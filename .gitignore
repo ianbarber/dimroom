@@ -30,6 +30,8 @@ project.xcworkspace/
 .swiftpm/
 Packages/*/.build/
 Packages/*/.swiftpm/
+App/.build/
+App/.swiftpm/
 Package.resolved
 *.xcodeproj/project.xcworkspace/xcshareddata/swiftpm/
 

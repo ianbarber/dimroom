@@ -30,18 +30,13 @@ jobs:
     runs-on: macos-14
     steps:
       - uses: actions/checkout@v4
-      - name: Build (placeholder until Stage 0.3)
+      - name: Build app (SPM)
         run: |
-          if [ ! -d App/Dimroom.xcodeproj ]; then
-            echo "No app target yet — skipping. (Stage 0.3 will add it.)"
+          if [ ! -f App/Package.swift ]; then
+            echo "No app target yet — skipping."
             exit 0
           fi
-          xcodebuild \
-            -project App/Dimroom.xcodeproj \
-            -scheme Dimroom \
-            -destination 'platform=macOS' \
-            -configuration Debug \
-            build | xcpretty || true
+          swift build --package-path App
 
   harness-smoke:
     name: harness smoke flow
@@ -49,10 +44,10 @@ jobs:
     needs: [swift-test, build-app]
     steps:
       - uses: actions/checkout@v4
-      - name: Run harness smoke (placeholder until Stage 0.3)
+      - name: Run harness smoke
         run: |
           if [ ! -x bin/harness-smoke.sh ]; then
-            echo "No harness smoke script yet — skipping. (Stage 0.3 will add it.)"
+            echo "No harness smoke script yet — skipping."
             exit 0
           fi
           bin/harness-smoke.sh

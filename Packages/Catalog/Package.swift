@@ -9,7 +9,7 @@ let package = Package(
         .library(name: "Catalog", targets: ["Catalog"]),
     ],
     dependencies: [
-        .package(url: "https://github.com/groue/GRDB.swift.git", from: "7.0.0"),
+        .package(url: "https://github.com/groue/GRDB.swift.git", from: "6.0.0"),
     ],
     targets: [
         .target(

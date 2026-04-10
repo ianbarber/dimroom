@@ -40,12 +40,12 @@ public enum AnyCodableValue: Codable, Sendable, Equatable {
         let container = try decoder.singleValueContainer()
         if let str = try? container.decode(String.self) {
             self = .string(str)
+        } else if let b = try? container.decode(Bool.self) {
+            self = .bool(b)
         } else if let int = try? container.decode(Int.self) {
             self = .int(int)
         } else if let dbl = try? container.decode(Double.self) {
             self = .double(dbl)
-        } else if let b = try? container.decode(Bool.self) {
-            self = .bool(b)
         } else if let dict = try? container.decode([String: AnyCodableValue].self) {
             self = .dictionary(dict)
         } else if let arr = try? container.decode([AnyCodableValue].self) {

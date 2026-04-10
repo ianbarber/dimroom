@@ -68,7 +68,7 @@ extension DimroomCLI {
 
 private func runCommand(_ command: Command, socket: String) throws {
     let semaphore = DispatchSemaphore(value: 0)
-    var result: Result<Response, Error>?
+    let box = SendableBox<Result<Response, Error>>()
 
     Task {
         do {
@@ -76,16 +76,16 @@ private func runCommand(_ command: Command, socket: String) throws {
             try await client.connect()
             let response = try await client.send(command)
             client.disconnect()
-            result = .success(response)
+            box.value = .success(response)
         } catch {
-            result = .failure(error)
+            box.value = .failure(error)
         }
         semaphore.signal()
     }
 
     semaphore.wait()
 
-    switch result! {
+    switch box.value! {
     case .success(let response):
         let encoder = JSONEncoder()
         encoder.outputFormatting = [.prettyPrinted, .sortedKeys]
@@ -94,4 +94,9 @@ private func runCommand(_ command: Command, socket: String) throws {
     case .failure(let error):
         throw error
     }
+}
+
+/// Thread-safe box for capturing values in Sendable closures.
+private final class SendableBox<T>: @unchecked Sendable {
+    var value: T?
 }

@@ -23,19 +23,7 @@ jobs:
           swift --version
 
       - name: Test all packages
-        run: |
-          if [ ! -d Packages ]; then
-            echo "No Packages/ directory yet — skipping. (Stage 0.1 will add it.)"
-            exit 0
-          fi
-          set -e
-          for pkg in Packages/*/; do
-            if [ -f "$pkg/Package.swift" ]; then
-              echo "::group::swift test $pkg"
-              (cd "$pkg" && swift test --parallel)
-              echo "::endgroup::"
-            fi
-          done
+        run: bin/test-all.sh
 
   build-app:
     name: build app target

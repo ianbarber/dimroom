@@ -40,22 +40,18 @@ final class MyViewSnapshotTest: XCTestCase {
 }
 ```
 
-## Precision tolerances for text-containing views
+## Snapshot strategies
 
-Views with pure geometry (solid colors, shapes) can use plain `.image` — the output is deterministic across machines.
+**Text-based (`.dump`, `.description`):** Fully deterministic across machines. Prefer these when proving structure or testing non-visual behavior. The example test in this package uses `.dump`.
 
-Views that render **text** need tolerances because font rasterization varies across machines. Two parameters control this:
+**Image-based (`.image`):** Renders the view to a PNG and compares pixels. Use for real view regression testing. Note that image snapshots can vary across machines due to GPU differences, anti-aliasing, and font rasterization — even for pure-geometry views. Always use precision tolerances with `.image`:
 
 - **`perceptualPrecision`** — per-pixel color similarity threshold. `0.98` tolerates minor anti-aliasing differences.
-- **`precision`** — fraction of pixels that must match. `0.99` tolerates up to 1% of pixels being completely different (e.g., text rendered at a slightly different sub-pixel position).
-
-Use both together for text-containing views:
+- **`precision`** — fraction of pixels that must match. `0.99` tolerates up to 1% of pixels being completely different (e.g., text at a slightly different sub-pixel position).
 
 ```swift
 assertSnapshot(of: view, as: .image(precision: 0.99, perceptualPrecision: 0.98))
 ```
-
-For geometric-only views, plain `.image` is preferred — it's stricter and deterministic.
 
 ## How it works
 

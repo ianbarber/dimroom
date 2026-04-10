@@ -10,18 +10,17 @@ final class ExampleSnapshotTest: XCTestCase {
         )
         view.view.frame = NSRect(x: 0, y: 0, width: 200, height: 100)
 
-        assertSnapshot(of: view, as: .image(perceptualPrecision: 0.98))
+        assertSnapshot(of: view, as: .image)
     }
 }
 
 /// A trivial SwiftUI view used only to prove the snapshot pipeline works.
+/// Uses pure geometry (no text) so the golden is deterministic across machines.
 private struct ExampleView: View {
     var body: some View {
-        ZStack {
+        HStack(spacing: 0) {
             Color.blue
-            Text("Snapshot OK")
-                .foregroundStyle(.white)
-                .font(.system(size: 16, weight: .bold, design: .monospaced))
+            Color.red
         }
         .frame(width: 200, height: 100)
     }

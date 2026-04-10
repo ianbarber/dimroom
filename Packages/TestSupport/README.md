@@ -35,20 +35,27 @@ final class MyViewSnapshotTest: XCTestCase {
         let view = NSHostingController(rootView: MyView())
         view.view.frame = NSRect(x: 0, y: 0, width: 400, height: 300)
 
-        assertSnapshot(of: view, as: .image(perceptualPrecision: 0.98))
+        assertSnapshot(of: view, as: .image)
     }
 }
 ```
 
-## Perceptual precision
+## Precision tolerances for text-containing views
 
-Always use `perceptualPrecision` when snapshotting views that contain text. Text rendering varies slightly across machines due to anti-aliasing differences, which causes pixel-exact comparisons to fail even when the output looks identical. A threshold of `0.98` tolerates minor sub-pixel differences while still catching real regressions:
+Views with pure geometry (solid colors, shapes) can use plain `.image` — the output is deterministic across machines.
+
+Views that render **text** need tolerances because font rasterization varies across machines. Two parameters control this:
+
+- **`perceptualPrecision`** — per-pixel color similarity threshold. `0.98` tolerates minor anti-aliasing differences.
+- **`precision`** — fraction of pixels that must match. `0.99` tolerates up to 1% of pixels being completely different (e.g., text rendered at a slightly different sub-pixel position).
+
+Use both together for text-containing views:
 
 ```swift
-assertSnapshot(of: view, as: .image(perceptualPrecision: 0.98))
+assertSnapshot(of: view, as: .image(precision: 0.99, perceptualPrecision: 0.98))
 ```
 
-For views that are purely geometric (solid colors, shapes, no text), plain `.image` is fine.
+For geometric-only views, plain `.image` is preferred — it's stricter and deterministic.
 
 ## How it works
 

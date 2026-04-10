@@ -35,10 +35,20 @@ final class MyViewSnapshotTest: XCTestCase {
         let view = NSHostingController(rootView: MyView())
         view.view.frame = NSRect(x: 0, y: 0, width: 400, height: 300)
 
-        assertSnapshot(of: view, as: .image)
+        assertSnapshot(of: view, as: .image(perceptualPrecision: 0.98))
     }
 }
 ```
+
+## Perceptual precision
+
+Always use `perceptualPrecision` when snapshotting views that contain text. Text rendering varies slightly across machines due to anti-aliasing differences, which causes pixel-exact comparisons to fail even when the output looks identical. A threshold of `0.98` tolerates minor sub-pixel differences while still catching real regressions:
+
+```swift
+assertSnapshot(of: view, as: .image(perceptualPrecision: 0.98))
+```
+
+For views that are purely geometric (solid colors, shapes, no text), plain `.image` is fine.
 
 ## How it works
 

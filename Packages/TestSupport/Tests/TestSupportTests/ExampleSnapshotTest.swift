@@ -10,7 +10,7 @@ final class ExampleSnapshotTest: XCTestCase {
         )
         view.view.frame = NSRect(x: 0, y: 0, width: 200, height: 100)
 
-        assertSnapshot(of: view, as: .image)
+        assertSnapshot(of: view, as: .image(perceptualPrecision: 0.98))
     }
 }
 

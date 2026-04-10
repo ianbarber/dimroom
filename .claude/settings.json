@@ -1,0 +1,62 @@
+{
+  "permissions": {
+    "allow": [
+      "Read",
+      "Write",
+      "Edit",
+      "Glob",
+      "Grep",
+      "WebFetch",
+      "WebSearch",
+
+      "Bash(gh *)",
+      "Bash(git *)",
+      "Bash(swift *)",
+      "Bash(xcodebuild *)",
+
+      "Bash(mkdir *)",
+      "Bash(chmod *)",
+      "Bash(cp *)",
+      "Bash(mv *)",
+      "Bash(rm *)",
+      "Bash(ls *)",
+      "Bash(cat *)",
+      "Bash(head *)",
+      "Bash(tail *)",
+      "Bash(wc *)",
+      "Bash(sort *)",
+      "Bash(diff *)",
+      "Bash(find *)",
+      "Bash(which *)",
+      "Bash(mktemp *)",
+      "Bash(touch *)",
+      "Bash(basename *)",
+      "Bash(dirname *)",
+      "Bash(realpath *)",
+      "Bash(pwd *)",
+
+      "Bash(jq *)",
+      "Bash(sed *)",
+      "Bash(awk *)",
+      "Bash(tr *)",
+      "Bash(cut *)",
+      "Bash(grep *)",
+
+      "Bash(cd *)",
+      "Bash(set *)",
+      "Bash(echo *)",
+      "Bash(printf *)",
+      "Bash(test *)",
+      "Bash([ *)",
+      "Bash(for *)",
+      "Bash(if *)",
+      "Bash(while *)",
+
+      "Bash(sw_vers*)",
+      "Bash(xcpretty *)",
+      "Bash(magick *)",
+      "Bash(bin/*)",
+      "Bash(./bin/*)"
+    ]
+  }
+}

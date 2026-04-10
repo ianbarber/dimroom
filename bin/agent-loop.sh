@@ -229,5 +229,9 @@ if [ "$WATCH" -eq 1 ]; then
     sleep "$SLEEP_SECONDS"
   done
 else
-  do_pass || true
+  # Keep making passes until there's nothing actionable.
+  while do_pass; do
+    log "pass complete, checking for next action..."
+  done
+  log "no more actionable issues — done"
 fi

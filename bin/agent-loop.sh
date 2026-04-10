@@ -39,7 +39,16 @@ while [ $# -gt 0 ]; do
   esac
 done
 
-log() { printf '[agent-loop] %s\n' "$*" >&2; }
+LOG_DIR="$REPO_ROOT/.artifacts/logs"
+mkdir -p "$LOG_DIR"
+LOG_FILE="$LOG_DIR/agent-loop-$(date +%Y%m%d-%H%M%S).log"
+
+log() {
+  local msg
+  msg="[agent-loop $(date +%H:%M:%S)] $*"
+  printf '%s\n' "$msg" >&2
+  printf '%s\n' "$msg" >> "$LOG_FILE"
+}
 run() {
   if [ "$DRY_RUN" -eq 1 ]; then
     printf '[dry-run] %s\n' "$*" >&2
@@ -47,6 +56,8 @@ run() {
     eval "$@"
   fi
 }
+
+log "log file: $LOG_FILE"
 
 require() {
   command -v "$1" >/dev/null 2>&1 || { echo "missing dependency: $1" >&2; exit 1; }
@@ -194,8 +205,8 @@ EOF
   claude \
     --print \
     --permission-mode acceptEdits \
-    < "$prompt_file"
-  local rc=$?
+    < "$prompt_file" 2>&1 | tee -a "$LOG_FILE"
+  local rc=${PIPESTATUS[0]}
   set -e
 
   rm -f "$prompt_file"
@@ -222,16 +233,24 @@ if [ -n "$POST_MERGE_PR" ]; then
   exit 0
 fi
 
+sync_main() {
+  log "pulling latest main..."
+  git pull --ff-only origin main 2>&1 | while read -r line; do log "  $line"; done
+}
+
 if [ "$WATCH" -eq 1 ]; then
   log "watching every ${SLEEP_SECONDS}s; ctrl-c to stop"
   while true; do
+    sync_main
     do_pass || true
     sleep "$SLEEP_SECONDS"
   done
 else
+  sync_main
   # Keep making passes until there's nothing actionable.
   while do_pass; do
     log "pass complete, checking for next action..."
+    sync_main
   done
   log "no more actionable issues — done"
 fi

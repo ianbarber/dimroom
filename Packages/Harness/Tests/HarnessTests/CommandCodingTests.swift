@@ -41,6 +41,20 @@ final class CommandCodingTests: XCTestCase {
         XCTAssertEqual(command, decoded)
     }
 
+    func testImportFolderRoundTrip() throws {
+        let command = Command.importFolder(path: "/tmp/cards/2024-06-01")
+        let data = try encoder.encode(command)
+        let decoded = try decoder.decode(Command.self, from: data)
+        XCTAssertEqual(command, decoded)
+    }
+
+    func testListAssetsRoundTrip() throws {
+        let command = Command.listAssets
+        let data = try encoder.encode(command)
+        let decoded = try decoder.decode(Command.self, from: data)
+        XCTAssertEqual(command, decoded)
+    }
+
     // MARK: - Command JSON shape
 
     func testNavigateJSON() throws {
@@ -71,12 +85,38 @@ final class CommandCodingTests: XCTestCase {
         XCTAssertEqual(json, #"{"type":"quit"}"#)
     }
 
+    func testImportFolderJSON() throws {
+        let command = Command.importFolder(path: "/tmp/cards")
+        let data = try encoder.encode(command)
+        let json = String(data: data, encoding: .utf8)!
+        XCTAssertEqual(json, #"{"path":"\/tmp\/cards","type":"importFolder"}"#)
+    }
+
+    func testListAssetsJSON() throws {
+        let command = Command.listAssets
+        let data = try encoder.encode(command)
+        let json = String(data: data, encoding: .utf8)!
+        XCTAssertEqual(json, #"{"type":"listAssets"}"#)
+    }
+
     // MARK: - Command decoding from raw JSON
 
     func testDecodeNavigateFromJSON() throws {
         let json = #"{"type":"navigate","route":"develop"}"#
         let command = try decoder.decode(Command.self, from: Data(json.utf8))
         XCTAssertEqual(command, .navigate(.develop))
+    }
+
+    func testDecodeImportFolderFromJSON() throws {
+        let json = #"{"type":"importFolder","path":"/var/fixtures/import"}"#
+        let command = try decoder.decode(Command.self, from: Data(json.utf8))
+        XCTAssertEqual(command, .importFolder(path: "/var/fixtures/import"))
+    }
+
+    func testDecodeListAssetsFromJSON() throws {
+        let json = #"{"type":"listAssets"}"#
+        let command = try decoder.decode(Command.self, from: Data(json.utf8))
+        XCTAssertEqual(command, .listAssets)
     }
 
     // MARK: - Response round-trips

@@ -7,7 +7,14 @@ struct DimroomCLI: ParsableCommand {
     static let configuration = CommandConfiguration(
         commandName: "dimroom-cli",
         abstract: "Command-line interface for the Dimroom harness socket.",
-        subcommands: [Navigate.self, Screenshot.self, State.self, Quit.self]
+        subcommands: [
+            Navigate.self,
+            Screenshot.self,
+            State.self,
+            Quit.self,
+            ImportFolder.self,
+            ListAssets.self,
+        ]
     )
 }
 
@@ -62,6 +69,37 @@ extension DimroomCLI {
 
         func run() throws {
             try runCommand(.quit, socket: socket)
+        }
+    }
+
+    struct ImportFolder: ParsableCommand {
+        static let configuration = CommandConfiguration(
+            commandName: "import-folder",
+            abstract: "Import all supported files from a folder into the catalog."
+        )
+
+        @Argument(help: "Absolute path to the folder to import.")
+        var path: String
+
+        @Option(name: .long, help: "Path to the harness socket.")
+        var socket: String = HarnessServer.defaultSocketPath
+
+        func run() throws {
+            try runCommand(.importFolder(path: path), socket: socket)
+        }
+    }
+
+    struct ListAssets: ParsableCommand {
+        static let configuration = CommandConfiguration(
+            commandName: "list-assets",
+            abstract: "List all assets currently in the catalog."
+        )
+
+        @Option(name: .long, help: "Path to the harness socket.")
+        var socket: String = HarnessServer.defaultSocketPath
+
+        func run() throws {
+            try runCommand(.listAssets, socket: socket)
         }
     }
 }

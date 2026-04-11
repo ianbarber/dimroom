@@ -51,3 +51,10 @@ jobs:
             exit 0
           fi
           bin/harness-smoke.sh
+      - name: Run harness import flow
+        run: |
+          if [ ! -x bin/harness-import-flow.sh ]; then
+            echo "No harness import flow script yet — skipping."
+            exit 0
+          fi
+          bin/harness-import-flow.sh

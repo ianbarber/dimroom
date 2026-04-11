@@ -8,8 +8,23 @@ let package = Package(
     products: [
         .library(name: "ImportKit", targets: ["ImportKit"]),
     ],
+    dependencies: [
+        .package(path: "../Catalog"),
+    ],
     targets: [
-        .target(name: "ImportKit"),
-        .testTarget(name: "ImportKitTests", dependencies: ["ImportKit"]),
+        .target(
+            name: "ImportKit",
+            dependencies: [
+                .product(name: "Catalog", package: "Catalog"),
+            ],
+            linkerSettings: [
+                .linkedFramework("ImageIO"),
+                .linkedFramework("CoreGraphics"),
+            ]
+        ),
+        .testTarget(
+            name: "ImportKitTests",
+            dependencies: ["ImportKit"]
+        ),
     ]
 )

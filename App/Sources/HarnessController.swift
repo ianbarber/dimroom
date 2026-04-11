@@ -1,14 +1,24 @@
 import AppKit
+import Catalog
 import Foundation
 import Harness
+import ImportKit
 
 /// Bridges harness commands to the app's state and AppKit operations.
 final class HarnessController: @unchecked Sendable {
     private let router: AppRouter
+    private let catalog: CatalogDatabase?
+    private let originalsDirectory: URL
     private var server: HarnessServer?
 
-    init(router: AppRouter) {
+    init(
+        router: AppRouter,
+        catalog: CatalogDatabase?,
+        originalsDirectory: URL
+    ) {
         self.router = router
+        self.catalog = catalog
+        self.originalsDirectory = originalsDirectory
     }
 
     func start(socketPath: String = HarnessServer.defaultSocketPath) throws {
@@ -49,8 +59,68 @@ final class HarnessController: @unchecked Sendable {
                 NSApplication.shared.terminate(nil)
             }
             return .ok()
+
+        case .importFolder(let path):
+            return try await handleImportFolder(path: path)
+
+        case .listAssets:
+            return handleListAssets()
         }
     }
+
+    // MARK: - Import
+
+    private func handleImportFolder(path: String) async throws -> Response {
+        guard let catalog else {
+            return .error("catalog not loaded")
+        }
+        let folderURL = URL(fileURLWithPath: path)
+        let importer = FolderImporter(
+            catalog: catalog,
+            originalsDirectory: originalsDirectory
+        )
+        let result = try await importer.importFolder(folderURL)
+        return .ok(data: .dictionary([
+            "importedCount": .int(result.importedCount),
+            "skippedCount": .int(result.skippedCount),
+            "sessionId": .string(result.sessionId.uuidString),
+        ]))
+    }
+
+    // MARK: - List assets
+
+    private func handleListAssets() -> Response {
+        guard let catalog else {
+            return .error("catalog not loaded")
+        }
+        do {
+            let assets = try catalog.fetchAssets()
+            let array: [AnyCodableValue] = assets.map { asset in
+                let captureDate: AnyCodableValue
+                if let date = asset.captureDate {
+                    captureDate = .string(Self.iso8601.string(from: date))
+                } else {
+                    captureDate = .null
+                }
+                return .dictionary([
+                    "id": .string(asset.id.uuidString),
+                    "originalFilename": .string(asset.originalFilename),
+                    "captureDate": captureDate,
+                    "rating": .int(asset.rating),
+                    "sourceType": .string(asset.sourceType.rawValue),
+                ])
+            }
+            return .ok(data: .array(array))
+        } catch {
+            return .error("fetchAssets failed: \(error.localizedDescription)")
+        }
+    }
+
+    private static let iso8601: ISO8601DateFormatter = {
+        let f = ISO8601DateFormatter()
+        f.formatOptions = [.withInternetDateTime]
+        return f
+    }()
 
     @MainActor
     private func captureScreenshot(to path: String) async -> Response {

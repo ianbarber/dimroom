@@ -1,0 +1,24 @@
+{
+    "name": "import-folder",
+    "description": "Boot against an empty fixture catalog, import fixtures/import/, list the resulting assets, then re-import to assert dedup idempotency.",
+    "fixtureCatalog": "fixtures/empty.sqlite",
+    "sourceDir": "fixtures/import",
+    "expectedAssetCount": 3,
+    "steps": [
+        {
+            "command": "importFolder",
+            "args": { "path": "fixtures/import" },
+            "expect": { "importedCount": 3, "skippedCount": 0 }
+        },
+        {
+            "command": "listAssets",
+            "expect": { "length": 3 }
+        },
+        {
+            "command": "importFolder",
+            "args": { "path": "fixtures/import" },
+            "expect": { "importedCount": 0, "skippedCount": 3 }
+        },
+        { "command": "quit" }
+    ]
+}

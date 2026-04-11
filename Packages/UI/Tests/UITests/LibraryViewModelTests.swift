@@ -4,7 +4,6 @@ import Previews
 @testable import UI
 import XCTest
 
-@MainActor
 final class LibraryViewModelTests: XCTestCase {
     private var tempCacheDir: URL!
 
@@ -26,6 +25,7 @@ final class LibraryViewModelTests: XCTestCase {
 
     // MARK: - Fetch / filter / sort
 
+    @MainActor
     func testInitialRowsIsEmpty() async throws {
         let catalog = try CatalogDatabase.inMemory()
         let store = PreviewStore(cacheDirectory: tempCacheDir)
@@ -33,6 +33,7 @@ final class LibraryViewModelTests: XCTestCase {
         XCTAssertTrue(vm.rows.isEmpty)
     }
 
+    @MainActor
     func testReloadExcludesSoftDeleted() async throws {
         let catalog = try CatalogDatabase.inMemory()
         let a = TestFixtures.makeAsset(hash: "aa1")
@@ -45,12 +46,13 @@ final class LibraryViewModelTests: XCTestCase {
 
         let store = PreviewStore(cacheDirectory: tempCacheDir)
         let vm = LibraryViewModel(catalog: catalog, previewStore: store)
-        vm.reload()
+        await vm.reloadAndWait()
 
         XCTAssertEqual(vm.rows.count, 2)
         XCTAssertFalse(vm.rows.contains { $0.id == b.id })
     }
 
+    @MainActor
     func testReloadSortOrderIsNewestFirstByCaptureDate() async throws {
         let catalog = try CatalogDatabase.inMemory()
         let old = TestFixtures.makeAsset(
@@ -72,11 +74,12 @@ final class LibraryViewModelTests: XCTestCase {
 
         let store = PreviewStore(cacheDirectory: tempCacheDir)
         let vm = LibraryViewModel(catalog: catalog, previewStore: store)
-        vm.reload()
+        await vm.reloadAndWait()
 
         XCTAssertEqual(vm.rows.map(\.id), [new.id, mid.id, old.id])
     }
 
+    @MainActor
     func testReloadFallsBackToImportedDateWhenCaptureDateNil() async throws {
         let catalog = try CatalogDatabase.inMemory()
         let scan = TestFixtures.makeAsset(
@@ -94,7 +97,7 @@ final class LibraryViewModelTests: XCTestCase {
 
         let store = PreviewStore(cacheDirectory: tempCacheDir)
         let vm = LibraryViewModel(catalog: catalog, previewStore: store)
-        vm.reload()
+        await vm.reloadAndWait()
 
         // `scan` has no captureDate — the view model must treat its
         // importedDate (newer) as the sort key so it wins over `dated`.
@@ -103,6 +106,7 @@ final class LibraryViewModelTests: XCTestCase {
 
     // MARK: - Thumbnail URL resolution
 
+    @MainActor
     func testReloadPopulatesThumbnailURLWhenCacheHit() async throws {
         let catalog = try CatalogDatabase.inMemory()
         let asset = TestFixtures.makeAsset(hash: "abcd1234")
@@ -115,7 +119,7 @@ final class LibraryViewModelTests: XCTestCase {
 
         let store = PreviewStore(cacheDirectory: tempCacheDir)
         let vm = LibraryViewModel(catalog: catalog, previewStore: store)
-        vm.reload()
+        await vm.reloadAndWait()
 
         XCTAssertEqual(vm.rows.count, 1)
         let url = try XCTUnwrap(vm.rows[0].thumbnailURL)
@@ -125,6 +129,7 @@ final class LibraryViewModelTests: XCTestCase {
         )
     }
 
+    @MainActor
     func testReloadThumbnailURLNilWhenCacheMiss() async throws {
         let catalog = try CatalogDatabase.inMemory()
         let asset = TestFixtures.makeAsset(hash: "deadbeef")
@@ -132,7 +137,7 @@ final class LibraryViewModelTests: XCTestCase {
 
         let store = PreviewStore(cacheDirectory: tempCacheDir)
         let vm = LibraryViewModel(catalog: catalog, previewStore: store)
-        vm.reload()
+        await vm.reloadAndWait()
 
         XCTAssertEqual(vm.rows.count, 1)
         XCTAssertNil(
@@ -143,6 +148,7 @@ final class LibraryViewModelTests: XCTestCase {
 
     // MARK: - Selection
 
+    @MainActor
     func testSelectUpdatesSelectedAssetId() async throws {
         let catalog = try CatalogDatabase.inMemory()
         let store = PreviewStore(cacheDirectory: tempCacheDir)
@@ -156,6 +162,7 @@ final class LibraryViewModelTests: XCTestCase {
         XCTAssertNil(vm.selectedAssetId)
     }
 
+    @MainActor
     func testReloadClearsSelectionWhenSelectedAssetVanishes() async throws {
         let catalog = try CatalogDatabase.inMemory()
         let a = TestFixtures.makeAsset(hash: "aa")
@@ -163,12 +170,12 @@ final class LibraryViewModelTests: XCTestCase {
 
         let store = PreviewStore(cacheDirectory: tempCacheDir)
         let vm = LibraryViewModel(catalog: catalog, previewStore: store)
-        vm.reload()
+        await vm.reloadAndWait()
         vm.select(a.id)
         XCTAssertEqual(vm.selectedAssetId, a.id)
 
         try catalog.deleteAsset(id: a.id)
-        vm.reload()
+        await vm.reloadAndWait()
         XCTAssertNil(vm.selectedAssetId)
     }
 }

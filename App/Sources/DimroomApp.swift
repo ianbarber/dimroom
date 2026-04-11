@@ -22,8 +22,11 @@ struct DimroomApp: App {
 final class AppDelegate: NSObject, NSApplicationDelegate {
     let router = AppRouter()
     /// View model shared between the SwiftUI tree and the harness
-    /// controller. Constructed lazily in `applicationDidFinishLaunching`
-    /// because its catalog + preview dependencies come from CLI flags.
+    /// controller. Initialised eagerly with an in-memory empty catalog so
+    /// the `@main App` scene can read it before `applicationDidFinishLaunching`
+    /// runs, then replaced in `applicationDidFinishLaunching` once the
+    /// CLI flags are parsed and the real catalog + preview store are
+    /// available.
     private(set) var libraryViewModel: LibraryViewModel = LibraryViewModel.empty()
     private var harnessController: HarnessController?
     private var harnessWindow: NSWindow?

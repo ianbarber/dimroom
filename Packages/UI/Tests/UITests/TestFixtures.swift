@@ -54,19 +54,6 @@ enum TestFixtures {
         return url
     }
 
-    static func placeThumbnailFromData(
-        for asset: Asset,
-        cacheDirectory: URL,
-        sourceURL: URL
-    ) throws -> URL {
-        let prefix = String(asset.contentHash.prefix(2))
-        let dir = cacheDirectory.appendingPathComponent(prefix, isDirectory: true)
-        try FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true)
-        let url = dir.appendingPathComponent("\(asset.contentHash).thumb.jpg")
-        try FileManager.default.copyItem(at: sourceURL, to: url)
-        return url
-    }
-
     private static func writeSolidColorJPEG(
         width: Int,
         height: Int,

@@ -9,14 +9,21 @@ public struct AppState: Codable, Sendable, Equatable {
     /// Identifier of the asset currently selected in the library grid, or
     /// `nil` when nothing is selected.
     public let selectedAssetId: UUID?
+    /// Active minimum-rating filter. `0` means "show everything" — any
+    /// other value restricts the library grid to assets where
+    /// `rating >= minRating`. Harness flows check this to prove that
+    /// `setFilter` actually reached the view model.
+    public let minRating: Int
 
     public init(
         route: Route,
         assetCount: Int = 0,
-        selectedAssetId: UUID? = nil
+        selectedAssetId: UUID? = nil,
+        minRating: Int = 0
     ) {
         self.route = route
         self.assetCount = assetCount
         self.selectedAssetId = selectedAssetId
+        self.minRating = minRating
     }
 }

@@ -77,6 +77,34 @@ final class CatalogDatabaseTests: XCTestCase {
         XCTAssertEqual(fetched?.rating, 5)
     }
 
+    // MARK: - Rotation Update
+
+    func testUpdateRotation() throws {
+        let db = try makeDatabase()
+        let asset = makeSampleAsset()
+        try db.insertAsset(asset)
+
+        try db.updateRotation(assetId: asset.id, rotation: 90)
+
+        let fetched = try db.fetchAsset(byHash: asset.contentHash)
+        XCTAssertEqual(fetched?.rotation, 90)
+    }
+
+    func testUpdateRotationStoresArbitraryValue() throws {
+        // The catalog is a dumb store — it persists whatever value the
+        // caller passes. Normalisation to {0,90,180,270} is the view
+        // model's job, not the database's.
+        let db = try makeDatabase()
+        let asset = makeSampleAsset()
+        try db.insertAsset(asset)
+
+        try db.updateRotation(assetId: asset.id, rotation: 270)
+        XCTAssertEqual(try db.fetchAsset(byHash: asset.contentHash)?.rotation, 270)
+
+        try db.updateRotation(assetId: asset.id, rotation: 0)
+        XCTAssertEqual(try db.fetchAsset(byHash: asset.contentHash)?.rotation, 0)
+    }
+
     // MARK: - Soft Delete
 
     func testSoftDelete() throws {

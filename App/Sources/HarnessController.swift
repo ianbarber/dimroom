@@ -90,7 +90,10 @@ final class HarnessController: @unchecked Sendable {
         )
         let result = try await importer.importFolder(folderURL)
         // Refresh the library grid so `state` reflects the new rows.
-        await MainActor.run { libraryViewModel.reload() }
+        // `reloadAndWait` is required (not `reload`) because reload now
+        // runs on a background task — the subsequent `state` or `listAssets`
+        // command would race with it.
+        await libraryViewModel.reloadAndWait()
         return .ok(data: .dictionary([
             "importedCount": .int(result.importedCount),
             "skippedCount": .int(result.skippedCount),

@@ -70,8 +70,10 @@ final class LibrarySnapshotTests: XCTestCase {
     /// size we pin the output to exactly `frameSize` pixels on every
     /// machine.
     @MainActor
-    private func renderFixedPixelImage(for view: some View) -> NSImage {
-        let size = Self.frameSize
+    private func renderFixedPixelImage(
+        for view: some View,
+        size: CGSize = LibrarySnapshotTests.frameSize
+    ) -> NSImage {
         let host = NSHostingView(rootView: AnyView(view))
         host.frame = CGRect(origin: .zero, size: size)
         host.layoutSubtreeIfNeeded()
@@ -159,6 +161,74 @@ final class LibrarySnapshotTests: XCTestCase {
         }
     }
 
+    // MARK: - Ratings + filter
+
+    /// Populated grid after the user picks min-rating = 3. Only the
+    /// 3-star and 5-star cells should remain — the 1-star cell must be
+    /// hidden entirely. The visible cells should show their star
+    /// overlays.
+    @MainActor
+    func test_populated_grid_filtered_to_three_stars() async throws {
+        let (vm, _) = try await makeRatedViewModel()
+        await vm.setMinRating(3)
+        XCTAssertEqual(vm.rows.count, 2)
+
+        let image = renderFixedPixelImage(for: LibraryView(viewModel: vm))
+
+        runAssertSnapshot {
+            assertSnapshot(
+                of: image,
+                as: .image(
+                    precision: Self.snapshotPrecision,
+                    perceptualPrecision: Self.snapshotPerceptualPrecision
+                )
+            )
+        }
+    }
+
+    /// Single cell rendered in isolation at a fixed 200x200 point size
+    /// so the star overlay placement is legible independently of the
+    /// grid layout. Uses a 3-star asset with a pre-placed green
+    /// thumbnail.
+    @MainActor
+    func test_library_cell_with_three_star_overlay() async throws {
+        var asset = TestFixtures.makeAsset(
+            hash: "starred3",
+            filename: "starred.jpg"
+        )
+        asset.rating = 3
+        try TestFixtures.placeThumbnail(
+            for: asset,
+            cacheDirectory: tempCacheDir,
+            color: (r: 60, g: 180, b: 90)
+        )
+        let row = LibraryRow(
+            asset: asset,
+            thumbnailURL: tempCacheDir
+                .appendingPathComponent("st", isDirectory: true)
+                .appendingPathComponent("starred3.thumb.jpg"),
+            previewURL: nil
+        )
+
+        let cell = LibraryCell(row: row, isSelected: false, rowVersion: 0)
+            .frame(width: 200, height: 200)
+
+        let image = renderFixedPixelImage(
+            for: cell,
+            size: CGSize(width: 200, height: 200)
+        )
+
+        runAssertSnapshot {
+            assertSnapshot(
+                of: image,
+                as: .image(
+                    precision: Self.snapshotPrecision,
+                    perceptualPrecision: Self.snapshotPerceptualPrecision
+                )
+            )
+        }
+    }
+
     // MARK: - Helper
 
     /// Builds a view model backed by three fixture assets with
@@ -209,5 +279,59 @@ final class LibrarySnapshotTests: XCTestCase {
         let vm = LibraryViewModel(catalog: catalog, previewStore: store)
         await vm.reloadAndWait()
         return (vm, [newest, middle, oldest])
+    }
+
+    /// Three assets at ratings 1/3/5, ordered so the 5-star is newest
+    /// and the 1-star is oldest. Each has a pre-placed solid-colour
+    /// thumbnail so the filter snapshot exercises the star overlay and
+    /// the filter bar simultaneously. Returns the view model and the
+    /// three assets in newest-first order.
+    @MainActor
+    private func makeRatedViewModel() async throws -> (LibraryViewModel, [Asset]) {
+        let catalog = try CatalogDatabase.inMemory()
+
+        var five = TestFixtures.makeAsset(
+            hash: "rate5newest",
+            filename: "five.jpg",
+            captureDate: Date(timeIntervalSince1970: 3_000_000)
+        )
+        five.rating = 5
+        var three = TestFixtures.makeAsset(
+            hash: "rate3middle",
+            filename: "three.jpg",
+            captureDate: Date(timeIntervalSince1970: 2_000_000)
+        )
+        three.rating = 3
+        var one = TestFixtures.makeAsset(
+            hash: "rate1oldest",
+            filename: "one.jpg",
+            captureDate: Date(timeIntervalSince1970: 1_000_000)
+        )
+        one.rating = 1
+
+        try catalog.insertAsset(five)
+        try catalog.insertAsset(three)
+        try catalog.insertAsset(one)
+
+        try TestFixtures.placeThumbnail(
+            for: five,
+            cacheDirectory: tempCacheDir,
+            color: (r: 210, g: 60, b: 60)
+        )
+        try TestFixtures.placeThumbnail(
+            for: three,
+            cacheDirectory: tempCacheDir,
+            color: (r: 60, g: 180, b: 90)
+        )
+        try TestFixtures.placeThumbnail(
+            for: one,
+            cacheDirectory: tempCacheDir,
+            color: (r: 60, g: 110, b: 210)
+        )
+
+        let store = PreviewStore(cacheDirectory: tempCacheDir)
+        let vm = LibraryViewModel(catalog: catalog, previewStore: store)
+        await vm.reloadAndWait()
+        return (vm, [five, three, one])
     }
 }

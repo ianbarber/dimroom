@@ -80,6 +80,18 @@ enum TestFixtures {
         return url
     }
 
+    /// Public entry point used by rotate tests that need a real JPEG on
+    /// disk for `PreviewStore.generate` to decode. Mirrors the internal
+    /// helper used by `placeThumbnail` / `placePreview`.
+    static func writeSolidJPEG(
+        width: Int,
+        height: Int,
+        color: (r: UInt8, g: UInt8, b: UInt8),
+        to url: URL
+    ) throws {
+        try writeSolidColorJPEG(width: width, height: height, color: color, to: url)
+    }
+
     private static func writeSolidColorJPEG(
         width: Int,
         height: Int,

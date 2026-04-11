@@ -143,4 +143,53 @@ final class LoupeSnapshotTests: XCTestCase {
             )
         }
     }
+
+    // MARK: - Rotated asset
+
+    /// Fixture with `rotation = 90` persisted in the catalog. The
+    /// `PreviewStore.applyRotation` math already bakes orientation into
+    /// the encoded JPEG when `generate` runs, but this test doesn't
+    /// call generate — it hand-places a *portrait-shaped* preview JPEG
+    /// to stand in for the rotated output. This keeps the snapshot
+    /// deterministic regardless of Core Image's rotation matrix in the
+    /// test environment.
+    @MainActor
+    func test_loupe_rotated_asset() async throws {
+        let catalog = try CatalogDatabase.inMemory()
+
+        var asset = TestFixtures.makeAsset(
+            hash: "loupeRotated",
+            filename: "rotated.jpg",
+            captureDate: Date(timeIntervalSince1970: 2_500_000)
+        )
+        asset.rotation = 90
+        try catalog.insertAsset(asset)
+        // Portrait-shape preview so the loupe's aspect-fit letterboxes
+        // left/right instead of top/bottom — the obvious visual
+        // difference from `test_loupe_with_fixture_asset`.
+        try TestFixtures.placePreview(
+            for: asset,
+            cacheDirectory: tempCacheDir,
+            color: (r: 200, g: 140, b: 60),
+            width: 1000,
+            height: 1600
+        )
+
+        let store = PreviewStore(cacheDirectory: tempCacheDir)
+        let vm = LibraryViewModel(catalog: catalog, previewStore: store)
+        await vm.reloadAndWait()
+        vm.select(asset.id)
+
+        let image = renderFixedPixelImage(for: LoupeView(viewModel: vm))
+
+        runAssertSnapshot {
+            assertSnapshot(
+                of: image,
+                as: .image(
+                    precision: Self.snapshotPrecision,
+                    perceptualPrecision: Self.snapshotPerceptualPrecision
+                )
+            )
+        }
+    }
 }

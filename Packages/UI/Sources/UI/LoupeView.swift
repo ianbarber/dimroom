@@ -29,6 +29,13 @@ public struct LoupeView: View {
                     .aspectRatio(contentMode: .fit)
                     .frame(maxWidth: .infinity, maxHeight: .infinity)
                     .padding(8)
+                    // Force SwiftUI to rebuild the image subtree whenever
+                    // the view model bumps its row-version counter (on
+                    // rotate). Without this, AppKit keeps serving the
+                    // CGImage it decoded the first time it saw the file
+                    // and the new orientation doesn't appear until the
+                    // user navigates away and back.
+                    .id(viewModel.rowVersion)
             } else {
                 placeholder
             }

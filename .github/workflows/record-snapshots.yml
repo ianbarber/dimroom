@@ -19,10 +19,19 @@ on:
         type: choice
         options:
           - UI
+  # Also trigger when the workflow file itself is touched on any
+  # branch. This is the bootstrap path: workflow_dispatch can only
+  # fire workflows that exist on the default branch, so before this
+  # file lands on main the only way to run it is to push a change to
+  # the file on the feature branch. Safe because the path filter
+  # guarantees nothing else triggers it.
+  push:
+    paths:
+      - '.github/workflows/record-snapshots.yml'
 
 jobs:
   record:
-    name: Record ${{ inputs.package }} snapshots
+    name: Record UI snapshots
     runs-on: macos-14
     steps:
       - uses: actions/checkout@v4
@@ -37,7 +46,7 @@ jobs:
           DIMROOM_RECORD_SNAPSHOTS: "1"
         run: |
           set -e
-          cd "Packages/${{ inputs.package }}"
+          cd Packages/UI
           # Recording mode always fails the tests that wrote a golden,
           # so ignore the exit code — the artifact upload below is what
           # matters.
@@ -46,7 +55,7 @@ jobs:
       - name: Upload generated snapshots
         uses: actions/upload-artifact@v4
         with:
-          name: ${{ inputs.package }}-snapshots
-          path: Packages/${{ inputs.package }}/Tests/**/__Snapshots__/**/*.png
+          name: UI-snapshots
+          path: Packages/UI/Tests/**/__Snapshots__/**/*.png
           if-no-files-found: error
           retention-days: 7

@@ -51,25 +51,52 @@ final class LibrarySnapshotTests: XCTestCase {
 
     private static let frameSize = CGSize(width: 1024, height: 768)
 
-    // Snapshot tolerances are loose enough to survive cross-machine font /
-    // Core Image drift between local dev boxes and the GitHub `macos-14`
-    // runner (anti-aliasing, SF Symbol metrics, subpixel text rendering).
-    // Tighter values worked locally but failed on CI; 0.95 matches the
-    // pointfree-recommended cross-machine default.
-    private static let snapshotPrecision: Float = 0.95
-    private static let snapshotPerceptualPrecision: Float = 0.9
+    // Snapshot tolerances kept tight now that the render path is
+    // backing-scale-independent (see `renderFixedPixelImage`). 0.99 /
+    // 0.98 was the reviewer's original cross-machine target; we meet it
+    // because the output is guaranteed to be at the same pixel
+    // dimensions on every machine.
+    private static let snapshotPrecision: Float = 0.99
+    private static let snapshotPerceptualPrecision: Float = 0.98
 
-    /// Wraps a SwiftUI view in an `NSHostingView` at a fixed size and
-    /// forces layout so snapshot-testing can capture a deterministic image
-    /// on macOS. SwiftUI views don't snapshot directly through
-    /// `swift-snapshot-testing`'s macOS strategies; going through
-    /// `NSHostingView` gives us a real `NSView` we can render.
+    /// Renders the given SwiftUI view to a fixed-pixel `NSImage` so the
+    /// snapshot output is identical regardless of the runner's display
+    /// backing scale factor. The previous implementation wrapped the
+    /// view in an `NSHostingView` and relied on
+    /// `bitmapImageRepForCachingDisplay`, which multiplies the backing
+    /// store by whatever `NSScreen` reports — 1.0 on a headless CI Mac,
+    /// 1.5 on some virtualized runners, 2.0 on a Retina dev box. By
+    /// building the `NSBitmapImageRep` ourselves with an explicit pixel
+    /// size we pin the output to exactly `frameSize` pixels on every
+    /// machine.
     @MainActor
-    private func hostingView(for view: some View) -> NSHostingView<AnyView> {
+    private func renderFixedPixelImage(for view: some View) -> NSImage {
+        let size = Self.frameSize
         let host = NSHostingView(rootView: AnyView(view))
-        host.frame = CGRect(origin: .zero, size: Self.frameSize)
+        host.frame = CGRect(origin: .zero, size: size)
         host.layoutSubtreeIfNeeded()
-        return host
+
+        guard let rep = NSBitmapImageRep(
+            bitmapDataPlanes: nil,
+            pixelsWide: Int(size.width),
+            pixelsHigh: Int(size.height),
+            bitsPerSample: 8,
+            samplesPerPixel: 4,
+            hasAlpha: true,
+            isPlanar: false,
+            colorSpaceName: .deviceRGB,
+            bytesPerRow: 0,
+            bitsPerPixel: 32
+        ) else {
+            fatalError("Failed to allocate NSBitmapImageRep for snapshot")
+        }
+        // cacheDisplay(in:to:) draws the view into the rep at exactly
+        // the rep's pixel dimensions, ignoring display scale.
+        host.cacheDisplay(in: host.bounds, to: rep)
+
+        let image = NSImage(size: size)
+        image.addRepresentation(rep)
+        return image
     }
 
     // MARK: - Empty state
@@ -81,11 +108,11 @@ final class LibrarySnapshotTests: XCTestCase {
         let vm = LibraryViewModel(catalog: catalog, previewStore: store)
         // No reload — the view model starts empty.
 
-        let host = hostingView(for: LibraryView(viewModel: vm))
+        let image = renderFixedPixelImage(for: LibraryView(viewModel: vm))
 
         runAssertSnapshot {
             assertSnapshot(
-                of: host,
+                of: image,
                 as: .image(
                     precision: Self.snapshotPrecision,
                     perceptualPrecision: Self.snapshotPerceptualPrecision
@@ -99,11 +126,11 @@ final class LibrarySnapshotTests: XCTestCase {
     @MainActor
     func test_populated_grid_no_selection() async throws {
         let (vm, _) = try await makePopulatedViewModel()
-        let host = hostingView(for: LibraryView(viewModel: vm))
+        let image = renderFixedPixelImage(for: LibraryView(viewModel: vm))
 
         runAssertSnapshot {
             assertSnapshot(
-                of: host,
+                of: image,
                 as: .image(
                     precision: Self.snapshotPrecision,
                     perceptualPrecision: Self.snapshotPerceptualPrecision
@@ -119,11 +146,11 @@ final class LibrarySnapshotTests: XCTestCase {
         // second row in the grid is the middle asset.
         vm.select(assets[1].id)
 
-        let host = hostingView(for: LibraryView(viewModel: vm))
+        let image = renderFixedPixelImage(for: LibraryView(viewModel: vm))
 
         runAssertSnapshot {
             assertSnapshot(
-                of: host,
+                of: image,
                 as: .image(
                     precision: Self.snapshotPrecision,
                     perceptualPrecision: Self.snapshotPerceptualPrecision

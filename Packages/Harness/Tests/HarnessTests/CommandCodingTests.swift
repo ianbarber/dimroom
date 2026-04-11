@@ -55,6 +55,14 @@ final class CommandCodingTests: XCTestCase {
         XCTAssertEqual(command, decoded)
     }
 
+    func testSelectAssetRoundTrip() throws {
+        let id = UUID(uuidString: "12345678-1234-1234-1234-123456789012")!
+        let command = Command.selectAsset(id: id)
+        let data = try encoder.encode(command)
+        let decoded = try decoder.decode(Command.self, from: data)
+        XCTAssertEqual(command, decoded)
+    }
+
     // MARK: - Command JSON shape
 
     func testNavigateJSON() throws {
@@ -99,6 +107,20 @@ final class CommandCodingTests: XCTestCase {
         XCTAssertEqual(json, #"{"type":"listAssets"}"#)
     }
 
+    func testSelectAssetJSON() throws {
+        // Swift's default JSONEncoder encodes UUIDs in uppercase per
+        // RFC 4122. This test pins the wire shape so downstream tools
+        // (the CLI, shell flows) can rely on it.
+        let id = UUID(uuidString: "12345678-1234-1234-1234-123456789012")!
+        let command = Command.selectAsset(id: id)
+        let data = try encoder.encode(command)
+        let json = String(data: data, encoding: .utf8)!
+        XCTAssertEqual(
+            json,
+            #"{"id":"12345678-1234-1234-1234-123456789012","type":"selectAsset"}"#
+        )
+    }
+
     // MARK: - Command decoding from raw JSON
 
     func testDecodeNavigateFromJSON() throws {
@@ -117,6 +139,13 @@ final class CommandCodingTests: XCTestCase {
         let json = #"{"type":"listAssets"}"#
         let command = try decoder.decode(Command.self, from: Data(json.utf8))
         XCTAssertEqual(command, .listAssets)
+    }
+
+    func testDecodeSelectAssetFromJSON() throws {
+        let json = #"{"id":"12345678-1234-1234-1234-123456789012","type":"selectAsset"}"#
+        let command = try decoder.decode(Command.self, from: Data(json.utf8))
+        let expected = UUID(uuidString: "12345678-1234-1234-1234-123456789012")!
+        XCTAssertEqual(command, .selectAsset(id: expected))
     }
 
     // MARK: - Response round-trips

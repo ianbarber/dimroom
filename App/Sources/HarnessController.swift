@@ -74,6 +74,10 @@ final class HarnessController: @unchecked Sendable {
 
         case .listAssets:
             return handleListAssets()
+
+        case .selectAsset(let id):
+            await MainActor.run { libraryViewModel.select(id) }
+            return .ok()
         }
     }
 

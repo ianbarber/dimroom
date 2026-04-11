@@ -9,11 +9,13 @@ public enum Command: Codable, Sendable, Equatable {
     case quit
     case importFolder(path: String)
     case listAssets
+    case selectAsset(id: UUID)
 
     private enum CodingKeys: String, CodingKey {
         case type
         case route
         case path
+        case id
     }
 
     private enum CommandType: String, Codable {
@@ -23,6 +25,7 @@ public enum Command: Codable, Sendable, Equatable {
         case quit
         case importFolder
         case listAssets
+        case selectAsset
     }
 
     public init(from decoder: Decoder) throws {
@@ -44,6 +47,9 @@ public enum Command: Codable, Sendable, Equatable {
             self = .importFolder(path: path)
         case .listAssets:
             self = .listAssets
+        case .selectAsset:
+            let id = try container.decode(UUID.self, forKey: .id)
+            self = .selectAsset(id: id)
         }
     }
 
@@ -65,6 +71,9 @@ public enum Command: Codable, Sendable, Equatable {
             try container.encode(path, forKey: .path)
         case .listAssets:
             try container.encode(CommandType.listAssets, forKey: .type)
+        case .selectAsset(let id):
+            try container.encode(CommandType.selectAsset, forKey: .type)
+            try container.encode(id, forKey: .id)
         }
     }
 }

@@ -7,6 +7,8 @@ public enum Command: Codable, Sendable, Equatable {
     case screenshot(path: String)
     case state
     case quit
+    case importFolder(path: String)
+    case listAssets
 
     private enum CodingKeys: String, CodingKey {
         case type
@@ -19,6 +21,8 @@ public enum Command: Codable, Sendable, Equatable {
         case screenshot
         case state
         case quit
+        case importFolder
+        case listAssets
     }
 
     public init(from decoder: Decoder) throws {
@@ -35,6 +39,11 @@ public enum Command: Codable, Sendable, Equatable {
             self = .state
         case .quit:
             self = .quit
+        case .importFolder:
+            let path = try container.decode(String.self, forKey: .path)
+            self = .importFolder(path: path)
+        case .listAssets:
+            self = .listAssets
         }
     }
 
@@ -51,6 +60,11 @@ public enum Command: Codable, Sendable, Equatable {
             try container.encode(CommandType.state, forKey: .type)
         case .quit:
             try container.encode(CommandType.quit, forKey: .type)
+        case .importFolder(let path):
+            try container.encode(CommandType.importFolder, forKey: .type)
+            try container.encode(path, forKey: .path)
+        case .listAssets:
+            try container.encode(CommandType.listAssets, forKey: .type)
         }
     }
 }

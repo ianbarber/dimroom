@@ -9,6 +9,8 @@ let package = Package(
         .package(path: "../Packages/Harness"),
         .package(path: "../Packages/Catalog"),
         .package(path: "../Packages/ImportKit"),
+        .package(path: "../Packages/Previews"),
+        .package(path: "../Packages/UI"),
     ],
     targets: [
         .executableTarget(
@@ -17,6 +19,8 @@ let package = Package(
                 .product(name: "Harness", package: "Harness"),
                 .product(name: "Catalog", package: "Catalog"),
                 .product(name: "ImportKit", package: "ImportKit"),
+                .product(name: "Previews", package: "Previews"),
+                .product(name: "UI", package: "UI"),
             ],
             path: "Sources"
         ),

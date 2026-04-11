@@ -52,6 +52,7 @@ fastlane/test_output
 .worktrees/
 .claude/local/
 .claude/cache/
+.claude/worktrees/
 
 # Secrets
 *.pem

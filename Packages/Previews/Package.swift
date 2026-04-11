@@ -8,8 +8,24 @@ let package = Package(
     products: [
         .library(name: "Previews", targets: ["Previews"]),
     ],
+    dependencies: [
+        .package(path: "../Catalog"),
+    ],
     targets: [
-        .target(name: "Previews"),
-        .testTarget(name: "PreviewsTests", dependencies: ["Previews"]),
+        .target(
+            name: "Previews",
+            dependencies: [
+                .product(name: "Catalog", package: "Catalog"),
+            ],
+            linkerSettings: [
+                .linkedFramework("CoreImage"),
+                .linkedFramework("ImageIO"),
+                .linkedFramework("CoreGraphics"),
+            ]
+        ),
+        .testTarget(
+            name: "PreviewsTests",
+            dependencies: ["Previews"]
+        ),
     ]
 )

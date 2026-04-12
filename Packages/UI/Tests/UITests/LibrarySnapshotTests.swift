@@ -229,6 +229,71 @@ final class LibrarySnapshotTests: XCTestCase {
         }
     }
 
+    // MARK: - Rotated (non-square) thumbnail
+
+    /// Grid containing one non-square thumbnail (192×256, simulating a
+    /// landscape photo rotated 90°) alongside square thumbnails. The cell
+    /// must remain square with the image aspect-fit inside, not overflow
+    /// or distort the grid layout.
+    @MainActor
+    func test_populated_grid_with_rotated_thumbnail() async throws {
+        let catalog = try CatalogDatabase.inMemory()
+
+        let rotated = TestFixtures.makeAsset(
+            hash: "aaaaroted",
+            filename: "rotated.jpg",
+            captureDate: Date(timeIntervalSince1970: 3_000_000)
+        )
+        let normal1 = TestFixtures.makeAsset(
+            hash: "bbbbnorm1",
+            filename: "norm1.jpg",
+            captureDate: Date(timeIntervalSince1970: 2_000_000)
+        )
+        let normal2 = TestFixtures.makeAsset(
+            hash: "ccccnorm2",
+            filename: "norm2.jpg",
+            captureDate: Date(timeIntervalSince1970: 1_000_000)
+        )
+        try catalog.insertAsset(rotated)
+        try catalog.insertAsset(normal1)
+        try catalog.insertAsset(normal2)
+
+        // Non-square thumbnail: portrait aspect from a rotated landscape
+        try TestFixtures.placeThumbnail(
+            for: rotated,
+            cacheDirectory: tempCacheDir,
+            color: (r: 210, g: 60, b: 60),
+            width: 192,
+            height: 256
+        )
+        try TestFixtures.placeThumbnail(
+            for: normal1,
+            cacheDirectory: tempCacheDir,
+            color: (r: 60, g: 180, b: 90)
+        )
+        try TestFixtures.placeThumbnail(
+            for: normal2,
+            cacheDirectory: tempCacheDir,
+            color: (r: 60, g: 110, b: 210)
+        )
+
+        let store = PreviewStore(cacheDirectory: tempCacheDir)
+        let vm = LibraryViewModel(catalog: catalog, previewStore: store)
+        await vm.reloadAndWait()
+
+        let image = renderFixedPixelImage(for: LibraryView(viewModel: vm))
+
+        runAssertSnapshot {
+            assertSnapshot(
+                of: image,
+                as: .image(
+                    precision: Self.snapshotPrecision,
+                    perceptualPrecision: Self.snapshotPerceptualPrecision
+                )
+            )
+        }
+    }
+
     // MARK: - Scope picker
 
     @MainActor

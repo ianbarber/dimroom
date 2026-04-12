@@ -18,6 +18,10 @@ struct DimroomCLI: ParsableCommand {
             SetRating.self,
             Rotate.self,
             SetFilter.self,
+            CopyEdit.self,
+            PasteEdit.self,
+            SetEdit.self,
+            GetEdit.self,
         ]
     )
 }
@@ -190,6 +194,92 @@ extension DimroomCLI {
                 throw ValidationError("minRating must be in 0...5, got \(minRating).")
             }
             try runCommand(.setFilter(minRating: minRating), socket: socket)
+        }
+    }
+
+    struct CopyEdit: ParsableCommand {
+        static let configuration = CommandConfiguration(
+            commandName: "copy-edit",
+            abstract: "Copy the edit state of the given asset to the internal clipboard."
+        )
+
+        @Argument(help: "The UUID of the asset whose edit state to copy.")
+        var id: String
+
+        @Option(name: .long, help: "Path to the harness socket.")
+        var socket: String = HarnessServer.defaultSocketPath
+
+        func run() throws {
+            guard let uuid = UUID(uuidString: id) else {
+                throw ValidationError("Invalid UUID '\(id)'.")
+            }
+            try runCommand(.copyEdit(assetId: uuid), socket: socket)
+        }
+    }
+
+    struct PasteEdit: ParsableCommand {
+        static let configuration = CommandConfiguration(
+            commandName: "paste-edit",
+            abstract: "Paste the clipboard's edit state onto the given asset."
+        )
+
+        @Argument(help: "The UUID of the asset to paste the edit state onto.")
+        var id: String
+
+        @Flag(name: .long, help: "Include crop rect and crop angle in the paste.")
+        var includeCrop: Bool = false
+
+        @Option(name: .long, help: "Path to the harness socket.")
+        var socket: String = HarnessServer.defaultSocketPath
+
+        func run() throws {
+            guard let uuid = UUID(uuidString: id) else {
+                throw ValidationError("Invalid UUID '\(id)'.")
+            }
+            try runCommand(.pasteEdit(assetId: uuid, includeCrop: includeCrop), socket: socket)
+        }
+    }
+
+    struct SetEdit: ParsableCommand {
+        static let configuration = CommandConfiguration(
+            commandName: "set-edit",
+            abstract: "Set an edit state on an asset from a JSON string."
+        )
+
+        @Argument(help: "The UUID of the asset.")
+        var id: String
+
+        @Option(name: .long, help: "JSON string representing the EditState.")
+        var json: String
+
+        @Option(name: .long, help: "Path to the harness socket.")
+        var socket: String = HarnessServer.defaultSocketPath
+
+        func run() throws {
+            guard let uuid = UUID(uuidString: id) else {
+                throw ValidationError("Invalid UUID '\(id)'.")
+            }
+            try runCommand(.setEdit(assetId: uuid, stateJSON: json), socket: socket)
+        }
+    }
+
+    struct GetEdit: ParsableCommand {
+        static let configuration = CommandConfiguration(
+            commandName: "get-edit",
+            abstract: "Get the latest edit state for an asset as JSON."
+        )
+
+        @Argument(help: "The UUID of the asset.")
+        var id: String
+
+        @Option(name: .long, help: "Path to the harness socket.")
+        var socket: String = HarnessServer.defaultSocketPath
+
+        func run() throws {
+            guard let uuid = UUID(uuidString: id) else {
+                throw ValidationError("Invalid UUID '\(id)'.")
+            }
+            try runCommand(.getEdit(assetId: uuid), socket: socket)
         }
     }
 }

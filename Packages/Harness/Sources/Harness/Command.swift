@@ -13,6 +13,10 @@ public enum Command: Codable, Sendable, Equatable {
     case setRating(assetId: UUID, rating: Int)
     case rotate(assetId: UUID)
     case setFilter(minRating: Int)
+    case copyEdit(assetId: UUID)
+    case pasteEdit(assetId: UUID, includeCrop: Bool)
+    case setEdit(assetId: UUID, stateJSON: String)
+    case getEdit(assetId: UUID)
 
     private enum CodingKeys: String, CodingKey {
         case type
@@ -22,6 +26,8 @@ public enum Command: Codable, Sendable, Equatable {
         case assetId
         case rating
         case minRating
+        case includeCrop
+        case stateJSON
     }
 
     private enum CommandType: String, Codable {
@@ -35,6 +41,10 @@ public enum Command: Codable, Sendable, Equatable {
         case setRating
         case rotate
         case setFilter
+        case copyEdit
+        case pasteEdit
+        case setEdit
+        case getEdit
     }
 
     public init(from decoder: Decoder) throws {
@@ -69,6 +79,20 @@ public enum Command: Codable, Sendable, Equatable {
         case .setFilter:
             let minRating = try container.decode(Int.self, forKey: .minRating)
             self = .setFilter(minRating: minRating)
+        case .copyEdit:
+            let assetId = try container.decode(UUID.self, forKey: .assetId)
+            self = .copyEdit(assetId: assetId)
+        case .pasteEdit:
+            let assetId = try container.decode(UUID.self, forKey: .assetId)
+            let includeCrop = try container.decode(Bool.self, forKey: .includeCrop)
+            self = .pasteEdit(assetId: assetId, includeCrop: includeCrop)
+        case .setEdit:
+            let assetId = try container.decode(UUID.self, forKey: .assetId)
+            let stateJSON = try container.decode(String.self, forKey: .stateJSON)
+            self = .setEdit(assetId: assetId, stateJSON: stateJSON)
+        case .getEdit:
+            let assetId = try container.decode(UUID.self, forKey: .assetId)
+            self = .getEdit(assetId: assetId)
         }
     }
 
@@ -103,6 +127,20 @@ public enum Command: Codable, Sendable, Equatable {
         case .setFilter(let minRating):
             try container.encode(CommandType.setFilter, forKey: .type)
             try container.encode(minRating, forKey: .minRating)
+        case .copyEdit(let assetId):
+            try container.encode(CommandType.copyEdit, forKey: .type)
+            try container.encode(assetId, forKey: .assetId)
+        case .pasteEdit(let assetId, let includeCrop):
+            try container.encode(CommandType.pasteEdit, forKey: .type)
+            try container.encode(assetId, forKey: .assetId)
+            try container.encode(includeCrop, forKey: .includeCrop)
+        case .setEdit(let assetId, let stateJSON):
+            try container.encode(CommandType.setEdit, forKey: .type)
+            try container.encode(assetId, forKey: .assetId)
+            try container.encode(stateJSON, forKey: .stateJSON)
+        case .getEdit(let assetId):
+            try container.encode(CommandType.getEdit, forKey: .type)
+            try container.encode(assetId, forKey: .assetId)
         }
     }
 }

@@ -90,6 +90,40 @@ final class CommandCodingTests: XCTestCase {
         }
     }
 
+    func testCopyEditRoundTrip() throws {
+        let id = UUID(uuidString: "12345678-1234-1234-1234-123456789012")!
+        let command = Command.copyEdit(assetId: id)
+        let data = try encoder.encode(command)
+        let decoded = try decoder.decode(Command.self, from: data)
+        XCTAssertEqual(command, decoded)
+    }
+
+    func testPasteEditRoundTrip() throws {
+        let id = UUID(uuidString: "12345678-1234-1234-1234-123456789012")!
+        for includeCrop in [true, false] {
+            let command = Command.pasteEdit(assetId: id, includeCrop: includeCrop)
+            let data = try encoder.encode(command)
+            let decoded = try decoder.decode(Command.self, from: data)
+            XCTAssertEqual(command, decoded)
+        }
+    }
+
+    func testSetEditRoundTrip() throws {
+        let id = UUID(uuidString: "12345678-1234-1234-1234-123456789012")!
+        let command = Command.setEdit(assetId: id, stateJSON: #"{"exposure":2.0}"#)
+        let data = try encoder.encode(command)
+        let decoded = try decoder.decode(Command.self, from: data)
+        XCTAssertEqual(command, decoded)
+    }
+
+    func testGetEditRoundTrip() throws {
+        let id = UUID(uuidString: "12345678-1234-1234-1234-123456789012")!
+        let command = Command.getEdit(assetId: id)
+        let data = try encoder.encode(command)
+        let decoded = try decoder.decode(Command.self, from: data)
+        XCTAssertEqual(command, decoded)
+    }
+
     // MARK: - Command JSON shape
 
     func testNavigateJSON() throws {
@@ -180,6 +214,61 @@ final class CommandCodingTests: XCTestCase {
         )
     }
 
+    func testCopyEditJSON() throws {
+        let id = UUID(uuidString: "12345678-1234-1234-1234-123456789012")!
+        let command = Command.copyEdit(assetId: id)
+        let data = try encoder.encode(command)
+        let json = String(data: data, encoding: .utf8)!
+        XCTAssertEqual(
+            json,
+            #"{"assetId":"12345678-1234-1234-1234-123456789012","type":"copyEdit"}"#
+        )
+    }
+
+    func testPasteEditJSON() throws {
+        let id = UUID(uuidString: "12345678-1234-1234-1234-123456789012")!
+        let command = Command.pasteEdit(assetId: id, includeCrop: false)
+        let data = try encoder.encode(command)
+        let json = String(data: data, encoding: .utf8)!
+        XCTAssertEqual(
+            json,
+            #"{"assetId":"12345678-1234-1234-1234-123456789012","includeCrop":false,"type":"pasteEdit"}"#
+        )
+    }
+
+    func testPasteEditWithCropJSON() throws {
+        let id = UUID(uuidString: "12345678-1234-1234-1234-123456789012")!
+        let command = Command.pasteEdit(assetId: id, includeCrop: true)
+        let data = try encoder.encode(command)
+        let json = String(data: data, encoding: .utf8)!
+        XCTAssertEqual(
+            json,
+            #"{"assetId":"12345678-1234-1234-1234-123456789012","includeCrop":true,"type":"pasteEdit"}"#
+        )
+    }
+
+    func testSetEditJSON() throws {
+        let id = UUID(uuidString: "12345678-1234-1234-1234-123456789012")!
+        let command = Command.setEdit(assetId: id, stateJSON: #"{"exposure":2}"#)
+        let data = try encoder.encode(command)
+        let json = String(data: data, encoding: .utf8)!
+        XCTAssertEqual(
+            json,
+            #"{"assetId":"12345678-1234-1234-1234-123456789012","stateJSON":"{\"exposure\":2}","type":"setEdit"}"#
+        )
+    }
+
+    func testGetEditJSON() throws {
+        let id = UUID(uuidString: "12345678-1234-1234-1234-123456789012")!
+        let command = Command.getEdit(assetId: id)
+        let data = try encoder.encode(command)
+        let json = String(data: data, encoding: .utf8)!
+        XCTAssertEqual(
+            json,
+            #"{"assetId":"12345678-1234-1234-1234-123456789012","type":"getEdit"}"#
+        )
+    }
+
     // MARK: - Command decoding from raw JSON
 
     func testDecodeNavigateFromJSON() throws {
@@ -205,6 +294,20 @@ final class CommandCodingTests: XCTestCase {
         let command = try decoder.decode(Command.self, from: Data(json.utf8))
         let expected = UUID(uuidString: "12345678-1234-1234-1234-123456789012")!
         XCTAssertEqual(command, .selectAsset(id: expected))
+    }
+
+    func testDecodeCopyEditFromJSON() throws {
+        let json = #"{"type":"copyEdit","assetId":"12345678-1234-1234-1234-123456789012"}"#
+        let command = try decoder.decode(Command.self, from: Data(json.utf8))
+        let expected = UUID(uuidString: "12345678-1234-1234-1234-123456789012")!
+        XCTAssertEqual(command, .copyEdit(assetId: expected))
+    }
+
+    func testDecodePasteEditFromJSON() throws {
+        let json = #"{"type":"pasteEdit","assetId":"12345678-1234-1234-1234-123456789012","includeCrop":true}"#
+        let command = try decoder.decode(Command.self, from: Data(json.utf8))
+        let expected = UUID(uuidString: "12345678-1234-1234-1234-123456789012")!
+        XCTAssertEqual(command, .pasteEdit(assetId: expected, includeCrop: true))
     }
 
     // MARK: - Response round-trips

@@ -22,6 +22,7 @@ You are implementing a planned issue for **dimroom**. You will write code, run t
    - Worktree path: `.worktrees/issue-${ISSUE_NUMBER}`
    - If the worktree exists, this is a continuation: `cd` into it and pull.
    - If not: `git worktree add .worktrees/issue-${ISSUE_NUMBER} -b <branch>` from `main`.
+   - **CRITICAL: Always branch from `main`.** Never branch from another issue's branch. If the issue depends on code that hasn't landed on `main` yet, set `state:blocked` and stop — do not stack PRs on top of unmerged branches.
    - All work happens inside the worktree. Do not touch the main checkout.
 
 3. **Set the label** (if not already): remove `state:planned`, add `state:in-progress`.
@@ -47,8 +48,9 @@ You are implementing a planned issue for **dimroom**. You will write code, run t
 
 8. **Push the branch and open the PR** (or update an existing one):
    - `git push -u origin <branch>`
-   - If no PR exists for this branch: `gh pr create` with the template, link `Closes #${ISSUE_NUMBER}`.
+   - If no PR exists for this branch: `gh pr create --base main` with the template, link `Closes #${ISSUE_NUMBER}`. **Always target `main`** — never target another feature branch.
    - If a PR exists: it auto-updates from the push. Add a `gh pr comment` summarising what changed since last push.
+   - **Verify** the PR targets `main` with `gh pr view --json baseRefName -q .baseRefName`. If it doesn't, something went wrong — fix it with `gh pr edit --base main`.
 
 9. **Attach screenshots to the PR.** Use the `capture-screenshots` skill's "attach" step. If upload fails, fall back to the orphan `artifacts/<branch>` branch (see `.claude/skills/capture-screenshots.md`).
 

@@ -144,6 +144,88 @@ final class LoupeSnapshotTests: XCTestCase {
         }
     }
 
+    // MARK: - Zoom indicator at fit
+
+    @MainActor
+    func test_loupe_zoom_indicator_fit() async throws {
+        let catalog = try CatalogDatabase.inMemory()
+
+        let asset = TestFixtures.makeAsset(
+            hash: "zoomFit",
+            filename: "zoom_fit.jpg",
+            captureDate: Date(timeIntervalSince1970: 2_500_000)
+        )
+        try catalog.insertAsset(asset)
+        try TestFixtures.placePreview(
+            for: asset,
+            cacheDirectory: tempCacheDir,
+            color: (r: 60, g: 140, b: 200),
+            width: 1600,
+            height: 1000
+        )
+
+        let store = PreviewStore(cacheDirectory: tempCacheDir)
+        let vm = LibraryViewModel(catalog: catalog, previewStore: store)
+        await vm.reloadAndWait()
+        vm.select(asset.id)
+
+        // initialZoomScale 0 → effectiveZoomScale resolves to fit; indicator forced visible.
+        let image = renderFixedPixelImage(
+            for: LoupeView(viewModel: vm, initialZoomScale: 0)
+        )
+
+        runAssertSnapshot {
+            assertSnapshot(
+                of: image,
+                as: .image(
+                    precision: Self.snapshotPrecision,
+                    perceptualPrecision: Self.snapshotPerceptualPrecision
+                )
+            )
+        }
+    }
+
+    // MARK: - Zoom indicator at 100%
+
+    @MainActor
+    func test_loupe_zoom_indicator_100() async throws {
+        let catalog = try CatalogDatabase.inMemory()
+
+        let asset = TestFixtures.makeAsset(
+            hash: "zoom100",
+            filename: "zoom_100.jpg",
+            captureDate: Date(timeIntervalSince1970: 2_500_000)
+        )
+        try catalog.insertAsset(asset)
+        try TestFixtures.placePreview(
+            for: asset,
+            cacheDirectory: tempCacheDir,
+            color: (r: 60, g: 140, b: 200),
+            width: 1600,
+            height: 1000
+        )
+
+        let store = PreviewStore(cacheDirectory: tempCacheDir)
+        let vm = LibraryViewModel(catalog: catalog, previewStore: store)
+        await vm.reloadAndWait()
+        vm.select(asset.id)
+
+        // initialZoomScale 1.0 → 100% zoom; indicator forced visible.
+        let image = renderFixedPixelImage(
+            for: LoupeView(viewModel: vm, initialZoomScale: 1.0)
+        )
+
+        runAssertSnapshot {
+            assertSnapshot(
+                of: image,
+                as: .image(
+                    precision: Self.snapshotPrecision,
+                    perceptualPrecision: Self.snapshotPerceptualPrecision
+                )
+            )
+        }
+    }
+
     // MARK: - Rotated asset
 
     /// Fixture with `rotation = 90` persisted in the catalog. The

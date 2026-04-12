@@ -70,14 +70,16 @@ struct ContentView: View {
             router.goBack()
             return .handled
         }
-        .onKeyPress(.init("]"), modifiers: .command) {
+        .onKeyPress(keys: ["]"], phases: .down) { keyPress in
+            guard keyPress.modifiers == .command else { return .ignored }
             guard let assetId = libraryViewModel.selectedAssetId else {
                 return .ignored
             }
             Task { await libraryViewModel.rotate(assetId: assetId, clockwise: true) }
             return .handled
         }
-        .onKeyPress(.init("["), modifiers: .command) {
+        .onKeyPress(keys: ["["], phases: .down) { keyPress in
+            guard keyPress.modifiers == .command else { return .ignored }
             guard let assetId = libraryViewModel.selectedAssetId else {
                 return .ignored
             }

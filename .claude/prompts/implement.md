@@ -39,10 +39,11 @@ You are implementing a planned issue for **dimroom**. You will write code, run t
    - `chore(infra): wire harness smoke into CI`
 
 6. **Run the verification ladder for everything you touched:**
+   - **App build:** `swift build --package-path App` must succeed. This is mandatory even if you only touched packages — the App target imports all packages and may fail on API changes that package-level `swift test` misses.
    - **Layer A:** `swift test` in each affected package under `Packages/*/`
    - **Layer B:** snapshot tests if any views or edit outputs changed
    - **Layer C:** harness smoke flow if any user-facing action changed
-   - All three must pass before opening the PR. If a test you added fails, fix the code, not the test.
+   - All four must pass before opening the PR. If a test you added fails, fix the code, not the test.
 
 7. **Capture screenshots** for the PR using the `capture-screenshots` skill in `.claude/skills/capture-screenshots.md`. Output goes to `.artifacts/issue-${ISSUE_NUMBER}/`.
 

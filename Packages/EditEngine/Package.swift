@@ -8,8 +8,22 @@ let package = Package(
     products: [
         .library(name: "EditEngine", targets: ["EditEngine"]),
     ],
+    dependencies: [
+        .package(path: "../Catalog"),
+        .package(path: "../TestSupport"),
+    ],
     targets: [
-        .target(name: "EditEngine"),
-        .testTarget(name: "EditEngineTests", dependencies: ["EditEngine"]),
+        .target(
+            name: "EditEngine",
+            dependencies: ["Catalog"]
+        ),
+        .testTarget(
+            name: "EditEngineTests",
+            dependencies: [
+                "EditEngine",
+                "TestSupport",
+            ],
+            exclude: ["__Snapshots__"]
+        ),
     ]
 )

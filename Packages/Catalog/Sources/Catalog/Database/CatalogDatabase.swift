@@ -48,6 +48,9 @@ public final class CatalogDatabase: Sendable {
             if let sourceType = filter.sourceType {
                 request = request.filter(Column("sourceType") == sourceType)
             }
+            if let sessionId = filter.importSessionId {
+                request = request.filter(Column("importSessionId") == sessionId)
+            }
 
             return try request.fetchAll(db)
         }
@@ -85,6 +88,45 @@ public final class CatalogDatabase: Sendable {
     public func insertImportSession(_ session: ImportSession) throws {
         try dbQueue.write { db in
             try session.insert(db)
+        }
+    }
+
+    /// Returns the most recent import sessions that have at least one
+    /// linked asset, ordered newest-first, capped at `limit`.
+    public func fetchImportSessions(limit: Int = 20) throws -> [ImportSessionSummary] {
+        try dbQueue.read { db in
+            let rows = try Row.fetchAll(db, sql: """
+                SELECT s.id, s.startedAt, s.sourceKind, s.sourceDevice,
+                       COUNT(a.id) AS assetCount
+                FROM import_sessions s
+                JOIN assets a ON a.importSessionId = s.id AND a.deletedAt IS NULL
+                GROUP BY s.id
+                ORDER BY s.startedAt DESC
+                LIMIT ?
+                """, arguments: [limit])
+            return rows.map { row in
+                let session = ImportSession(
+                    id: row["id"],
+                    startedAt: row["startedAt"],
+                    sourceKind: row["sourceKind"],
+                    sourceDevice: row["sourceDevice"]
+                )
+                return ImportSessionSummary(
+                    id: session.id,
+                    displayName: session.displayName(),
+                    assetCount: row["assetCount"],
+                    startedAt: session.startedAt
+                )
+            }
+        }
+    }
+
+    public func updateImportSessionSourceDevice(id: UUID, sourceDevice: String) throws {
+        try dbQueue.write { db in
+            if var session = try ImportSession.fetchOne(db, key: id) {
+                session.sourceDevice = sourceDevice
+                try session.update(db)
+            }
         }
     }
 

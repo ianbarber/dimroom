@@ -194,6 +194,27 @@ final class RendererTests: XCTestCase {
         XCTAssertEqual(result.extent.height, 40, accuracy: 0.5)
     }
 
+    func testCropAngleRotatesAroundCenter() {
+        let source = makeGradientImage(width: 64, height: 64)
+        let mid = Int(source.extent.width) / 2
+
+        // Sample the center pixel of the unrotated source
+        let srcCenter = samplePixel(image: source, x: mid, y: mid, context: ctx)
+
+        // Full-image crop with a small rotation — pivot should be at image center
+        let cropRect = source.extent
+        let result = Renderer.render(
+            source: source,
+            editState: EditState(cropRect: cropRect, cropAngle: 5)
+        )
+
+        // After center-pivot rotation the center pixel should stay the same
+        let resCenter = samplePixel(image: result, x: mid, y: mid, context: ctx)
+        XCTAssertEqual(resCenter.r, srcCenter.r, "Center pixel R should be unchanged after center-pivot rotation")
+        XCTAssertEqual(resCenter.g, srcCenter.g, "Center pixel G should be unchanged after center-pivot rotation")
+        XCTAssertEqual(resCenter.b, srcCenter.b, "Center pixel B should be unchanged after center-pivot rotation")
+    }
+
     // MARK: - Clarity
 
     func testClarityEnhancesLocalContrast() {

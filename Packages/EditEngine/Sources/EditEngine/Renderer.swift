@@ -145,10 +145,14 @@ public enum Renderer {
         guard let cropRect = rect else { return image }
         var result = image
 
-        // Apply rotation if angle is set
+        // Apply rotation around image center if angle is set
         if let angle = angle, angle != 0 {
             let radians = angle * .pi / 180.0
-            let transform = CGAffineTransform(rotationAngle: CGFloat(radians))
+            let cx = result.extent.midX
+            let cy = result.extent.midY
+            let transform = CGAffineTransform(translationX: cx, y: cy)
+                .rotated(by: CGFloat(radians))
+                .translatedBy(x: -cx, y: -cy)
             result = result.transformed(by: transform)
         }
 

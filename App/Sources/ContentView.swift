@@ -86,6 +86,50 @@ struct ContentView: View {
             Task { await libraryViewModel.rotate(assetId: assetId, clockwise: false) }
             return .handled
         }
+        // Rating keys 1-5 (set) and 0 (clear). Active in both Library
+        // and Loupe — rating applies to the selected asset regardless
+        // of which view is showing.
+        .onKeyPress(keys: ["1", "2", "3", "4", "5"], phases: .down) { keyPress in
+            guard keyPress.modifiers.isEmpty else { return .ignored }
+            guard let assetId = libraryViewModel.selectedAssetId,
+                  let digit = Int(String(keyPress.characters)) else {
+                return .ignored
+            }
+            Task { await libraryViewModel.setRating(for: assetId, to: digit) }
+            return .handled
+        }
+        .onKeyPress(keys: ["0"], phases: .down) { keyPress in
+            // Plain 0 → clear rating. Cmd+0 → reset zoom (loupe only).
+            if keyPress.modifiers == .command {
+                guard router.route == .loupe else { return .ignored }
+                libraryViewModel.pendingZoomCommand = .resetToFit
+                return .handled
+            }
+            guard keyPress.modifiers.isEmpty else { return .ignored }
+            guard let assetId = libraryViewModel.selectedAssetId else {
+                return .ignored
+            }
+            Task { await libraryViewModel.setRating(for: assetId, to: 0) }
+            return .handled
+        }
+        // Arrow keys — navigate between assets in Loupe.
+        .onKeyPress(.leftArrow) {
+            guard router.route == .loupe else { return .ignored }
+            libraryViewModel.selectPrevious()
+            return .handled
+        }
+        .onKeyPress(.rightArrow) {
+            guard router.route == .loupe else { return .ignored }
+            libraryViewModel.selectNext()
+            return .handled
+        }
+        // Z — toggle fit ↔ 100% zoom in Loupe.
+        .onKeyPress(keys: ["z"], phases: .down) { keyPress in
+            guard keyPress.modifiers.isEmpty else { return .ignored }
+            guard router.route == .loupe else { return .ignored }
+            libraryViewModel.pendingZoomCommand = .toggleFitTo100
+            return .handled
+        }
     }
 
     private func placeholder(_ label: String) -> some View {

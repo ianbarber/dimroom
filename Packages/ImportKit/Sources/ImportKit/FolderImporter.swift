@@ -23,12 +23,23 @@ public final class FolderImporter {
         self.fileManager = fileManager
     }
 
+    /// Progress callback: (currentFileIndex, totalFileCount).
+    public typealias ProgressHandler = @Sendable (Int, Int) -> Void
+
     /// Imports every supported image file under `folderURL`, recursively.
     ///
     /// Hidden files (anything whose name starts with `.`) and unsupported
     /// extensions are silently ignored and do not count toward either the
     /// `importedCount` or `skippedCount` in the result.
-    public func importFolder(_ folderURL: URL) async throws -> ImportResult {
+    ///
+    /// - Parameter progress: Called after each file is processed (imported
+    ///   or skipped) with `(currentIndex, totalCandidates)`. Called on an
+    ///   unspecified queue — the caller is responsible for dispatching to
+    ///   main if needed.
+    public func importFolder(
+        _ folderURL: URL,
+        progress: ProgressHandler? = nil
+    ) async throws -> ImportResult {
         let session = ImportSession(sourceKind: "folder", sourceDevice: nil)
         try catalog.insertImportSession(session)
 
@@ -38,15 +49,17 @@ public final class FolderImporter {
         )
 
         let candidates = try enumerateCandidates(in: folderURL)
+        let total = candidates.count
 
         var importedAssets: [Asset] = []
         var skippedCount = 0
 
-        for fileURL in candidates {
+        for (index, fileURL) in candidates.enumerated() {
             let hash = try StreamingHasher.sha256Hex(of: fileURL)
 
             if try catalog.fetchAsset(byHash: hash) != nil {
                 skippedCount += 1
+                progress?(index + 1, total)
                 continue
             }
 
@@ -71,6 +84,7 @@ public final class FolderImporter {
 
             try catalog.insertAsset(asset)
             importedAssets.append(asset)
+            progress?(index + 1, total)
         }
 
         return ImportResult(

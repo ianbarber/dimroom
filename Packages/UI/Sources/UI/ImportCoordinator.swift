@@ -70,7 +70,12 @@ public final class ImportCoordinator: ObservableObject {
 
         let result: ImportResult
         do {
-            result = try await importer.importFolder(folderURL)
+            result = try await importer.importFolder(folderURL) { [weak self] current, total in
+                Task { @MainActor [weak self] in
+                    self?.currentItem = current
+                    self?.totalItems = total
+                }
+            }
         } catch {
             phase = .failed(error.localizedDescription)
             return

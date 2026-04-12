@@ -2,7 +2,7 @@ import SwiftUI
 
 /// Overlay shown during an import-then-preview-generation flow.
 /// Reads published state from an `ImportCoordinator` and displays
-/// a simple progress indicator with a label.
+/// a progress bar with a label.
 public struct ImportProgressView: View {
     @ObservedObject var coordinator: ImportCoordinator
 
@@ -12,8 +12,17 @@ public struct ImportProgressView: View {
 
     public var body: some View {
         VStack(spacing: 16) {
-            ProgressView()
-                .controlSize(.large)
+            if coordinator.totalItems > 0 {
+                ProgressView(
+                    value: Double(coordinator.currentItem),
+                    total: Double(coordinator.totalItems)
+                )
+                .progressViewStyle(.linear)
+                .frame(width: 240)
+            } else {
+                ProgressView()
+                    .controlSize(.large)
+            }
 
             Text(label)
                 .font(.headline)
@@ -28,10 +37,13 @@ public struct ImportProgressView: View {
     private var label: String {
         switch coordinator.phase {
         case .importing:
-            return "Importing..."
+            if coordinator.totalItems > 0 {
+                return "Importing \(coordinator.currentItem) of \(coordinator.totalItems)..."
+            }
+            return "Scanning folder..."
         case .generatingPreviews:
             if coordinator.totalItems > 0 {
-                return "Generating previews... \(coordinator.currentItem) of \(coordinator.totalItems)"
+                return "Generating previews \(coordinator.currentItem) of \(coordinator.totalItems)..."
             }
             return "Generating previews..."
         case .idle, .done, .failed:

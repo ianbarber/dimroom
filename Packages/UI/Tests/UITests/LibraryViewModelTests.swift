@@ -582,6 +582,37 @@ final class LibraryViewModelTests: XCTestCase {
         XCTAssertNil(vm.ratingToast, "Rating 0 must clear the toast")
     }
 
+    // MARK: - Zoom command trigger
+
+    @MainActor
+    func testPendingZoomCommandStartsNil() async throws {
+        let catalog = try CatalogDatabase.inMemory()
+        let store = PreviewStore(cacheDirectory: tempCacheDir)
+        let vm = LibraryViewModel(catalog: catalog, previewStore: store)
+        XCTAssertNil(vm.pendingZoomCommand)
+    }
+
+    @MainActor
+    func testPendingZoomCommandCanBeSetAndCleared() async throws {
+        let catalog = try CatalogDatabase.inMemory()
+        let store = PreviewStore(cacheDirectory: tempCacheDir)
+        let vm = LibraryViewModel(catalog: catalog, previewStore: store)
+
+        vm.pendingZoomCommand = .toggleFitTo100
+        XCTAssertEqual(vm.pendingZoomCommand, .toggleFitTo100)
+
+        vm.pendingZoomCommand = nil
+        XCTAssertNil(vm.pendingZoomCommand)
+
+        vm.pendingZoomCommand = .resetToFit
+        XCTAssertEqual(vm.pendingZoomCommand, .resetToFit)
+
+        vm.pendingZoomCommand = nil
+        XCTAssertNil(vm.pendingZoomCommand)
+    }
+
+    // MARK: - Helpers
+
     /// Produce a minimal 64×48 solid-red JPEG on disk and return its
     /// URL. This is the local-path source used by rotate tests so
     /// `PreviewStore.generate` has a real file to decode.

@@ -77,28 +77,18 @@ public struct LoupeView: View {
             }
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity)
-        .focusable()
-        .focusEffectDisabled()
-        .onKeyPress(.leftArrow) {
-            viewModel.selectPrevious()
-            return .handled
-        }
-        .onKeyPress(.rightArrow) {
-            viewModel.selectNext()
-            return .handled
-        }
-        .onKeyPress(characters: CharacterSet(charactersIn: "zZ")) { press in
-            guard press.modifiers.isEmpty else { return .ignored }
-            toggleZoom()
-            return .handled
-        }
-        .onKeyPress(characters: CharacterSet(charactersIn: "0")) { press in
-            guard press.modifiers == .command else { return .ignored }
-            resetZoom()
-            return .handled
-        }
         .onChange(of: viewModel.selectedAssetId) { _, _ in
             resetZoomOnAssetChange()
+        }
+        .onChange(of: viewModel.pendingZoomCommand) { _, command in
+            guard let command else { return }
+            switch command {
+            case .toggleFitTo100:
+                toggleZoom()
+            case .resetToFit:
+                resetZoom()
+            }
+            viewModel.pendingZoomCommand = nil
         }
     }
 

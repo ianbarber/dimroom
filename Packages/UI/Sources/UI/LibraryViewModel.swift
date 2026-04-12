@@ -33,11 +33,23 @@ public final class LibraryViewModel: ObservableObject {
     /// a short delay by the toast view.
     @Published public var ratingToast: RatingToast?
 
+    /// Trigger property for zoom commands. ContentView sets this when
+    /// the user presses Z or Cmd+0; LoupeView observes it via
+    /// `.onChange`, executes the zoom action with its local state, and
+    /// clears it back to `nil`.
+    @Published public var pendingZoomCommand: ZoomCommand?
+
     /// Lightweight value published when a rating changes so the UI can
     /// show brief visual feedback.
     public struct RatingToast: Equatable {
         public let assetId: UUID
         public let rating: Int
+    }
+
+    /// Zoom actions that ContentView can request LoupeView to perform.
+    public enum ZoomCommand: Equatable {
+        case toggleFitTo100
+        case resetToFit
     }
 
     private var catalog: CatalogDatabase

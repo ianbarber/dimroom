@@ -63,9 +63,50 @@ public final class LibraryViewModel: ObservableObject {
         selectedAssetId = assetId
     }
 
+    /// Move selection to the next row after the current selection. Wraps
+    /// at the end? **No.** If nothing is selected or the current selection
+    /// is already the last row, this is a no-op.
+    public func selectNext() {
+        let ids = rows.map(\.id)
+        guard let next = Self.neighbor(in: ids, from: selectedAssetId, offset: 1) else {
+            return
+        }
+        selectedAssetId = next
+    }
+
+    /// Move selection to the previous row before the current selection.
+    /// No wrap at the start; no-op if nothing is selected or the current
+    /// selection is already the first row.
+    public func selectPrevious() {
+        let ids = rows.map(\.id)
+        guard let prev = Self.neighbor(in: ids, from: selectedAssetId, offset: -1) else {
+            return
+        }
+        selectedAssetId = prev
+    }
+
+    /// Pure bounds helper: given an ordered id list, the current
+    /// selection, and an `offset` of `+1` or `-1`, return the id of the
+    /// neighbour — or `nil` when moving past either edge, when no
+    /// selection exists, or when the current selection isn't in the list.
+    /// Exposed internally so Layer A tests can hit the math without
+    /// building a live view model.
+    nonisolated static func neighbor(
+        in ids: [UUID],
+        from current: UUID?,
+        offset: Int
+    ) -> UUID? {
+        guard let current, let index = ids.firstIndex(of: current) else {
+            return nil
+        }
+        let target = index + offset
+        guard ids.indices.contains(target) else { return nil }
+        return ids[target]
+    }
+
     /// Background-task worker: read the catalog off the main thread, sort,
-    /// and resolve thumbnail URLs. Static so it can't accidentally touch
-    /// `@MainActor` state.
+    /// and resolve thumbnail + preview URLs. Static so it can't accidentally
+    /// touch `@MainActor` state.
     private static func loadRows(
         catalog: CatalogDatabase,
         previewStore: PreviewStore
@@ -86,7 +127,8 @@ public final class LibraryViewModel: ObservableObject {
             return sorted.map { asset in
                 LibraryRow(
                     asset: asset,
-                    thumbnailURL: previewStore.thumbnailURL(for: asset)
+                    thumbnailURL: previewStore.thumbnailURL(for: asset),
+                    previewURL: previewStore.previewURL(for: asset)
                 )
             }
         }.value

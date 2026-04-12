@@ -14,6 +14,7 @@ struct DimroomCLI: ParsableCommand {
             Quit.self,
             ImportFolder.self,
             ListAssets.self,
+            SelectAsset.self,
         ]
     )
 }
@@ -100,6 +101,26 @@ extension DimroomCLI {
 
         func run() throws {
             try runCommand(.listAssets, socket: socket)
+        }
+    }
+
+    struct SelectAsset: ParsableCommand {
+        static let configuration = CommandConfiguration(
+            commandName: "select-asset",
+            abstract: "Set the library's single-selection to the given asset UUID."
+        )
+
+        @Argument(help: "The UUID of the asset to select.")
+        var id: String
+
+        @Option(name: .long, help: "Path to the harness socket.")
+        var socket: String = HarnessServer.defaultSocketPath
+
+        func run() throws {
+            guard let uuid = UUID(uuidString: id) else {
+                throw ValidationError("Invalid UUID '\(id)'.")
+            }
+            try runCommand(.selectAsset(id: uuid), socket: socket)
         }
     }
 }

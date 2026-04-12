@@ -12,7 +12,7 @@ struct ContentView: View {
             case .library:
                 LibraryView(viewModel: libraryViewModel)
             case .loupe:
-                placeholder("Loupe")
+                LoupeView(viewModel: libraryViewModel)
             case .develop:
                 placeholder("Develop")
             }

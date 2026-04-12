@@ -1,5 +1,7 @@
+import AppKit
 import Catalog
 import Harness
+import ImportKit
 import Previews
 import SwiftUI
 import UI
@@ -12,8 +14,17 @@ struct DimroomApp: App {
         WindowGroup {
             ContentView(
                 router: appDelegate.router,
-                libraryViewModel: appDelegate.libraryViewModel
+                libraryViewModel: appDelegate.libraryViewModel,
+                importCoordinator: appDelegate.importCoordinator
             )
+        }
+        .commands {
+            CommandGroup(after: .newItem) {
+                Button("Import Folder...") {
+                    appDelegate.importFolderFromMenu()
+                }
+                .keyboardShortcut("i", modifiers: [.command, .shift])
+            }
         }
     }
 }
@@ -21,6 +32,7 @@ struct DimroomApp: App {
 @MainActor
 final class AppDelegate: NSObject, NSApplicationDelegate {
     let router = AppRouter()
+    let importCoordinator = ImportCoordinator()
     /// View model shared between the SwiftUI tree and the harness
     /// controller. Initialised eagerly with an in-memory empty catalog so
     /// the `@main App` scene can read it before `applicationDidFinishLaunching`
@@ -28,32 +40,40 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     /// CLI flags are parsed and the real catalog + preview store are
     /// available.
     private(set) var libraryViewModel: LibraryViewModel = LibraryViewModel.empty()
+    private var catalog: CatalogDatabase?
+    private var previewStore: PreviewStore?
+    private var originalsDirectory: URL?
     private var harnessController: HarnessController?
     private var harnessWindow: NSWindow?
 
     func applicationDidFinishLaunching(_ notification: Notification) {
         let args = ProcessInfo.processInfo.arguments
-        guard args.contains("--harness") else { return }
 
-        NSApplication.shared.setActivationPolicy(.regular)
-        NSApplication.shared.activate(ignoringOtherApps: true)
-
-        let catalog = loadCatalogIfRequested(from: args)
-        let originalsDirectory = resolveOriginalsDirectory()
+        let resolvedOriginalsDirectory = resolveOriginalsDirectory()
         let previewCacheDirectory = resolvePreviewCacheDirectory(from: args)
-        let previewStore = PreviewStore(cacheDirectory: previewCacheDirectory)
+        let resolvedPreviewStore = PreviewStore(cacheDirectory: previewCacheDirectory)
+        let resolvedCatalog = loadCatalogIfRequested(from: args)
+
+        self.catalog = resolvedCatalog
+        self.previewStore = resolvedPreviewStore
+        self.originalsDirectory = resolvedOriginalsDirectory
 
         // Replace the placeholder view model with one backed by the real
         // catalog when one is available. If there's no catalog, the
         // placeholder stays — the empty-state grid renders cleanly and
         // the harness `state` command still returns assetCount=0.
-        if let catalog {
+        if let resolvedCatalog {
             libraryViewModel = LibraryViewModel(
-                catalog: catalog,
-                previewStore: previewStore
+                catalog: resolvedCatalog,
+                previewStore: resolvedPreviewStore
             )
             libraryViewModel.reload()
         }
+
+        guard args.contains("--harness") else { return }
+
+        NSApplication.shared.setActivationPolicy(.regular)
+        NSApplication.shared.activate(ignoringOtherApps: true)
 
         // Create a window explicitly for harness mode so screenshots work
         // even when running as a bare SPM executable without an app bundle.
@@ -67,7 +87,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             window.contentView = NSHostingView(
                 rootView: ContentView(
                     router: router,
-                    libraryViewModel: libraryViewModel
+                    libraryViewModel: libraryViewModel,
+                    importCoordinator: importCoordinator
                 )
             )
             window.title = "Dimroom"
@@ -81,22 +102,70 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
 
         let controller = HarnessController(
             router: router,
-            catalog: catalog,
-            originalsDirectory: originalsDirectory,
+            catalog: resolvedCatalog,
+            originalsDirectory: resolvedOriginalsDirectory,
+            previewStore: resolvedPreviewStore,
             libraryViewModel: libraryViewModel
         )
         do {
             try controller.start(socketPath: socketPath)
             harnessController = controller
             print("[Dimroom] Harness mode active — listening on \(socketPath)")
-            if catalog != nil {
-                print("[Dimroom] Catalog loaded; originals dir = \(originalsDirectory.path)")
+            if resolvedCatalog != nil {
+                print("[Dimroom] Catalog loaded; originals dir = \(resolvedOriginalsDirectory.path)")
                 print("[Dimroom] Preview cache dir = \(previewCacheDirectory.path)")
             } else {
                 print("[Dimroom] No --fixture-catalog provided; catalog-dependent commands will fail")
             }
         } catch {
             print("[Dimroom] Failed to start harness server: \(error)")
+        }
+    }
+
+    // MARK: - Import from menu
+
+    func importFolderFromMenu() {
+        guard !importCoordinator.isActive else { return }
+
+        let panel = NSOpenPanel()
+        panel.canChooseFiles = false
+        panel.canChooseDirectories = true
+        panel.allowsMultipleSelection = false
+        panel.message = "Select a folder to import photos from"
+        panel.prompt = "Import"
+
+        guard panel.runModal() == .OK, let folderURL = panel.url else { return }
+
+        guard let catalog, let previewStore, let originalsDirectory else {
+            let alert = NSAlert()
+            alert.messageText = "Import Failed"
+            alert.informativeText = "No catalog is loaded. Launch with --fixture-catalog to enable import."
+            alert.alertStyle = .warning
+            alert.runModal()
+            return
+        }
+
+        let importer = FolderImporter(catalog: catalog, originalsDirectory: originalsDirectory)
+
+        Task { @MainActor in
+            await importCoordinator.run(
+                folderURL: folderURL,
+                importer: importer,
+                previewStore: previewStore
+            )
+
+            switch importCoordinator.phase {
+            case .failed(let message):
+                let alert = NSAlert()
+                alert.messageText = "Import Failed"
+                alert.informativeText = message
+                alert.alertStyle = .critical
+                alert.runModal()
+            case .done:
+                libraryViewModel.reload()
+            default:
+                break
+            }
         }
     }
 

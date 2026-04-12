@@ -3,6 +3,7 @@ import Catalog
 import Foundation
 import Harness
 import ImportKit
+import Previews
 import UI
 
 /// Bridges harness commands to the app's state and AppKit operations.
@@ -10,6 +11,7 @@ final class HarnessController: @unchecked Sendable {
     private let router: AppRouter
     private let catalog: CatalogDatabase?
     private let originalsDirectory: URL
+    private let previewStore: PreviewStore
     private let libraryViewModel: LibraryViewModel
     private var server: HarnessServer?
 
@@ -17,11 +19,13 @@ final class HarnessController: @unchecked Sendable {
         router: AppRouter,
         catalog: CatalogDatabase?,
         originalsDirectory: URL,
+        previewStore: PreviewStore,
         libraryViewModel: LibraryViewModel
     ) {
         self.router = router
         self.catalog = catalog
         self.originalsDirectory = originalsDirectory
+        self.previewStore = previewStore
         self.libraryViewModel = libraryViewModel
     }
 
@@ -89,6 +93,15 @@ final class HarnessController: @unchecked Sendable {
             originalsDirectory: originalsDirectory
         )
         let result = try await importer.importFolder(folderURL)
+
+        // Generate previews for newly imported assets so the library grid
+        // shows real thumbnails, matching the GUI import path.
+        for asset in result.importedAssets {
+            guard let localPath = asset.localPath else { continue }
+            let sourceURL = URL(fileURLWithPath: localPath)
+            _ = try? await previewStore.generate(for: asset, sourceURL: sourceURL)
+        }
+
         // Refresh the library grid so `state` reflects the new rows.
         // `reloadAndWait` is required (not `reload`) because reload now
         // runs on a background task — the subsequent `state` or `listAssets`

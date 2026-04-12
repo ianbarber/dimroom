@@ -39,7 +39,7 @@ public final class FolderImporter {
 
         let candidates = try enumerateCandidates(in: folderURL)
 
-        var importedCount = 0
+        var importedAssets: [Asset] = []
         var skippedCount = 0
 
         for fileURL in candidates {
@@ -70,13 +70,14 @@ public final class FolderImporter {
             )
 
             try catalog.insertAsset(asset)
-            importedCount += 1
+            importedAssets.append(asset)
         }
 
         return ImportResult(
-            importedCount: importedCount,
+            importedCount: importedAssets.count,
             skippedCount: skippedCount,
-            sessionId: session.id
+            sessionId: session.id,
+            importedAssets: importedAssets
         )
     }
 

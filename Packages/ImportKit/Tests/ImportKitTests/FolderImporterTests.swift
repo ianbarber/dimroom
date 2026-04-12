@@ -49,6 +49,11 @@ final class FolderImporterTests: XCTestCase {
 
         XCTAssertEqual(result.importedCount, 2)
         XCTAssertEqual(result.skippedCount, 0)
+        XCTAssertEqual(result.importedAssets.count, 2)
+
+        let returnedFilenames = Set(result.importedAssets.map(\.originalFilename))
+        XCTAssertEqual(returnedFilenames, ["IMG_0001.jpg", "IMG_0002.JPEG"])
+        XCTAssertTrue(result.importedAssets.allSatisfy { $0.localPath != nil })
 
         let assets = try catalog.fetchAssets()
         XCTAssertEqual(assets.count, 2)
@@ -133,10 +138,12 @@ final class FolderImporterTests: XCTestCase {
         let first = try await importer.importFolder(sourceDir)
         XCTAssertEqual(first.importedCount, 2)
         XCTAssertEqual(first.skippedCount, 0)
+        XCTAssertEqual(first.importedAssets.count, 2)
 
         let second = try await importer.importFolder(sourceDir)
         XCTAssertEqual(second.importedCount, 0)
         XCTAssertEqual(second.skippedCount, 2)
+        XCTAssertTrue(second.importedAssets.isEmpty)
 
         // Catalog still has exactly two assets.
         XCTAssertEqual(try catalog.fetchAssets().count, 2)

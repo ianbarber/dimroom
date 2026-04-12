@@ -102,4 +102,18 @@ public final class ImportCoordinator: ObservableObject {
         currentItem = 0
         totalItems = 0
     }
+
+    // MARK: - Test helpers
+
+    /// Sets the phase directly. Used by snapshot tests to render the
+    /// progress view in a specific state without running a real import.
+    func setPhaseForTesting(_ newPhase: Phase) {
+        phase = newPhase
+    }
+
+    /// Sets progress counters directly for snapshot tests.
+    func setProgressForTesting(current: Int, total: Int) {
+        currentItem = current
+        totalItems = total
+    }
 }

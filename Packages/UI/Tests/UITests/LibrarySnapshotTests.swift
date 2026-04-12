@@ -229,6 +229,25 @@ final class LibrarySnapshotTests: XCTestCase {
         }
     }
 
+    // MARK: - Scope picker
+
+    @MainActor
+    func test_scope_picker_with_three_sessions() async throws {
+        let (vm, _) = try await makeViewModelWithSessions()
+
+        let image = renderFixedPixelImage(for: LibraryView(viewModel: vm))
+
+        runAssertSnapshot {
+            assertSnapshot(
+                of: image,
+                as: .image(
+                    precision: Self.snapshotPrecision,
+                    perceptualPrecision: Self.snapshotPerceptualPrecision
+                )
+            )
+        }
+    }
+
     // MARK: - Helper
 
     /// Builds a view model backed by three fixture assets with
@@ -333,5 +352,74 @@ final class LibrarySnapshotTests: XCTestCase {
         let vm = LibraryViewModel(catalog: catalog, previewStore: store)
         await vm.reloadAndWait()
         return (vm, [five, three, one])
+    }
+
+    /// Three import sessions each with assets and pre-placed thumbnails.
+    /// Exercises the scope picker appearing in the filter bar.
+    @MainActor
+    private func makeViewModelWithSessions() async throws -> (LibraryViewModel, [Asset]) {
+        let catalog = try CatalogDatabase.inMemory()
+
+        let s1 = ImportSession(
+            startedAt: Date(timeIntervalSince1970: 3_000_000),
+            sourceKind: "folder",
+            sourceDevice: "Pixii Camera"
+        )
+        let s2 = ImportSession(
+            startedAt: Date(timeIntervalSince1970: 2_000_000),
+            sourceKind: "folder",
+            sourceDevice: "Canon EOS R6"
+        )
+        let s3 = ImportSession(
+            startedAt: Date(timeIntervalSince1970: 1_000_000),
+            sourceKind: "folder"
+        )
+        try catalog.insertImportSession(s1)
+        try catalog.insertImportSession(s2)
+        try catalog.insertImportSession(s3)
+
+        var a1 = TestFixtures.makeAsset(
+            hash: "sess1newest",
+            filename: "pixii.jpg",
+            captureDate: Date(timeIntervalSince1970: 3_000_000)
+        )
+        a1.importSessionId = s1.id
+        var a2 = TestFixtures.makeAsset(
+            hash: "sess2middle",
+            filename: "canon.jpg",
+            captureDate: Date(timeIntervalSince1970: 2_000_000)
+        )
+        a2.importSessionId = s2.id
+        var a3 = TestFixtures.makeAsset(
+            hash: "sess3oldest",
+            filename: "scan.jpg",
+            captureDate: Date(timeIntervalSince1970: 1_000_000)
+        )
+        a3.importSessionId = s3.id
+
+        try catalog.insertAsset(a1)
+        try catalog.insertAsset(a2)
+        try catalog.insertAsset(a3)
+
+        try TestFixtures.placeThumbnail(
+            for: a1,
+            cacheDirectory: tempCacheDir,
+            color: (r: 210, g: 60, b: 60)
+        )
+        try TestFixtures.placeThumbnail(
+            for: a2,
+            cacheDirectory: tempCacheDir,
+            color: (r: 60, g: 180, b: 90)
+        )
+        try TestFixtures.placeThumbnail(
+            for: a3,
+            cacheDirectory: tempCacheDir,
+            color: (r: 60, g: 110, b: 210)
+        )
+
+        let store = PreviewStore(cacheDirectory: tempCacheDir)
+        let vm = LibraryViewModel(catalog: catalog, previewStore: store)
+        await vm.reloadAndWait()
+        return (vm, [a1, a2, a3])
     }
 }

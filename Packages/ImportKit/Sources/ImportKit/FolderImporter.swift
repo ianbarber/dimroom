@@ -40,7 +40,7 @@ public final class FolderImporter {
         _ folderURL: URL,
         progress: ProgressHandler? = nil
     ) async throws -> ImportResult {
-        let session = ImportSession(sourceKind: "folder", sourceDevice: nil)
+        var session = ImportSession(sourceKind: "folder", sourceDevice: nil)
         try catalog.insertImportSession(session)
 
         try fileManager.createDirectory(
@@ -90,6 +90,7 @@ public final class FolderImporter {
             // that carries EXIF device info.
             if session.sourceDevice == nil, let device = metadata.sourceDevice {
                 try catalog.updateImportSessionSourceDevice(id: session.id, sourceDevice: device)
+                session.sourceDevice = device
             }
             progress?(index + 1, total)
         }

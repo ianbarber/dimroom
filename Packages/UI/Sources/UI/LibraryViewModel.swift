@@ -16,6 +16,10 @@ public final class LibraryViewModel: ObservableObject {
     /// directly does **not** trigger a reload — callers should go through
     /// `setMinRating(_:)` so the grid is re-queried.
     @Published public private(set) var minRating: Int = 0
+    /// Currently active import-session scope. `nil` means "All Photos".
+    @Published public private(set) var scopeSessionId: UUID?
+    /// Recent import sessions for the scope picker.
+    @Published public private(set) var recentSessions: [ImportSessionSummary] = []
     /// Monotonic counter bumped on every successful rotate. Views that
     /// cache decoded NSImages keyed on the file path (Loupe, Cell) apply
     /// `.id(rowVersion)` to their image subtree so SwiftUI forces a
@@ -70,16 +74,20 @@ public final class LibraryViewModel: ObservableObject {
         let catalog = self.catalog
         let previewStore = self.previewStore
         let minRating = self.minRating
+        let scopeSessionId = self.scopeSessionId
         reloadTask = Task { [weak self] in
+            let sessions = await Self.loadSessions(catalog: catalog)
             let resolved = await Self.loadRows(
                 catalog: catalog,
                 previewStore: previewStore,
-                minRating: minRating
+                minRating: minRating,
+                scopeSessionId: scopeSessionId
             )
             guard !Task.isCancelled else { return }
             await MainActor.run { [weak self] in
                 guard let self else { return }
                 self.rows = resolved
+                self.recentSessions = sessions
                 if let currentSelection = self.selectedAssetId,
                    !resolved.contains(where: { $0.id == currentSelection }) {
                     self.selectedAssetId = nil
@@ -149,6 +157,12 @@ public final class LibraryViewModel: ObservableObject {
     public func setMinRating(_ newValue: Int) async {
         let clamped = max(0, min(5, newValue))
         minRating = clamped
+        await reloadAndWait()
+    }
+
+    /// Set the import-session scope and reload. Pass `nil` for "All Photos".
+    public func setScope(_ sessionId: UUID?) async {
+        scopeSessionId = sessionId
         await reloadAndWait()
     }
 
@@ -226,16 +240,16 @@ public final class LibraryViewModel: ObservableObject {
     private static func loadRows(
         catalog: CatalogDatabase,
         previewStore: PreviewStore,
-        minRating: Int
+        minRating: Int,
+        scopeSessionId: UUID? = nil
     ) async -> [LibraryRow] {
         await Task.detached(priority: .userInitiated) {
             let fetched: [Asset]
             do {
-                // `AssetFilter.rating` is nil when the user wants
-                // everything — passing 0 would still include everything
-                // because of the `>=` semantics, but nil avoids an
-                // unnecessary WHERE clause.
-                let filter = AssetFilter(rating: minRating == 0 ? nil : minRating)
+                let filter = AssetFilter(
+                    rating: minRating == 0 ? nil : minRating,
+                    importSessionId: scopeSessionId
+                )
                 fetched = try catalog.fetchAssets(filter: filter)
             } catch {
                 // Catalog read failures are rare and non-recoverable from
@@ -253,6 +267,15 @@ public final class LibraryViewModel: ObservableObject {
                     previewURL: previewStore.previewURL(for: asset)
                 )
             }
+        }.value
+    }
+
+    /// Background-task worker: fetch recent import sessions.
+    private static func loadSessions(
+        catalog: CatalogDatabase
+    ) async -> [ImportSessionSummary] {
+        await Task.detached(priority: .userInitiated) {
+            (try? catalog.fetchImportSessions()) ?? []
         }.value
     }
 

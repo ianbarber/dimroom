@@ -47,6 +47,12 @@ public struct LibraryView: View {
     /// feels wrong in practice.
     private var filterBar: some View {
         HStack(spacing: 12) {
+            ScopePicker(
+                sessions: viewModel.recentSessions,
+                selectedSessionId: scopeBinding
+            )
+            Divider()
+                .frame(height: 16)
             Text("Min rating")
                 .font(.caption)
                 .foregroundStyle(Color(white: 0.7))
@@ -75,6 +81,15 @@ public struct LibraryView: View {
             get: { viewModel.minRating },
             set: { newValue in
                 Task { await viewModel.setMinRating(newValue) }
+            }
+        )
+    }
+
+    private var scopeBinding: Binding<UUID?> {
+        Binding(
+            get: { viewModel.scopeSessionId },
+            set: { newValue in
+                Task { await viewModel.setScope(newValue) }
             }
         )
     }

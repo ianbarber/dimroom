@@ -82,12 +82,44 @@ public enum Renderer {
 
     private static func applyClarity(_ image: CIImage, clarity: Double) -> CIImage {
         guard clarity != 0 else { return image }
-        // Large-radius unsharp mask for local contrast enhancement.
-        // inputIntensity controls the strength of the effect.
-        let filter = CIFilter(name: "CIUnsharpMask")!
+
+        if clarity > 0 {
+            // Positive: large-radius unsharp mask for local contrast enhancement.
+            let filter = CIFilter(name: "CIUnsharpMask")!
+            filter.setValue(image, forKey: kCIInputImageKey)
+            filter.setValue(20.0, forKey: "inputRadius")
+            filter.setValue(clarity / 100.0, forKey: "inputIntensity")
+            return filter.outputImage!
+        } else {
+            // Negative: blend toward a Gaussian blur for softening/diffusion.
+            let blendFraction = Swift.abs(clarity) / 100.0
+
+            let blur = CIFilter(name: "CIGaussianBlur")!
+            blur.setValue(image, forKey: kCIInputImageKey)
+            blur.setValue(20.0, forKey: "inputRadius")
+            let blurred = blur.outputImage!.cropped(to: image.extent)
+
+            // Lerp: result = source * (1 - t) + blurred * t
+            let sourceScaled = applyScale(image, factor: 1.0 - blendFraction)
+            let blurredScaled = applyScale(blurred, factor: blendFraction)
+
+            let add = CIFilter(name: "CIAdditionCompositing")!
+            add.setValue(sourceScaled, forKey: kCIInputImageKey)
+            add.setValue(blurredScaled, forKey: kCIInputBackgroundImageKey)
+            return add.outputImage!
+        }
+    }
+
+    /// Scale all channels of an image by a constant factor using CIColorMatrix.
+    private static func applyScale(_ image: CIImage, factor: Double) -> CIImage {
+        let f = CGFloat(factor)
+        let filter = CIFilter(name: "CIColorMatrix")!
         filter.setValue(image, forKey: kCIInputImageKey)
-        filter.setValue(20.0, forKey: "inputRadius")
-        filter.setValue(abs(clarity) / 100.0, forKey: "inputIntensity")
+        filter.setValue(CIVector(x: f, y: 0, z: 0, w: 0), forKey: "inputRVector")
+        filter.setValue(CIVector(x: 0, y: f, z: 0, w: 0), forKey: "inputGVector")
+        filter.setValue(CIVector(x: 0, y: 0, z: f, w: 0), forKey: "inputBVector")
+        filter.setValue(CIVector(x: 0, y: 0, z: 0, w: 1), forKey: "inputAVector")
+        filter.setValue(CIVector(x: 0, y: 0, z: 0, w: 0), forKey: "inputBiasVector")
         return filter.outputImage!
     }
 

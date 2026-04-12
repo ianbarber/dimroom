@@ -121,10 +121,17 @@ next_issue() {
 }
 
 # Get PR number for an issue, if any.
+#
+# GitHub's PR search has a `linked:issue` qualifier but it is a boolean —
+# it filters PRs that have *any* linked issue, ignoring the argument. We
+# instead match the branch naming convention `issue-{number}-*`, which is
+# enforced by CLAUDE.md and so is a reliable key. See issue #19.
 pr_for_issue() {
   local issue="$1"
-  gh pr list --state open --search "linked:issue $issue" \
-    --json number,headRefName -q '.[0].number' 2>/dev/null || true
+  gh pr list --state open \
+    --json number,headRefName \
+    -q ".[] | select(.headRefName | startswith(\"issue-${issue}-\")) | .number" \
+    2>/dev/null | head -n1
 }
 
 # Run a single pass.

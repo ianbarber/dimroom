@@ -211,4 +211,49 @@ final class RendererTests: XCTestCase {
         let changed = srcPx.r != resPx.r || srcPx.g != resPx.g || srcPx.b != resPx.b
         XCTAssertTrue(changed, "Clarity should enhance local contrast near edges")
     }
+
+    func testNegativeClarityProducesSoftening() {
+        // Negative clarity should reduce local contrast (move edge pixel toward neighbours' mean)
+        let source = makeColorImage()
+        let midY = Int(source.extent.height) / 2
+        let edgeX = Int(source.extent.width) / 2 - 1
+        let srcPx = samplePixel(image: source, x: edgeX, y: midY, context: ctx)
+
+        let result = Renderer.render(source: source, editState: EditState(clarity: -80))
+        let resPx = samplePixel(image: result, x: edgeX, y: midY, context: ctx)
+
+        // The edge pixel is on the muted-red side (R=160, G=120, B=120).
+        // Its neighbour across the edge is saturated blue (R=0, G=0, B=240).
+        // Softening should pull the red channel down toward the mean and the
+        // blue channel up toward the mean — i.e., local contrast decreases.
+        let changed = srcPx.r != resPx.r || srcPx.g != resPx.g || srcPx.b != resPx.b
+        XCTAssertTrue(changed, "Negative clarity should visibly change the edge pixel")
+
+        // The muted-red pixel's R should decrease (blending toward blue side)
+        XCTAssertLessThan(resPx.r, srcPx.r, "Negative clarity should soften: red channel moves toward neighbour mean")
+    }
+
+    func testClaritySymmetry() {
+        // Positive and negative clarity should move the same edge pixel in opposite directions
+        let source = makeColorImage()
+        let midY = Int(source.extent.height) / 2
+        let edgeX = Int(source.extent.width) / 2 - 1
+        let srcPx = samplePixel(image: source, x: edgeX, y: midY, context: ctx)
+
+        let positive = Renderer.render(source: source, editState: EditState(clarity: 50))
+        let negative = Renderer.render(source: source, editState: EditState(clarity: -50))
+        let posPx = samplePixel(image: positive, x: edgeX, y: midY, context: ctx)
+        let negPx = samplePixel(image: negative, x: edgeX, y: midY, context: ctx)
+
+        // Positive clarity sharpens (increases local contrast): the muted-red edge pixel's
+        // R channel should increase (pushed away from the blue neighbour).
+        // Negative clarity softens (decreases local contrast): R should decrease (pulled
+        // toward the blue neighbour's mean).
+        let positiveDelta = Int(posPx.r) - Int(srcPx.r)
+        let negativeDelta = Int(negPx.r) - Int(srcPx.r)
+
+        // They should move in opposite directions
+        XCTAssertGreaterThan(positiveDelta, 0, "Positive clarity should push edge pixel away from neighbour")
+        XCTAssertLessThan(negativeDelta, 0, "Negative clarity should pull edge pixel toward neighbour")
+    }
 }

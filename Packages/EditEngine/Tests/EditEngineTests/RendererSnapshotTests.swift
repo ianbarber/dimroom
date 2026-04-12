@@ -43,4 +43,10 @@ final class RendererSnapshotTests: XCTestCase {
         let image = renderToNSImage(source: source, editState: EditState(cropRect: cropRect))
         assertSnapshot(of: image, as: .image(precision: 0.99, perceptualPrecision: 0.98))
     }
+
+    func testNegativeClaritySnapshot() {
+        let source = makeColorImage()
+        let image = renderToNSImage(source: source, editState: EditState(clarity: -60))
+        assertSnapshot(of: image, as: .image(precision: 0.99, perceptualPrecision: 0.98))
+    }
 }

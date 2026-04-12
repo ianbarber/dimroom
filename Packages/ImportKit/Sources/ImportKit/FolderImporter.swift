@@ -79,11 +79,18 @@ public final class FolderImporter {
                 rawFormat: SupportedExtensions.isRaw(ext) ? ext : nil,
                 rotation: metadata.rotationDegrees,
                 localPath: stagedURL.path,
-                bytes: byteCount
+                bytes: byteCount,
+                importSessionId: session.id
             )
 
             try catalog.insertAsset(asset)
             importedAssets.append(asset)
+
+            // Backfill the session's sourceDevice from the first asset
+            // that carries EXIF device info.
+            if session.sourceDevice == nil, let device = metadata.sourceDevice {
+                try catalog.updateImportSessionSourceDevice(id: session.id, sourceDevice: device)
+            }
             progress?(index + 1, total)
         }
 

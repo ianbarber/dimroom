@@ -10,6 +10,7 @@ let package = Package(
     ],
     dependencies: [
         .package(path: "../Catalog"),
+        .package(path: "../ImportKit"),
         .package(path: "../Previews"),
         .package(path: "../TestSupport"),
     ],
@@ -18,6 +19,7 @@ let package = Package(
             name: "UI",
             dependencies: [
                 .product(name: "Catalog", package: "Catalog"),
+                .product(name: "ImportKit", package: "ImportKit"),
                 .product(name: "Previews", package: "Previews"),
             ]
         ),
@@ -26,6 +28,7 @@ let package = Package(
             dependencies: [
                 "UI",
                 .product(name: "Catalog", package: "Catalog"),
+                .product(name: "ImportKit", package: "ImportKit"),
                 .product(name: "Previews", package: "Previews"),
                 .product(name: "TestSupport", package: "TestSupport"),
             ],

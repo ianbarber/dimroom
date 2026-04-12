@@ -181,4 +181,170 @@ final class CatalogDatabaseTests: XCTestCase {
         let result = try db.fetchAsset(byHash: "nonexistent")
         XCTAssertNil(result)
     }
+
+    // MARK: - Import Session Id on Asset
+
+    func testMigrationAddsImportSessionId() throws {
+        let db = try makeDatabase()
+        let session = ImportSession(sourceKind: "folder")
+        try db.insertImportSession(session)
+
+        var asset = makeSampleAsset(contentHash: "sess1")
+        asset.importSessionId = session.id
+        try db.insertAsset(asset)
+
+        let fetched = try db.fetchAsset(byHash: "sess1")
+        XCTAssertEqual(fetched?.importSessionId, session.id)
+    }
+
+    func testAssetImportSessionIdDefaultsToNil() throws {
+        let db = try makeDatabase()
+        let asset = makeSampleAsset(contentHash: "nosess")
+        try db.insertAsset(asset)
+
+        let fetched = try db.fetchAsset(byHash: "nosess")
+        XCTAssertNil(fetched?.importSessionId)
+    }
+
+    // MARK: - Filter by Import Session
+
+    func testFetchAssetsFilteredByImportSessionId() throws {
+        let db = try makeDatabase()
+        let s1 = ImportSession(sourceKind: "folder")
+        let s2 = ImportSession(sourceKind: "folder")
+        try db.insertImportSession(s1)
+        try db.insertImportSession(s2)
+
+        var a1 = makeSampleAsset(contentHash: "is1")
+        a1.importSessionId = s1.id
+        var a2 = makeSampleAsset(contentHash: "is2")
+        a2.importSessionId = s1.id
+        var a3 = makeSampleAsset(contentHash: "is3")
+        a3.importSessionId = s2.id
+
+        try db.insertAsset(a1)
+        try db.insertAsset(a2)
+        try db.insertAsset(a3)
+
+        let filtered = try db.fetchAssets(filter: AssetFilter(importSessionId: s1.id))
+        XCTAssertEqual(filtered.count, 2)
+        XCTAssertTrue(filtered.allSatisfy { $0.importSessionId == s1.id })
+    }
+
+    // MARK: - Fetch Import Sessions
+
+    func testFetchImportSessionsReturnsRecentWithCounts() throws {
+        let db = try makeDatabase()
+        let s1 = ImportSession(
+            startedAt: Date(timeIntervalSince1970: 1_000_000),
+            sourceKind: "folder",
+            sourceDevice: "Canon EOS R6"
+        )
+        let s2 = ImportSession(
+            startedAt: Date(timeIntervalSince1970: 2_000_000),
+            sourceKind: "folder",
+            sourceDevice: "Pixii"
+        )
+        let s3 = ImportSession(
+            startedAt: Date(timeIntervalSince1970: 3_000_000),
+            sourceKind: "folder"
+        )
+        try db.insertImportSession(s1)
+        try db.insertImportSession(s2)
+        try db.insertImportSession(s3)
+
+        // s1: 1 asset, s2: 2 assets, s3: 1 asset
+        var a1 = makeSampleAsset(contentHash: "fs1")
+        a1.importSessionId = s1.id
+        var a2 = makeSampleAsset(contentHash: "fs2")
+        a2.importSessionId = s2.id
+        var a3 = makeSampleAsset(contentHash: "fs3")
+        a3.importSessionId = s2.id
+        var a4 = makeSampleAsset(contentHash: "fs4")
+        a4.importSessionId = s3.id
+
+        try db.insertAsset(a1)
+        try db.insertAsset(a2)
+        try db.insertAsset(a3)
+        try db.insertAsset(a4)
+
+        let sessions = try db.fetchImportSessions()
+        XCTAssertEqual(sessions.count, 3)
+        // Most recent first
+        XCTAssertEqual(sessions[0].id, s3.id)
+        XCTAssertEqual(sessions[1].id, s2.id)
+        XCTAssertEqual(sessions[2].id, s1.id)
+        // Correct counts
+        XCTAssertEqual(sessions[0].assetCount, 1)
+        XCTAssertEqual(sessions[1].assetCount, 2)
+        XCTAssertEqual(sessions[2].assetCount, 1)
+    }
+
+    func testFetchImportSessionsTrimming() throws {
+        let db = try makeDatabase()
+        // Insert 25 sessions each with 1 asset
+        for i in 0..<25 {
+            let s = ImportSession(
+                startedAt: Date(timeIntervalSince1970: Double(i) * 1000),
+                sourceKind: "folder"
+            )
+            try db.insertImportSession(s)
+            var a = makeSampleAsset(contentHash: "trim\(i)")
+            a.importSessionId = s.id
+            try db.insertAsset(a)
+        }
+
+        let sessions = try db.fetchImportSessions()
+        XCTAssertEqual(sessions.count, 20)
+    }
+
+    func testFetchImportSessionsExcludesEmptySessions() throws {
+        let db = try makeDatabase()
+        let s1 = ImportSession(sourceKind: "folder")
+        try db.insertImportSession(s1)
+        // No assets linked → s1 should not appear
+        let sessions = try db.fetchImportSessions()
+        XCTAssertTrue(sessions.isEmpty)
+    }
+
+    // MARK: - Import Session Display Name
+
+    func testImportSessionDisplayNameWithDevice() throws {
+        let session = ImportSession(
+            startedAt: Date(timeIntervalSince1970: 1_712_870_400), // 12 Apr 2024
+            sourceKind: "folder",
+            sourceDevice: "Pixii Camera (A3410)"
+        )
+        let name = session.displayName()
+        XCTAssertTrue(name.hasPrefix("Pixii Camera (A3410) — "))
+        XCTAssertTrue(name.contains("2024"))
+    }
+
+    func testImportSessionDisplayNameFallsBackToFolder() throws {
+        let session = ImportSession(
+            startedAt: Date(timeIntervalSince1970: 1_712_870_400),
+            sourceKind: "folder",
+            sourceDevice: nil
+        )
+        let name = session.displayName()
+        XCTAssertTrue(name.hasPrefix("Folder — "))
+    }
+
+    // MARK: - Update Import Session Source Device
+
+    func testUpdateImportSessionSourceDevice() throws {
+        let db = try makeDatabase()
+        let session = ImportSession(sourceKind: "folder", sourceDevice: nil)
+        try db.insertImportSession(session)
+
+        try db.updateImportSessionSourceDevice(id: session.id, sourceDevice: "Canon EOS R6")
+
+        // Verify by inserting an asset and checking session display name
+        var asset = makeSampleAsset(contentHash: "devup")
+        asset.importSessionId = session.id
+        try db.insertAsset(asset)
+        let sessions = try db.fetchImportSessions()
+        XCTAssertEqual(sessions.count, 1)
+        XCTAssertTrue(sessions[0].displayName.contains("Canon EOS R6"))
+    }
 }

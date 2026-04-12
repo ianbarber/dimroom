@@ -199,6 +199,47 @@ final class FolderImporterTests: XCTestCase {
 
     // MARK: - ImportSession
 
+    func testImportedAssetsHaveImportSessionId() async throws {
+        let importer = FolderImporter(catalog: catalog, originalsDirectory: originalsDir)
+
+        try TestFixtureBuilder.writeJPEG(
+            exif: .init(dateTimeOriginal: "2024:06:01 12:34:56"),
+            to: sourceDir.appendingPathComponent("a.jpg")
+        )
+        try TestFixtureBuilder.writeJPEG(
+            exif: .init(dateTimeOriginal: "2024:06:01 12:35:00"),
+            to: sourceDir.appendingPathComponent("b.jpg")
+        )
+
+        let result = try await importer.importFolder(sourceDir)
+        XCTAssertEqual(result.importedCount, 2)
+
+        let assets = try catalog.fetchAssets()
+        XCTAssertTrue(assets.allSatisfy { $0.importSessionId == result.sessionId })
+    }
+
+    func testImportSessionSourceDevicePopulated() async throws {
+        let importer = FolderImporter(catalog: catalog, originalsDirectory: originalsDir)
+
+        try TestFixtureBuilder.writeJPEG(
+            exif: .init(
+                dateTimeOriginal: "2024:06:01 12:34:56",
+                make: "Pixii",
+                model: "Pixii Camera (A3410)"
+            ),
+            to: sourceDir.appendingPathComponent("pixii.jpg")
+        )
+
+        let result = try await importer.importFolder(sourceDir)
+        let sessions = try catalog.fetchImportSessions()
+        XCTAssertEqual(sessions.count, 1)
+        XCTAssertEqual(sessions[0].id, result.sessionId)
+        XCTAssertTrue(
+            sessions[0].displayName.contains("Pixii"),
+            "Expected session display name to contain device name, got: \(sessions[0].displayName)"
+        )
+    }
+
     func testCreatesSingleImportSessionPerCall() async throws {
         let importer = FolderImporter(catalog: catalog, originalsDirectory: originalsDir)
 

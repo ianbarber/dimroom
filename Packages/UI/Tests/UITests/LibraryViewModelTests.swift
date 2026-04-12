@@ -422,6 +422,52 @@ final class LibraryViewModelTests: XCTestCase {
         XCTAssertEqual(fetched?.rotation, 90)
     }
 
+    /// CCW rotation must cycle 270 → 180 → 90 → 0. This is the mirror
+    /// image of the CW test above.
+    @MainActor
+    func testRotateCCWCyclesThroughAllFourOrientations() async throws {
+        let catalog = try CatalogDatabase.inMemory()
+        let asset = TestFixtures.makeAsset(hash: "ccwrot")
+        try catalog.insertAsset(asset)
+
+        let store = PreviewStore(cacheDirectory: tempCacheDir)
+        let vm = LibraryViewModel(catalog: catalog, previewStore: store)
+        await vm.reloadAndWait()
+
+        let expectedRotations = [270, 180, 90, 0]
+        for expected in expectedRotations {
+            await vm.rotate(assetId: asset.id, clockwise: false)
+            let fetched = try catalog.fetchAsset(byHash: "ccwrot")
+            XCTAssertEqual(
+                fetched?.rotation,
+                expected,
+                "rotate(clockwise: false) must produce CCW rotation"
+            )
+        }
+    }
+
+    /// Setting a non-zero rating must publish a `ratingToast` so the UI
+    /// can show visual feedback. Setting to 0 must clear it.
+    @MainActor
+    func testSetRatingPublishesToast() async throws {
+        let catalog = try CatalogDatabase.inMemory()
+        let asset = TestFixtures.makeAsset(hash: "toastee")
+        try catalog.insertAsset(asset)
+
+        let store = PreviewStore(cacheDirectory: tempCacheDir)
+        let vm = LibraryViewModel(catalog: catalog, previewStore: store)
+        await vm.reloadAndWait()
+
+        XCTAssertNil(vm.ratingToast)
+
+        await vm.setRating(for: asset.id, to: 3)
+        XCTAssertEqual(vm.ratingToast?.rating, 3)
+        XCTAssertEqual(vm.ratingToast?.assetId, asset.id)
+
+        await vm.setRating(for: asset.id, to: 0)
+        XCTAssertNil(vm.ratingToast, "Rating 0 must clear the toast")
+    }
+
     /// Produce a minimal 64×48 solid-red JPEG on disk and return its
     /// URL. This is the local-path source used by rotate tests so
     /// `PreviewStore.generate` has a real file to decode.

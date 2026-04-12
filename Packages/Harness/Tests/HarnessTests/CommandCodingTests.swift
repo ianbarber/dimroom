@@ -75,7 +75,16 @@ final class CommandCodingTests: XCTestCase {
 
     func testRotateRoundTrip() throws {
         let id = UUID(uuidString: "12345678-1234-1234-1234-123456789012")!
-        let command = Command.rotate(assetId: id)
+        for direction in ["cw", "ccw"] {
+            let command = Command.rotate(assetId: id, direction: direction)
+            let data = try encoder.encode(command)
+            let decoded = try decoder.decode(Command.self, from: data)
+            XCTAssertEqual(command, decoded)
+        }
+    }
+
+    func testGoBackRoundTrip() throws {
+        let command = Command.goBack
         let data = try encoder.encode(command)
         let decoded = try decoder.decode(Command.self, from: data)
         XCTAssertEqual(command, decoded)
@@ -195,13 +204,46 @@ final class CommandCodingTests: XCTestCase {
 
     func testRotateJSON() throws {
         let id = UUID(uuidString: "12345678-1234-1234-1234-123456789012")!
-        let command = Command.rotate(assetId: id)
+        let command = Command.rotate(assetId: id, direction: "cw")
         let data = try encoder.encode(command)
         let json = String(data: data, encoding: .utf8)!
         XCTAssertEqual(
             json,
-            #"{"assetId":"12345678-1234-1234-1234-123456789012","type":"rotate"}"#
+            #"{"assetId":"12345678-1234-1234-1234-123456789012","direction":"cw","type":"rotate"}"#
         )
+    }
+
+    func testRotateCCWJSON() throws {
+        let id = UUID(uuidString: "12345678-1234-1234-1234-123456789012")!
+        let command = Command.rotate(assetId: id, direction: "ccw")
+        let data = try encoder.encode(command)
+        let json = String(data: data, encoding: .utf8)!
+        XCTAssertEqual(
+            json,
+            #"{"assetId":"12345678-1234-1234-1234-123456789012","direction":"ccw","type":"rotate"}"#
+        )
+    }
+
+    func testGoBackJSON() throws {
+        let command = Command.goBack
+        let data = try encoder.encode(command)
+        let json = String(data: data, encoding: .utf8)!
+        XCTAssertEqual(json, #"{"type":"goBack"}"#)
+    }
+
+    /// Legacy JSON without a `direction` key must decode to `"cw"` for
+    /// backwards compatibility with existing harness scripts.
+    func testDecodeRotateWithoutDirectionDefaultsToCW() throws {
+        let json = #"{"type":"rotate","assetId":"12345678-1234-1234-1234-123456789012"}"#
+        let command = try decoder.decode(Command.self, from: Data(json.utf8))
+        let expected = UUID(uuidString: "12345678-1234-1234-1234-123456789012")!
+        XCTAssertEqual(command, .rotate(assetId: expected, direction: "cw"))
+    }
+
+    func testDecodeGoBackFromJSON() throws {
+        let json = #"{"type":"goBack"}"#
+        let command = try decoder.decode(Command.self, from: Data(json.utf8))
+        XCTAssertEqual(command, .goBack)
     }
 
     func testSetFilterJSON() throws {

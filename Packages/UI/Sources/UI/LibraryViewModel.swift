@@ -24,6 +24,18 @@ public final class LibraryViewModel: ObservableObject {
     /// CGImage it decoded the first time around.
     @Published public private(set) var rowVersion: Int = 0
 
+    /// Brief toast feedback when a rating is set. Views observe this to
+    /// show a transient star count overlay. Cleared automatically after
+    /// a short delay by the toast view.
+    @Published public var ratingToast: RatingToast?
+
+    /// Lightweight value published when a rating changes so the UI can
+    /// show brief visual feedback.
+    public struct RatingToast: Equatable {
+        public let assetId: UUID
+        public let rating: Int
+    }
+
     private var catalog: CatalogDatabase
     private var previewStore: PreviewStore
     private var reloadTask: Task<Void, Never>?
@@ -123,6 +135,11 @@ public final class LibraryViewModel: ObservableObject {
             // Swallow and let the next reload surface a consistent state.
             return
         }
+        if clamped > 0 {
+            ratingToast = RatingToast(assetId: assetId, rating: clamped)
+        } else {
+            ratingToast = nil
+        }
         await reloadAndWait()
     }
 
@@ -135,9 +152,9 @@ public final class LibraryViewModel: ObservableObject {
         await reloadAndWait()
     }
 
-    /// Rotate `assetId` 90° clockwise, invalidate its cached previews,
-    /// regenerate them from the original file, and reload the grid so
-    /// the new orientation is visible immediately.
+    /// Rotate `assetId` 90° in the given direction, invalidate its
+    /// cached previews, regenerate them from the original file, and
+    /// reload the grid so the new orientation is visible immediately.
     ///
     /// If the asset has no `localPath` (e.g. Drive-only), the rotation
     /// value is still written to the catalog — the preview just stays
@@ -145,7 +162,7 @@ public final class LibraryViewModel: ObservableObject {
     /// the "originals on demand" constraint in CLAUDE.md: we cannot
     /// guarantee the original is present, so rotation must not require
     /// it to succeed.
-    public func rotate(assetId: UUID) async {
+    public func rotate(assetId: UUID, clockwise: Bool = true) async {
         let assets: [Asset]
         do {
             assets = try catalog.fetchAssets(filter: AssetFilter(includeDeleted: true))
@@ -155,7 +172,12 @@ public final class LibraryViewModel: ObservableObject {
         guard let asset = assets.first(where: { $0.id == assetId }) else {
             return
         }
-        let newRotation = (asset.rotation + 90) % 360
+        let newRotation: Int
+        if clockwise {
+            newRotation = (asset.rotation + 90) % 360
+        } else {
+            newRotation = (asset.rotation - 90 + 360) % 360
+        }
         do {
             try catalog.updateRotation(assetId: assetId, rotation: newRotation)
         } catch {

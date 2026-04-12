@@ -20,23 +20,26 @@ struct LibraryCell: View {
     }
 
     var body: some View {
-        ZStack(alignment: .bottomLeading) {
-            thumbnail
-            if row.asset.rating > 0 {
-                starOverlay
-                    .padding(6)
+        Color.clear
+            .aspectRatio(1, contentMode: .fit)
+            .overlay {
+                thumbnail
             }
-        }
-        .aspectRatio(1, contentMode: .fit)
-        .clipShape(RoundedRectangle(cornerRadius: 4))
-        .overlay(
-            RoundedRectangle(cornerRadius: 4)
-                .strokeBorder(
-                    isSelected ? Color.accentColor : Color.clear,
-                    lineWidth: 2
-                )
-        )
-        .contentShape(Rectangle())
+            .overlay(alignment: .bottomLeading) {
+                if row.asset.rating > 0 {
+                    starOverlay
+                        .padding(6)
+                }
+            }
+            .clipShape(RoundedRectangle(cornerRadius: 4))
+            .overlay(
+                RoundedRectangle(cornerRadius: 4)
+                    .strokeBorder(
+                        isSelected ? Color.accentColor : Color.clear,
+                        lineWidth: 2
+                    )
+            )
+            .contentShape(Rectangle())
     }
 
     @ViewBuilder

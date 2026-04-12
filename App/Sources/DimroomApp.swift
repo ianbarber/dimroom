@@ -25,6 +25,24 @@ struct DimroomApp: App {
                 }
                 .keyboardShortcut("i", modifiers: [.command, .shift])
             }
+            CommandGroup(replacing: .pasteboard) {
+                Button("Copy Edit Settings") {
+                    appDelegate.copyEditSettings()
+                }
+                .keyboardShortcut("c", modifiers: .command)
+
+                Button("Paste Edit Settings") {
+                    appDelegate.pasteEditSettings(includeCrop: false)
+                }
+                .keyboardShortcut("v", modifiers: .command)
+                .disabled(appDelegate.editClipboard.isEmpty)
+
+                Button("Paste Edit Settings (All)") {
+                    appDelegate.pasteEditSettings(includeCrop: true)
+                }
+                .keyboardShortcut("v", modifiers: [.command, .shift])
+                .disabled(appDelegate.editClipboard.isEmpty)
+            }
         }
     }
 }
@@ -33,6 +51,7 @@ struct DimroomApp: App {
 final class AppDelegate: NSObject, NSApplicationDelegate {
     let router = AppRouter()
     let importCoordinator = ImportCoordinator()
+    let editClipboard = EditClipboard()
     /// View model shared between the SwiftUI tree and the harness
     /// controller. Initialised eagerly with an in-memory empty catalog so
     /// the `@main App` scene can read it before `applicationDidFinishLaunching`
@@ -107,7 +126,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             catalog: resolvedCatalog,
             originalsDirectory: resolvedOriginalsDirectory,
             previewStore: resolvedPreviewStore,
-            libraryViewModel: libraryViewModel
+            libraryViewModel: libraryViewModel,
+            editClipboard: editClipboard
         )
         do {
             try controller.start(socketPath: socketPath)
@@ -168,6 +188,37 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             default:
                 break
             }
+        }
+    }
+
+    // MARK: - Edit copy/paste
+
+    func copyEditSettings() {
+        guard let catalog,
+              let assetId = libraryViewModel.selectedAssetId else { return }
+        do {
+            let state = try catalog.latestEditState(for: assetId) ?? EditState()
+            editClipboard.copy(state, from: assetId)
+        } catch {
+            print("[Dimroom] copyEditSettings failed: \(error)")
+        }
+    }
+
+    func pasteEditSettings(includeCrop: Bool) {
+        guard let catalog,
+              let assetId = libraryViewModel.selectedAssetId else { return }
+        let state: EditState?
+        if includeCrop {
+            state = editClipboard.pasteIncludingCrop()
+        } else {
+            state = editClipboard.pasteExcludingCrop()
+        }
+        guard let state else { return }
+        do {
+            _ = try catalog.saveEditState(state, for: assetId)
+            libraryViewModel.reload()
+        } catch {
+            print("[Dimroom] pasteEditSettings failed: \(error)")
         }
     }
 

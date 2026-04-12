@@ -73,7 +73,6 @@ public struct LoupeView: View {
                         zoomState.clampZoom(imageSize: imageSize, containerSize: newSize)
                         zoomState.clampPan(imageSize: imageSize, containerSize: newSize)
                     }
-                    containerSize = newSize
                 }
             }
         }
@@ -135,6 +134,11 @@ public struct LoupeView: View {
     private func magnifyGesture(imageSize: CGSize, containerSize: CGSize) -> some Gesture {
         MagnifyGesture()
             .onChanged { value in
+                if magnifyStartScale == 0 {
+                    magnifyStartScale = effectiveZoomScale(
+                        imageSize: imageSize, containerSize: containerSize
+                    )
+                }
                 zoomState.applyMagnification(
                     value.magnification,
                     anchor: CGPoint(x: 0.5, y: 0.5),

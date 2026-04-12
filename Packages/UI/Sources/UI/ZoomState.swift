@@ -129,6 +129,9 @@ public struct ZoomState: Equatable {
         imageSize: CGSize,
         containerSize: CGSize
     ) {
+        if zoomScale == 0 {
+            zoomScale = Self.fitScale(imageSize: imageSize, containerSize: containerSize)
+        }
         let oldScale = zoomScale
         zoomScale = startScale * magnification
 

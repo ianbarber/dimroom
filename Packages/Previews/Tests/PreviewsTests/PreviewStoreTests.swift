@@ -120,6 +120,50 @@ final class PreviewStoreTests: XCTestCase {
         XCTAssertNotNil(store.previewURL(for: asset))
     }
 
+    // MARK: - Invalidation
+
+    func testInvalidateRemovesCachedFilesAndForcesRedecode() async throws {
+        let store = PreviewStore(cacheDirectory: cacheDir)
+        let asset = makeAsset(contentHash: "invalidate00000000aa")
+        let source = try makeJPEGFixture()
+
+        // Prime the cache.
+        _ = try await store.generate(for: asset, sourceURL: source)
+        XCTAssertNotNil(store.thumbnailURL(for: asset))
+        XCTAssertNotNil(store.previewURL(for: asset))
+        let firstDecode = await store.decodeCount
+        XCTAssertEqual(firstDecode, 1)
+
+        // Invalidate — both cached files must vanish and the nonisolated
+        // URL accessors must return nil (they're a pure filesystem check).
+        await store.invalidate(for: asset)
+        XCTAssertNil(store.thumbnailURL(for: asset))
+        XCTAssertNil(store.previewURL(for: asset))
+
+        // Next generate should re-decode, proving the cache was
+        // genuinely cleared rather than short-circuited.
+        _ = try await store.generate(for: asset, sourceURL: source)
+        let secondDecode = await store.decodeCount
+        XCTAssertEqual(
+            secondDecode,
+            2,
+            "invalidate + generate must force a second decode"
+        )
+        XCTAssertNotNil(store.thumbnailURL(for: asset))
+        XCTAssertNotNil(store.previewURL(for: asset))
+    }
+
+    func testInvalidateIsSafeWhenCacheIsEmpty() async {
+        let store = PreviewStore(cacheDirectory: cacheDir)
+        let asset = makeAsset(contentHash: "neverCached0000000ff")
+
+        // No generate — the cache files don't exist. invalidate must
+        // silently do nothing.
+        await store.invalidate(for: asset)
+        XCTAssertNil(store.thumbnailURL(for: asset))
+        XCTAssertNil(store.previewURL(for: asset))
+    }
+
     // MARK: - Rotation
 
     func testRotationIsAppliedToOutput() async throws {

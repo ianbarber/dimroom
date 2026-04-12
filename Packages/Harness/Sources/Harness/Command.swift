@@ -10,12 +10,18 @@ public enum Command: Codable, Sendable, Equatable {
     case importFolder(path: String)
     case listAssets
     case selectAsset(id: UUID)
+    case setRating(assetId: UUID, rating: Int)
+    case rotate(assetId: UUID)
+    case setFilter(minRating: Int)
 
     private enum CodingKeys: String, CodingKey {
         case type
         case route
         case path
         case id
+        case assetId
+        case rating
+        case minRating
     }
 
     private enum CommandType: String, Codable {
@@ -26,6 +32,9 @@ public enum Command: Codable, Sendable, Equatable {
         case importFolder
         case listAssets
         case selectAsset
+        case setRating
+        case rotate
+        case setFilter
     }
 
     public init(from decoder: Decoder) throws {
@@ -50,6 +59,16 @@ public enum Command: Codable, Sendable, Equatable {
         case .selectAsset:
             let id = try container.decode(UUID.self, forKey: .id)
             self = .selectAsset(id: id)
+        case .setRating:
+            let assetId = try container.decode(UUID.self, forKey: .assetId)
+            let rating = try container.decode(Int.self, forKey: .rating)
+            self = .setRating(assetId: assetId, rating: rating)
+        case .rotate:
+            let assetId = try container.decode(UUID.self, forKey: .assetId)
+            self = .rotate(assetId: assetId)
+        case .setFilter:
+            let minRating = try container.decode(Int.self, forKey: .minRating)
+            self = .setFilter(minRating: minRating)
         }
     }
 
@@ -74,6 +93,16 @@ public enum Command: Codable, Sendable, Equatable {
         case .selectAsset(let id):
             try container.encode(CommandType.selectAsset, forKey: .type)
             try container.encode(id, forKey: .id)
+        case .setRating(let assetId, let rating):
+            try container.encode(CommandType.setRating, forKey: .type)
+            try container.encode(assetId, forKey: .assetId)
+            try container.encode(rating, forKey: .rating)
+        case .rotate(let assetId):
+            try container.encode(CommandType.rotate, forKey: .type)
+            try container.encode(assetId, forKey: .assetId)
+        case .setFilter(let minRating):
+            try container.encode(CommandType.setFilter, forKey: .type)
+            try container.encode(minRating, forKey: .minRating)
         }
     }
 }

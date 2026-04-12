@@ -7,7 +7,10 @@ name: Record snapshots
 # machine and uploads them as an artifact; the developer downloads the
 # artifact, replaces the committed PNGs, and pushes.
 #
-# Manual-only (workflow_dispatch) — do not run on push/PR.
+# Two triggers:
+#   - workflow_dispatch, once this file lands on the default branch.
+#   - push to this file on any branch, as a bootstrap path so feature
+#     branches can run it before their PR merges.
 
 on:
   workflow_dispatch:

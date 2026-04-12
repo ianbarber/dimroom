@@ -73,6 +73,24 @@ public actor PreviewStore {
         return FileManager.default.fileExists(atPath: url.path) ? url : nil
     }
 
+    /// Remove any cached thumbnail and preview JPEGs for `asset`. After
+    /// this call both `thumbnailURL(for:)` and `previewURL(for:)` return
+    /// `nil` until the next `generate` call regenerates them. Missing
+    /// files are ignored — this is a best-effort cleanup, not an
+    /// assertion that the cache was populated.
+    ///
+    /// Used by `LibraryViewModel.rotate` to force a synchronous
+    /// regeneration after `Asset.rotation` changes, because `generate`
+    /// short-circuits when both cached files already exist on disk.
+    public func invalidate(for asset: Asset) {
+        for kind in PreviewKind.allCases {
+            let url = CachePaths.fileURL(for: asset, kind: kind, in: cacheDirectory)
+            if fileManager.fileExists(atPath: url.path) {
+                try? fileManager.removeItem(at: url)
+            }
+        }
+    }
+
     /// Produce both preview sizes for `asset` from its original at
     /// `sourceURL`. Idempotent: if both files already exist on disk the
     /// call returns immediately without decoding.

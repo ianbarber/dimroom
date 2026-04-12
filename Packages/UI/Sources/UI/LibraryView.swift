@@ -24,11 +24,14 @@ public struct LibraryView: View {
     }
 
     public var body: some View {
-        Group {
-            if viewModel.rows.isEmpty {
-                LibraryEmptyState()
-            } else {
-                grid
+        VStack(spacing: 0) {
+            filterBar
+            Group {
+                if viewModel.rows.isEmpty {
+                    LibraryEmptyState()
+                } else {
+                    grid
+                }
             }
         }
         .background(Color(white: 0.08))
@@ -37,13 +40,53 @@ public struct LibraryView: View {
         }
     }
 
+    /// Top-bar row containing the min-rating filter. Kept deliberately
+    /// thin — a single `Picker` is enough to satisfy the issue's
+    /// "Picker / SegmentedControl / custom" latitude. A star-chip
+    /// custom control can come in a follow-up if the plain picker ever
+    /// feels wrong in practice.
+    private var filterBar: some View {
+        HStack(spacing: 12) {
+            Text("Min rating")
+                .font(.caption)
+                .foregroundStyle(Color(white: 0.7))
+            Picker("Min rating", selection: filterBinding) {
+                Text("All").tag(0)
+                ForEach(1...5, id: \.self) { n in
+                    Text("\(n)★").tag(n)
+                }
+            }
+            .pickerStyle(.segmented)
+            .labelsHidden()
+            .frame(maxWidth: 320)
+            Spacer()
+        }
+        .padding(.horizontal, 12)
+        .padding(.vertical, 8)
+        .background(Color(white: 0.12))
+    }
+
+    /// Bridge the view model's `setMinRating(_:)` async entry point into
+    /// a SwiftUI `Binding<Int>`. The picker only writes on user input,
+    /// so kicking off a `Task` from the setter is fine — there's no
+    /// chance of a reentrant redraw.
+    private var filterBinding: Binding<Int> {
+        Binding(
+            get: { viewModel.minRating },
+            set: { newValue in
+                Task { await viewModel.setMinRating(newValue) }
+            }
+        )
+    }
+
     private var grid: some View {
         ScrollView {
             LazyVGrid(columns: columns, spacing: Self.cellSpacing) {
                 ForEach(viewModel.rows) { row in
                     LibraryCell(
                         row: row,
-                        isSelected: row.id == viewModel.selectedAssetId
+                        isSelected: row.id == viewModel.selectedAssetId,
+                        rowVersion: viewModel.rowVersion
                     )
                     .onTapGesture {
                         viewModel.select(row.id)

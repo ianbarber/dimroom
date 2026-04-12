@@ -52,7 +52,8 @@ final class HarnessController: @unchecked Sendable {
                 AppState(
                     route: router.route,
                     assetCount: libraryViewModel.rows.count,
-                    selectedAssetId: libraryViewModel.selectedAssetId
+                    selectedAssetId: libraryViewModel.selectedAssetId,
+                    minRating: libraryViewModel.minRating
                 )
             }
             let encoder = JSONEncoder()
@@ -73,10 +74,22 @@ final class HarnessController: @unchecked Sendable {
             return try await handleImportFolder(path: path)
 
         case .listAssets:
-            return handleListAssets()
+            return await handleListAssets()
 
         case .selectAsset(let id):
             await MainActor.run { libraryViewModel.select(id) }
+            return .ok()
+
+        case .setRating(let assetId, let rating):
+            await libraryViewModel.setRating(for: assetId, to: rating)
+            return .ok()
+
+        case .rotate(let assetId):
+            await libraryViewModel.rotate(assetId: assetId)
+            return .ok()
+
+        case .setFilter(let minRating):
+            await libraryViewModel.setMinRating(minRating)
             return .ok()
         }
     }
@@ -107,31 +120,33 @@ final class HarnessController: @unchecked Sendable {
 
     // MARK: - List assets
 
-    private func handleListAssets() -> Response {
-        guard let catalog else {
-            return .error("catalog not loaded")
-        }
-        do {
-            let assets = try catalog.fetchAssets()
-            let array: [AnyCodableValue] = assets.map { asset in
-                let captureDate: AnyCodableValue
-                if let date = asset.captureDate {
-                    captureDate = .string(Self.iso8601.string(from: date))
-                } else {
-                    captureDate = .null
-                }
-                return .dictionary([
-                    "id": .string(asset.id.uuidString),
-                    "originalFilename": .string(asset.originalFilename),
-                    "captureDate": captureDate,
-                    "rating": .int(asset.rating),
-                    "sourceType": .string(asset.sourceType.rawValue),
-                ])
+    /// List currently visible assets. Deliberately reads
+    /// `libraryViewModel.rows` rather than `catalog.fetchAssets()` so
+    /// the active rating filter, sort order, and selection bookkeeping
+    /// (all owned by the view model) are reflected in the response.
+    /// Stage 2.3's Layer C flow asserts that after `setFilter min=3`
+    /// only the rated rows come back — this is what makes that
+    /// assertion load-bearing.
+    private func handleListAssets() async -> Response {
+        let rows = await MainActor.run { libraryViewModel.rows }
+        let array: [AnyCodableValue] = rows.map { row in
+            let asset = row.asset
+            let captureDate: AnyCodableValue
+            if let date = asset.captureDate {
+                captureDate = .string(Self.iso8601.string(from: date))
+            } else {
+                captureDate = .null
             }
-            return .ok(data: .array(array))
-        } catch {
-            return .error("fetchAssets failed: \(error.localizedDescription)")
+            return .dictionary([
+                "id": .string(asset.id.uuidString),
+                "originalFilename": .string(asset.originalFilename),
+                "captureDate": captureDate,
+                "rating": .int(asset.rating),
+                "rotation": .int(asset.rotation),
+                "sourceType": .string(asset.sourceType.rawValue),
+            ])
         }
+        return .ok(data: .array(array))
     }
 
     private static let iso8601: ISO8601DateFormatter = {

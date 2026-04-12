@@ -21,6 +21,19 @@ public struct ImportSession: Identifiable, Codable, Sendable {
         self.sourceDevice = sourceDevice
         self.notes = notes
     }
+
+    /// Human-readable label: `"{device} — {date}"` or `"Folder — {date}"`.
+    public func displayName() -> String {
+        let device = sourceDevice ?? "Folder"
+        let dateString = Self.displayDateFormatter.string(from: startedAt)
+        return "\(device) — \(dateString)"
+    }
+
+    private static let displayDateFormatter: DateFormatter = {
+        let f = DateFormatter()
+        f.dateFormat = "d MMM yyyy"
+        return f
+    }()
 }
 
 extension ImportSession: FetchableRecord, PersistableRecord {

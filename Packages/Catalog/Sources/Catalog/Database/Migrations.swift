@@ -53,5 +53,17 @@ enum CatalogMigrations {
                 t.uniqueKey(["assetId", "version"])
             }
         }
+
+        migrator.registerMigration("003-addImportSessionIdToAssets") { db in
+            try db.alter(table: "assets") { t in
+                t.add(column: "importSessionId", .text)
+                    .references("import_sessions")
+            }
+            try db.create(
+                index: "assets_on_importSessionId",
+                on: "assets",
+                columns: ["importSessionId"]
+            )
+        }
     }
 }

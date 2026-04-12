@@ -328,6 +328,120 @@ final class LibraryViewModelTests: XCTestCase {
         XCTAssertEqual(vm.rows.first?.asset.rating, 0)
     }
 
+    // MARK: - Import session scope
+
+    @MainActor
+    func testSetScopeFiltersRows() async throws {
+        let catalog = try CatalogDatabase.inMemory()
+        let s1 = ImportSession(sourceKind: "folder")
+        let s2 = ImportSession(sourceKind: "folder")
+        try catalog.insertImportSession(s1)
+        try catalog.insertImportSession(s2)
+
+        var a1 = TestFixtures.makeAsset(hash: "scope1")
+        a1.importSessionId = s1.id
+        var a2 = TestFixtures.makeAsset(hash: "scope2")
+        a2.importSessionId = s1.id
+        var a3 = TestFixtures.makeAsset(hash: "scope3")
+        a3.importSessionId = s2.id
+        try catalog.insertAsset(a1)
+        try catalog.insertAsset(a2)
+        try catalog.insertAsset(a3)
+
+        let store = PreviewStore(cacheDirectory: tempCacheDir)
+        let vm = LibraryViewModel(catalog: catalog, previewStore: store)
+        await vm.reloadAndWait()
+        XCTAssertEqual(vm.rows.count, 3)
+
+        await vm.setScope(s1.id)
+        XCTAssertEqual(vm.rows.count, 2)
+        XCTAssertTrue(vm.rows.allSatisfy { $0.asset.importSessionId == s1.id })
+    }
+
+    @MainActor
+    func testSetScopeNilShowsAll() async throws {
+        let catalog = try CatalogDatabase.inMemory()
+        let s1 = ImportSession(sourceKind: "folder")
+        try catalog.insertImportSession(s1)
+
+        var a1 = TestFixtures.makeAsset(hash: "allscope1")
+        a1.importSessionId = s1.id
+        var a2 = TestFixtures.makeAsset(hash: "allscope2")
+        // a2 has no session (pre-existing asset)
+        try catalog.insertAsset(a1)
+        try catalog.insertAsset(a2)
+
+        let store = PreviewStore(cacheDirectory: tempCacheDir)
+        let vm = LibraryViewModel(catalog: catalog, previewStore: store)
+
+        await vm.setScope(s1.id)
+        XCTAssertEqual(vm.rows.count, 1)
+
+        await vm.setScope(nil)
+        XCTAssertEqual(vm.rows.count, 2)
+    }
+
+    @MainActor
+    func testArrowNavigationRespectsScope() async throws {
+        let catalog = try CatalogDatabase.inMemory()
+        let s1 = ImportSession(sourceKind: "folder")
+        try catalog.insertImportSession(s1)
+
+        var a1 = TestFixtures.makeAsset(
+            hash: "nav-s1",
+            captureDate: Date(timeIntervalSince1970: 3_000_000)
+        )
+        a1.importSessionId = s1.id
+        var a2 = TestFixtures.makeAsset(
+            hash: "nav-s2",
+            captureDate: Date(timeIntervalSince1970: 2_000_000)
+        )
+        a2.importSessionId = s1.id
+        var a3 = TestFixtures.makeAsset(
+            hash: "nav-other",
+            captureDate: Date(timeIntervalSince1970: 1_000_000)
+        )
+        // a3 in a different session — should not appear when scoped to s1
+        try catalog.insertAsset(a1)
+        try catalog.insertAsset(a2)
+        try catalog.insertAsset(a3)
+
+        let store = PreviewStore(cacheDirectory: tempCacheDir)
+        let vm = LibraryViewModel(catalog: catalog, previewStore: store)
+        await vm.setScope(s1.id)
+        // Rows: [a1, a2] (newest first)
+        XCTAssertEqual(vm.rows.count, 2)
+
+        vm.select(a1.id)
+        vm.selectNext()
+        XCTAssertEqual(vm.selectedAssetId, a2.id)
+        vm.selectNext()
+        // At end of scoped rows — no-op
+        XCTAssertEqual(vm.selectedAssetId, a2.id)
+    }
+
+    @MainActor
+    func testRecentSessionsPopulatedOnReload() async throws {
+        let catalog = try CatalogDatabase.inMemory()
+        let s1 = ImportSession(sourceKind: "folder", sourceDevice: "Camera A")
+        let s2 = ImportSession(sourceKind: "folder", sourceDevice: "Camera B")
+        try catalog.insertImportSession(s1)
+        try catalog.insertImportSession(s2)
+
+        var a1 = TestFixtures.makeAsset(hash: "rs1")
+        a1.importSessionId = s1.id
+        var a2 = TestFixtures.makeAsset(hash: "rs2")
+        a2.importSessionId = s2.id
+        try catalog.insertAsset(a1)
+        try catalog.insertAsset(a2)
+
+        let store = PreviewStore(cacheDirectory: tempCacheDir)
+        let vm = LibraryViewModel(catalog: catalog, previewStore: store)
+        await vm.reloadAndWait()
+
+        XCTAssertEqual(vm.recentSessions.count, 2)
+    }
+
     // MARK: - Rotation
 
     /// Cycles the rotation value four times and asserts it lands on

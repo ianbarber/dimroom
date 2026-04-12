@@ -23,6 +23,8 @@ struct DimroomCLI: ParsableCommand {
             PasteEdit.self,
             SetEdit.self,
             GetEdit.self,
+            SetScope.self,
+            ListImportSessions.self,
         ]
     )
 }
@@ -301,6 +303,46 @@ extension DimroomCLI {
                 throw ValidationError("Invalid UUID '\(id)'.")
             }
             try runCommand(.getEdit(assetId: uuid), socket: socket)
+        }
+    }
+
+    struct SetScope: ParsableCommand {
+        static let configuration = CommandConfiguration(
+            commandName: "set-scope",
+            abstract: "Scope the library to an import session (omit id for All Photos)."
+        )
+
+        @Argument(help: "The UUID of the import session, or omit for All Photos.")
+        var id: String?
+
+        @Option(name: .long, help: "Path to the harness socket.")
+        var socket: String = HarnessServer.defaultSocketPath
+
+        func run() throws {
+            let sessionId: UUID?
+            if let id {
+                guard let uuid = UUID(uuidString: id) else {
+                    throw ValidationError("Invalid UUID '\(id)'.")
+                }
+                sessionId = uuid
+            } else {
+                sessionId = nil
+            }
+            try runCommand(.setScope(importSessionId: sessionId), socket: socket)
+        }
+    }
+
+    struct ListImportSessions: ParsableCommand {
+        static let configuration = CommandConfiguration(
+            commandName: "list-import-sessions",
+            abstract: "List recent import sessions with display names and asset counts."
+        )
+
+        @Option(name: .long, help: "Path to the harness socket.")
+        var socket: String = HarnessServer.defaultSocketPath
+
+        func run() throws {
+            try runCommand(.listImportSessions, socket: socket)
         }
     }
 }

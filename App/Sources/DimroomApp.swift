@@ -184,7 +184,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
                 alert.alertStyle = .critical
                 alert.runModal()
             case .done:
-                libraryViewModel.reload()
+                Task {
+                    await libraryViewModel.setScope(importCoordinator.lastImportSessionId)
+                }
             default:
                 break
             }

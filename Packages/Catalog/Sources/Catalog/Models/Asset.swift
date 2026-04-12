@@ -18,6 +18,7 @@ public struct Asset: Identifiable, Codable, Sendable {
     public var localPath: String?
     public var bytes: Int64
     public var deletedAt: Date?
+    public var importSessionId: UUID?
 
     public enum SourceType: String, Codable, Sendable, DatabaseValueConvertible {
         case digital
@@ -40,7 +41,8 @@ public struct Asset: Identifiable, Codable, Sendable {
         driveFileId: String? = nil,
         localPath: String? = nil,
         bytes: Int64,
-        deletedAt: Date? = nil
+        deletedAt: Date? = nil,
+        importSessionId: UUID? = nil
     ) {
         self.id = id
         self.contentHash = contentHash
@@ -58,6 +60,7 @@ public struct Asset: Identifiable, Codable, Sendable {
         self.localPath = localPath
         self.bytes = bytes
         self.deletedAt = deletedAt
+        self.importSessionId = importSessionId
     }
 }
 

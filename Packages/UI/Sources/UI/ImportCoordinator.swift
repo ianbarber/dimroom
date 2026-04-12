@@ -37,6 +37,9 @@ public final class ImportCoordinator: ObservableObject {
     @Published public private(set) var phase: Phase = .idle
     @Published public private(set) var currentItem: Int = 0
     @Published public private(set) var totalItems: Int = 0
+    /// Session ID from the most recently completed import, used by the
+    /// app layer to auto-scope the Library to the new batch.
+    @Published public private(set) var lastImportSessionId: UUID?
 
     public init() {}
 
@@ -98,6 +101,7 @@ public final class ImportCoordinator: ObservableObject {
             currentItem += 1
         }
 
+        lastImportSessionId = result.sessionId
         phase = .done
     }
 

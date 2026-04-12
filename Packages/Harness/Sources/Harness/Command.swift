@@ -18,6 +18,8 @@ public enum Command: Codable, Sendable, Equatable {
     case pasteEdit(assetId: UUID, includeCrop: Bool)
     case setEdit(assetId: UUID, stateJSON: String)
     case getEdit(assetId: UUID)
+    case setScope(importSessionId: UUID?)
+    case listImportSessions
 
     private enum CodingKeys: String, CodingKey {
         case type
@@ -30,6 +32,7 @@ public enum Command: Codable, Sendable, Equatable {
         case minRating
         case includeCrop
         case stateJSON
+        case importSessionId
     }
 
     private enum CommandType: String, Codable {
@@ -48,6 +51,8 @@ public enum Command: Codable, Sendable, Equatable {
         case pasteEdit
         case setEdit
         case getEdit
+        case setScope
+        case listImportSessions
     }
 
     public init(from decoder: Decoder) throws {
@@ -99,6 +104,11 @@ public enum Command: Codable, Sendable, Equatable {
         case .getEdit:
             let assetId = try container.decode(UUID.self, forKey: .assetId)
             self = .getEdit(assetId: assetId)
+        case .setScope:
+            let sessionId = try container.decodeIfPresent(UUID.self, forKey: .importSessionId)
+            self = .setScope(importSessionId: sessionId)
+        case .listImportSessions:
+            self = .listImportSessions
         }
     }
 
@@ -150,6 +160,11 @@ public enum Command: Codable, Sendable, Equatable {
         case .getEdit(let assetId):
             try container.encode(CommandType.getEdit, forKey: .type)
             try container.encode(assetId, forKey: .assetId)
+        case .setScope(let sessionId):
+            try container.encode(CommandType.setScope, forKey: .type)
+            try container.encodeIfPresent(sessionId, forKey: .importSessionId)
+        case .listImportSessions:
+            try container.encode(CommandType.listImportSessions, forKey: .type)
         }
     }
 }

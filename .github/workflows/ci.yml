@@ -1,9 +1,23 @@
 name: CI
 
+# -------------------------------------------------------------------
+# CI is DISABLED to avoid expensive macOS runner minutes.
+#
+# All verification (swift test, snapshot tests, harness smoke flows)
+# runs locally as part of the agent loop's IMPLEMENT stage — see
+# .claude/prompts/implement.md steps 6–7.
+#
+# To re-enable, uncomment the `on:` block below and delete the
+# `on: workflow_dispatch` line.
+# -------------------------------------------------------------------
+
 on:
-  pull_request:
-  push:
-    branches: [main]
+  workflow_dispatch:  # manual-only — no automatic triggers
+
+# on:
+#   pull_request:
+#   push:
+#     branches: [main]
 
 concurrency:
   group: ci-${{ github.ref }}

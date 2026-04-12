@@ -49,4 +49,14 @@ final class RendererSnapshotTests: XCTestCase {
         let image = renderToNSImage(source: source, editState: EditState(clarity: -60))
         assertSnapshot(of: image, as: .image(precision: 0.99, perceptualPrecision: 0.98))
     }
+
+    func testCroppedWithRotationSnapshot() {
+        let source = makeGradientImage()
+        let cropRect = CGRect(x: 8, y: 8, width: 48, height: 48)
+        let image = renderToNSImage(
+            source: source,
+            editState: EditState(cropRect: cropRect, cropAngle: 5)
+        )
+        assertSnapshot(of: image, as: .image(precision: 0.99, perceptualPrecision: 0.98))
+    }
 }

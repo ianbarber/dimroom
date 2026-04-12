@@ -7,22 +7,47 @@ struct ContentView: View {
     @ObservedObject var libraryViewModel: LibraryViewModel
     @ObservedObject var importCoordinator: ImportCoordinator
 
-    var body: some View {
-        Group {
-            switch router.route {
-            case .library:
-                LibraryView(viewModel: libraryViewModel)
-            case .loupe:
-                LoupeView(viewModel: libraryViewModel)
-            case .develop:
-                placeholder("Develop")
-            }
+    private var currentMode: NavigationMode {
+        switch router.route {
+        case .library: .library
+        case .loupe: .loupe
+        case .develop: .develop
         }
-        .frame(maxWidth: .infinity, maxHeight: .infinity)
+    }
+
+    var body: some View {
+        VStack(spacing: 0) {
+            NavigationBar(
+                currentMode: currentMode,
+                onBack: { router.goBack() },
+                onNavigate: { mode in
+                    switch mode {
+                    case .library: router.route = .library
+                    case .loupe: router.route = .loupe
+                    case .develop: router.route = .develop
+                    }
+                }
+            )
+
+            Group {
+                switch router.route {
+                case .library:
+                    LibraryView(viewModel: libraryViewModel)
+                case .loupe:
+                    LoupeView(viewModel: libraryViewModel)
+                case .develop:
+                    placeholder("Develop")
+                }
+            }
+            .frame(maxWidth: .infinity, maxHeight: .infinity)
+        }
         .overlay {
             if importCoordinator.isActive {
                 ImportProgressView(coordinator: importCoordinator)
             }
+        }
+        .overlay {
+            RatingToastView(toast: $libraryViewModel.ratingToast)
         }
         // Mode switch keys, Lightroom-style: G → Library, E → Loupe,
         // D → Develop. Attached at the root so they fire regardless of
@@ -39,6 +64,24 @@ struct ContentView: View {
         }
         .onKeyPress(.init("d")) {
             router.route = .develop
+            return .handled
+        }
+        .onKeyPress(.escape) {
+            router.goBack()
+            return .handled
+        }
+        .onKeyPress(.init("]"), modifiers: .command) {
+            guard let assetId = libraryViewModel.selectedAssetId else {
+                return .ignored
+            }
+            Task { await libraryViewModel.rotate(assetId: assetId, clockwise: true) }
+            return .handled
+        }
+        .onKeyPress(.init("["), modifiers: .command) {
+            guard let assetId = libraryViewModel.selectedAssetId else {
+                return .ignored
+            }
+            Task { await libraryViewModel.rotate(assetId: assetId, clockwise: false) }
             return .handled
         }
     }

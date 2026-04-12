@@ -90,8 +90,13 @@ final class HarnessController: @unchecked Sendable {
             await libraryViewModel.setRating(for: assetId, to: rating)
             return .ok()
 
-        case .rotate(let assetId):
-            await libraryViewModel.rotate(assetId: assetId)
+        case .rotate(let assetId, let direction):
+            let clockwise = direction != "ccw"
+            await libraryViewModel.rotate(assetId: assetId, clockwise: clockwise)
+            return .ok()
+
+        case .goBack:
+            await MainActor.run { router.goBack() }
             return .ok()
 
         case .setFilter(let minRating):

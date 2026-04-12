@@ -50,10 +50,11 @@ You are reviewing a PR for **dimroom**. You will read the diff adversarially, ru
    - Stop.
 
    **If everything looks good:**
+   - **File follow-up issues** for any non-blocking gaps, missing tests, or deferred work you noticed. Use `gh issue create` with `state:needs-plan` and appropriate area/stage labels. Common examples: a Layer C harness flow the plan promised but the PR omitted, a TODO without an issue link, a non-blocking code suggestion that would be a separate PR. Don't just mention them in a comment — actually create the issue so the work is tracked and the loop picks it up.
    - Post a top-level approval comment summarising:
      - What the PR does
      - What you verified (CI green, tests run locally, harness flow X passed, screenshots checked)
-     - Any non-blocking suggestions or follow-ups (file as separate issues, link them)
+     - Follow-up issues filed (link them)
    - Use `gh pr review --comment -F <path>` (NOT `--approve` — only the human approves).
    - Set issue label to `state:ready-to-merge` (remove `state:in-review`).
    - Mention `@ianbarber` in a comment so the human gets notified.

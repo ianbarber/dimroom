@@ -69,6 +69,12 @@ if ! echo "$STATE_OUT" | grep -q '"ok"'; then
     echo "ERROR: state command did not return ok"
     exit 1
 fi
+# The library view-model fields must always be present on the state
+# response, even when the catalog is empty.
+if ! echo "$STATE_OUT" | grep -q '"assetCount"'; then
+    echo "ERROR: state response missing assetCount field"
+    exit 1
+fi
 
 echo "=== Sending 'navigate develop' command ==="
 NAV_OUT=$("$CLI_BIN" navigate develop --socket "$SOCKET" 2>&1)

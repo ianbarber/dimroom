@@ -156,6 +156,48 @@ final class CommandCodingTests: XCTestCase {
         XCTAssertEqual(state, decoded)
     }
 
+    func testAppStateRoundTripWithAssetFields() throws {
+        let id = UUID(uuidString: "12345678-1234-1234-1234-123456789012")!
+        let state = AppState(
+            route: .library,
+            assetCount: 42,
+            selectedAssetId: id
+        )
+        let data = try encoder.encode(state)
+        let decoded = try decoder.decode(AppState.self, from: data)
+        XCTAssertEqual(state, decoded)
+        XCTAssertEqual(decoded.assetCount, 42)
+        XCTAssertEqual(decoded.selectedAssetId, id)
+    }
+
+    func testAppStateJSONShape() throws {
+        let id = UUID(uuidString: "12345678-1234-1234-1234-123456789012")!
+        let state = AppState(
+            route: .library,
+            assetCount: 3,
+            selectedAssetId: id
+        )
+        let data = try encoder.encode(state)
+        let json = String(data: data, encoding: .utf8)!
+        XCTAssertEqual(
+            json,
+            #"{"assetCount":3,"route":"library","selectedAssetId":"12345678-1234-1234-1234-123456789012"}"#
+        )
+    }
+
+    func testAppStateJSONShapeWithoutSelection() throws {
+        // Swift's default JSONEncoder omits nil optionals rather than
+        // emitting them as `null`. Pin that shape so the harness wire
+        // format is explicit about what consumers will see.
+        let state = AppState(route: .library, assetCount: 0, selectedAssetId: nil)
+        let data = try encoder.encode(state)
+        let json = String(data: data, encoding: .utf8)!
+        XCTAssertEqual(
+            json,
+            #"{"assetCount":0,"route":"library"}"#
+        )
+    }
+
     // MARK: - Route
 
     func testRouteAllCases() {

@@ -1,6 +1,8 @@
 import Catalog
 import Harness
+import Previews
 import SwiftUI
+import UI
 
 @main
 struct DimroomApp: App {
@@ -8,13 +10,24 @@ struct DimroomApp: App {
 
     var body: some Scene {
         WindowGroup {
-            ContentView(router: appDelegate.router)
+            ContentView(
+                router: appDelegate.router,
+                libraryViewModel: appDelegate.libraryViewModel
+            )
         }
     }
 }
 
+@MainActor
 final class AppDelegate: NSObject, NSApplicationDelegate {
     let router = AppRouter()
+    /// View model shared between the SwiftUI tree and the harness
+    /// controller. Initialised eagerly with an in-memory empty catalog so
+    /// the `@main App` scene can read it before `applicationDidFinishLaunching`
+    /// runs, then replaced in `applicationDidFinishLaunching` once the
+    /// CLI flags are parsed and the real catalog + preview store are
+    /// available.
+    private(set) var libraryViewModel: LibraryViewModel = LibraryViewModel.empty()
     private var harnessController: HarnessController?
     private var harnessWindow: NSWindow?
 
@@ -25,16 +38,38 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         NSApplication.shared.setActivationPolicy(.regular)
         NSApplication.shared.activate(ignoringOtherApps: true)
 
+        let catalog = loadCatalogIfRequested(from: args)
+        let originalsDirectory = resolveOriginalsDirectory()
+        let previewCacheDirectory = resolvePreviewCacheDirectory(from: args)
+        let previewStore = PreviewStore(cacheDirectory: previewCacheDirectory)
+
+        // Replace the placeholder view model with one backed by the real
+        // catalog when one is available. If there's no catalog, the
+        // placeholder stays — the empty-state grid renders cleanly and
+        // the harness `state` command still returns assetCount=0.
+        if let catalog {
+            libraryViewModel = LibraryViewModel(
+                catalog: catalog,
+                previewStore: previewStore
+            )
+            libraryViewModel.reload()
+        }
+
         // Create a window explicitly for harness mode so screenshots work
         // even when running as a bare SPM executable without an app bundle.
         if NSApplication.shared.windows.isEmpty {
             let window = NSWindow(
-                contentRect: NSRect(x: 0, y: 0, width: 800, height: 600),
+                contentRect: NSRect(x: 0, y: 0, width: 1024, height: 768),
                 styleMask: [.titled, .closable, .resizable],
                 backing: .buffered,
                 defer: false
             )
-            window.contentView = NSHostingView(rootView: ContentView(router: router))
+            window.contentView = NSHostingView(
+                rootView: ContentView(
+                    router: router,
+                    libraryViewModel: libraryViewModel
+                )
+            )
             window.title = "Dimroom"
             window.center()
             window.makeKeyAndOrderFront(nil)
@@ -44,13 +79,11 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         let socketPath = ProcessInfo.processInfo.environment["DIMROOM_HARNESS_SOCKET"]
             ?? HarnessServer.defaultSocketPath
 
-        let catalog = loadCatalogIfRequested(from: args)
-        let originalsDirectory = resolveOriginalsDirectory()
-
         let controller = HarnessController(
             router: router,
             catalog: catalog,
-            originalsDirectory: originalsDirectory
+            originalsDirectory: originalsDirectory,
+            libraryViewModel: libraryViewModel
         )
         do {
             try controller.start(socketPath: socketPath)
@@ -58,6 +91,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             print("[Dimroom] Harness mode active — listening on \(socketPath)")
             if catalog != nil {
                 print("[Dimroom] Catalog loaded; originals dir = \(originalsDirectory.path)")
+                print("[Dimroom] Preview cache dir = \(previewCacheDirectory.path)")
             } else {
                 print("[Dimroom] No --fixture-catalog provided; catalog-dependent commands will fail")
             }
@@ -85,6 +119,24 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         }
     }
 
+    /// Parses `--preview-cache <path>` out of the argument vector. Falls
+    /// back to a Dimroom-specific subdirectory of Application Support so
+    /// running the app without harness flags still works the same as
+    /// before.
+    private func resolvePreviewCacheDirectory(from args: [String]) -> URL {
+        if let index = args.firstIndex(of: "--preview-cache"),
+           index + 1 < args.count {
+            return URL(fileURLWithPath: args[index + 1])
+        }
+        let appSupport = FileManager.default.urls(
+            for: .applicationSupportDirectory,
+            in: .userDomainMask
+        ).first ?? FileManager.default.temporaryDirectory
+        return appSupport
+            .appendingPathComponent("Dimroom", isDirectory: true)
+            .appendingPathComponent("previews", isDirectory: true)
+    }
+
     /// Resolves the staging directory for copied originals. The harness flow
     /// overrides the default via `DIMROOM_ORIGINALS_DIR` so tests do not leak
     /// files into the user's Application Support.
@@ -101,5 +153,23 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         return appSupport
             .appendingPathComponent("Dimroom", isDirectory: true)
             .appendingPathComponent("originals", isDirectory: true)
+    }
+}
+
+// A LibraryViewModel needs a catalog to be useful, but the `@main`
+// `App` struct initialises its delegate property before we've parsed any
+// flags. We fall back to an in-memory empty catalog for that early-init
+// window; `applicationDidFinishLaunching` replaces it with the real one
+// once flags are known.
+private extension LibraryViewModel {
+    static func empty() -> LibraryViewModel {
+        let catalog: CatalogDatabase
+        do {
+            catalog = try CatalogDatabase.inMemory()
+        } catch {
+            fatalError("in-memory catalog init failed: \(error)")
+        }
+        let store = PreviewStore(cacheDirectory: FileManager.default.temporaryDirectory)
+        return LibraryViewModel(catalog: catalog, previewStore: store)
     }
 }

@@ -1,0 +1,136 @@
+#!/usr/bin/env bash
+# harness-library-flow.sh — Layer C flow for the library grid.
+#
+# Seeds a throwaway catalog from fixtures/library-seed/ with the
+# dimroom-fixture binary, launches the app in harness mode, navigates to
+# the library route, takes a screenshot and asserts that the app's
+# `state` response reports assetCount > 0.
+#
+# Assumes the capture-screenshots skill already built the app, CLI, and
+# fixture seeder — this script must not rebuild. SCREENSHOT_DIR is set by
+# the capture skill per-flow.
+set -euo pipefail
+
+REPO_ROOT="$(cd "$(dirname "$0")/.." && pwd)"
+SCREENSHOT_DIR="${SCREENSHOT_DIR:-$REPO_ROOT/.artifacts/library}"
+SEED_SRC="$REPO_ROOT/fixtures/library-seed"
+WORK_DIR="$REPO_ROOT/.artifacts/harness-library"
+CATALOG_PATH="$WORK_DIR/catalog.sqlite"
+PREVIEW_CACHE="$WORK_DIR/previews"
+SOCKET="/tmp/dimroom-harness-library-$$.sock"
+APP_PID=""
+
+cleanup() {
+    if [ -n "$APP_PID" ] && kill -0 "$APP_PID" 2>/dev/null; then
+        kill "$APP_PID" 2>/dev/null || true
+        wait "$APP_PID" 2>/dev/null || true
+    fi
+    rm -f "$SOCKET"
+}
+trap cleanup EXIT
+
+APP_BIN="$REPO_ROOT/App/.build/debug/Dimroom"
+CLI_BIN="$REPO_ROOT/Packages/Harness/.build/debug/dimroom-cli"
+FIXTURE_BIN="$REPO_ROOT/Packages/Harness/.build/debug/dimroom-fixture"
+
+for bin in "$APP_BIN" "$CLI_BIN" "$FIXTURE_BIN"; do
+    if [ ! -x "$bin" ]; then
+        echo "ERROR: missing binary $bin — capture-screenshots skill should have built it"
+        exit 1
+    fi
+done
+
+echo "=== Seeding catalog from $SEED_SRC ==="
+rm -rf "$WORK_DIR"
+mkdir -p "$WORK_DIR"
+"$FIXTURE_BIN" seed \
+    --catalog "$CATALOG_PATH" \
+    --cache "$PREVIEW_CACHE" \
+    --seed-dir "$SEED_SRC"
+
+if [ ! -f "$CATALOG_PATH" ]; then
+    echo "ERROR: dimroom-fixture did not produce $CATALOG_PATH"
+    exit 1
+fi
+
+echo "=== Launching app in harness mode ==="
+DIMROOM_HARNESS_SOCKET="$SOCKET" \
+    "$APP_BIN" --harness \
+    --fixture-catalog "$CATALOG_PATH" \
+    --preview-cache "$PREVIEW_CACHE" &
+APP_PID=$!
+
+echo "=== Waiting for socket ==="
+for i in $(seq 1 30); do
+    if [ -e "$SOCKET" ]; then
+        echo "Socket ready after ${i}s"
+        break
+    fi
+    if ! kill -0 "$APP_PID" 2>/dev/null; then
+        echo "ERROR: App exited before socket was ready"
+        exit 1
+    fi
+    sleep 1
+done
+if [ ! -e "$SOCKET" ]; then
+    echo "ERROR: Socket not ready after 30s"
+    exit 1
+fi
+
+echo "=== navigate library ==="
+NAV_OUT=$("$CLI_BIN" navigate library --socket "$SOCKET")
+echo "$NAV_OUT"
+if ! echo "$NAV_OUT" | grep -q '"ok"'; then
+    echo "ERROR: navigate library did not return ok"
+    exit 1
+fi
+
+# Small paint delay — SwiftUI needs a tick after the route change
+# before the grid is actually drawn.
+sleep 1
+
+echo "=== screenshot ==="
+mkdir -p "$SCREENSHOT_DIR"
+SHOT_PATH="$SCREENSHOT_DIR/library-populated.png"
+SHOT_OUT=$("$CLI_BIN" screenshot "$SHOT_PATH" --socket "$SOCKET")
+echo "$SHOT_OUT"
+if ! echo "$SHOT_OUT" | grep -q '"ok"'; then
+    echo "ERROR: screenshot command did not return ok"
+    exit 1
+fi
+if [ ! -f "$SHOT_PATH" ]; then
+    echo "ERROR: screenshot file not created at $SHOT_PATH"
+    exit 1
+fi
+FILE_TYPE=$(file -b "$SHOT_PATH")
+if ! echo "$FILE_TYPE" | grep -qi "png"; then
+    echo "ERROR: screenshot is not a valid PNG: $FILE_TYPE"
+    exit 1
+fi
+echo "Screenshot verified: $FILE_TYPE"
+
+echo "=== state — assert assetCount > 0 ==="
+STATE_OUT=$("$CLI_BIN" state --socket "$SOCKET")
+echo "$STATE_OUT"
+ASSET_COUNT=$(printf '%s' "$STATE_OUT" | /usr/bin/python3 -c "
+import json, sys
+doc = json.loads(sys.stdin.read())
+print(doc['data']['assetCount'])
+")
+if [ -z "$ASSET_COUNT" ] || [ "$ASSET_COUNT" -le 0 ]; then
+    echo "ERROR: expected assetCount > 0, got '$ASSET_COUNT'"
+    exit 1
+fi
+echo "  OK: assetCount == $ASSET_COUNT"
+
+echo "=== quit ==="
+"$CLI_BIN" quit --socket "$SOCKET" 2>&1 || true
+
+sleep 1
+if kill -0 "$APP_PID" 2>/dev/null; then
+    echo "WARN: App did not exit after quit, killing"
+    kill "$APP_PID" 2>/dev/null || true
+fi
+APP_PID=""
+
+echo "=== Harness library flow PASSED ==="

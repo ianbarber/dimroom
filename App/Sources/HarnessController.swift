@@ -3,22 +3,26 @@ import Catalog
 import Foundation
 import Harness
 import ImportKit
+import UI
 
 /// Bridges harness commands to the app's state and AppKit operations.
 final class HarnessController: @unchecked Sendable {
     private let router: AppRouter
     private let catalog: CatalogDatabase?
     private let originalsDirectory: URL
+    private let libraryViewModel: LibraryViewModel
     private var server: HarnessServer?
 
     init(
         router: AppRouter,
         catalog: CatalogDatabase?,
-        originalsDirectory: URL
+        originalsDirectory: URL,
+        libraryViewModel: LibraryViewModel
     ) {
         self.router = router
         self.catalog = catalog
         self.originalsDirectory = originalsDirectory
+        self.libraryViewModel = libraryViewModel
     }
 
     func start(socketPath: String = HarnessServer.defaultSocketPath) throws {
@@ -44,10 +48,15 @@ final class HarnessController: @unchecked Sendable {
             return await captureScreenshot(to: path)
 
         case .state:
-            let currentRoute = await MainActor.run { router.route }
-            let state = AppState(route: currentRoute)
+            let snapshot = await MainActor.run { () -> AppState in
+                AppState(
+                    route: router.route,
+                    assetCount: libraryViewModel.rows.count,
+                    selectedAssetId: libraryViewModel.selectedAssetId
+                )
+            }
             let encoder = JSONEncoder()
-            let data = try encoder.encode(state)
+            let data = try encoder.encode(snapshot)
             let json = try JSONDecoder().decode(AnyCodableValue.self, from: data)
             return .ok(data: json)
 
@@ -80,6 +89,11 @@ final class HarnessController: @unchecked Sendable {
             originalsDirectory: originalsDirectory
         )
         let result = try await importer.importFolder(folderURL)
+        // Refresh the library grid so `state` reflects the new rows.
+        // `reloadAndWait` is required (not `reload`) because reload now
+        // runs on a background task — the subsequent `state` or `listAssets`
+        // command would race with it.
+        await libraryViewModel.reloadAndWait()
         return .ok(data: .dictionary([
             "importedCount": .int(result.importedCount),
             "skippedCount": .int(result.skippedCount),

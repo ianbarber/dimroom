@@ -40,5 +40,18 @@ enum CatalogMigrations {
                 t.primaryKey(["assetId"])
             }
         }
+
+        migrator.registerMigration("002-createEditStates") { db in
+            try db.create(table: "edit_states") { t in
+                t.column("id", .text).primaryKey()
+                t.column("assetId", .text)
+                    .notNull()
+                    .references("assets", onDelete: .cascade)
+                t.column("version", .integer).notNull()
+                t.column("state", .text).notNull()
+                t.column("createdAt", .datetime).notNull()
+                t.uniqueKey(["assetId", "version"])
+            }
+        }
     }
 }

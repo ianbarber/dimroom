@@ -59,7 +59,9 @@ final class HarnessController: @unchecked Sendable {
                 AppState(
                     route: router.route,
                     assetCount: libraryViewModel.rows.count,
-                    selectedAssetId: libraryViewModel.selectedAssetId
+                    selectedAssetId: libraryViewModel.selectedAssetId,
+                    minRating: libraryViewModel.minRating,
+                    scopeSessionId: libraryViewModel.scopeSessionId
                 )
             }
             let encoder = JSONEncoder()
@@ -114,6 +116,13 @@ final class HarnessController: @unchecked Sendable {
 
         case .getEdit(let assetId):
             return handleGetEdit(assetId: assetId)
+
+        case .setScope(let sessionId):
+            await libraryViewModel.setScope(sessionId)
+            return .ok()
+
+        case .listImportSessions:
+            return handleListImportSessions()
         }
     }
 
@@ -138,11 +147,9 @@ final class HarnessController: @unchecked Sendable {
             _ = try? await previewStore.generate(for: asset, sourceURL: sourceURL)
         }
 
-        // Refresh the library grid so `state` reflects the new rows.
-        // `reloadAndWait` is required (not `reload`) because reload now
-        // runs on a background task — the subsequent `state` or `listAssets`
-        // command would race with it.
-        await libraryViewModel.reloadAndWait()
+        // Auto-scope the library to the newly imported session and
+        // reload so `state` reflects the new rows.
+        await libraryViewModel.setScope(result.sessionId)
         return .ok(data: .dictionary([
             "importedCount": .int(result.importedCount),
             "skippedCount": .int(result.skippedCount),
@@ -176,6 +183,28 @@ final class HarnessController: @unchecked Sendable {
             return .ok(data: .array(array))
         } catch {
             return .error("fetchAssets failed: \(error.localizedDescription)")
+        }
+    }
+
+    // MARK: - Import sessions
+
+    private func handleListImportSessions() -> Response {
+        guard let catalog else {
+            return .error("catalog not loaded")
+        }
+        do {
+            let sessions = try catalog.fetchImportSessions()
+            let array: [AnyCodableValue] = sessions.map { session in
+                .dictionary([
+                    "id": .string(session.id.uuidString),
+                    "displayName": .string(session.displayName),
+                    "assetCount": .int(session.assetCount),
+                    "startedAt": .string(Self.iso8601.string(from: session.startedAt)),
+                ])
+            }
+            return .ok(data: .array(array))
+        } catch {
+            return .error("fetchImportSessions failed: \(error.localizedDescription)")
         }
     }
 

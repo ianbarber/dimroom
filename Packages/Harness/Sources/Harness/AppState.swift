@@ -14,16 +14,20 @@ public struct AppState: Codable, Sendable, Equatable {
     /// `rating >= minRating`. Harness flows check this to prove that
     /// `setFilter` actually reached the view model.
     public let minRating: Int
+    /// Active import-session scope. `nil` means "All Photos".
+    public let scopeSessionId: UUID?
 
     public init(
         route: Route,
         assetCount: Int = 0,
         selectedAssetId: UUID? = nil,
-        minRating: Int = 0
+        minRating: Int = 0,
+        scopeSessionId: UUID? = nil
     ) {
         self.route = route
         self.assetCount = assetCount
         self.selectedAssetId = selectedAssetId
         self.minRating = minRating
+        self.scopeSessionId = scopeSessionId
     }
 }

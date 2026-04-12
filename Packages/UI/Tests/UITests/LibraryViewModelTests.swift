@@ -146,6 +146,37 @@ final class LibraryViewModelTests: XCTestCase {
         )
     }
 
+    // MARK: - Configure (backing store swap)
+
+    @MainActor
+    func testConfigureSwitchesBacking() async throws {
+        // Start with an empty in-memory catalog (mimics the placeholder).
+        let emptyCatalog = try CatalogDatabase.inMemory()
+        let emptyStore = PreviewStore(cacheDirectory: tempCacheDir)
+        let vm = LibraryViewModel(catalog: emptyCatalog, previewStore: emptyStore)
+        await vm.reloadAndWait()
+        XCTAssertTrue(vm.rows.isEmpty)
+
+        // Create a second catalog with assets (mimics the real catalog).
+        let realCatalog = try CatalogDatabase.inMemory()
+        let a = TestFixtures.makeAsset(hash: "conf1")
+        let b = TestFixtures.makeAsset(hash: "conf2")
+        try realCatalog.insertAsset(a)
+        try realCatalog.insertAsset(b)
+
+        let realStore = PreviewStore(cacheDirectory: tempCacheDir)
+
+        // The reference must stay the same — SwiftUI's @ObservedObject
+        // identity depends on it.
+        let identityBefore = ObjectIdentifier(vm)
+        vm.configure(catalog: realCatalog, previewStore: realStore)
+        await vm.reloadAndWait()
+        let identityAfter = ObjectIdentifier(vm)
+
+        XCTAssertEqual(identityBefore, identityAfter)
+        XCTAssertEqual(vm.rows.count, 2)
+    }
+
     // MARK: - Selection
 
     @MainActor

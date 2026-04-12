@@ -78,4 +78,53 @@ public final class CatalogDatabase: Sendable {
             try session.insert(db)
         }
     }
+
+    // MARK: - Edit States
+
+    /// Inserts a new versioned edit state for the given asset. Returns the version number.
+    @discardableResult
+    public func saveEditState(_ state: EditState, for assetId: UUID) throws -> Int {
+        try dbQueue.write { db in
+            let maxVersion = try Int.fetchOne(
+                db,
+                sql: "SELECT MAX(version) FROM edit_states WHERE assetId = ?",
+                arguments: [assetId]
+            ) ?? 0
+            let newVersion = maxVersion + 1
+
+            let record = EditStateRecord(
+                id: UUID(),
+                assetId: assetId,
+                version: newVersion,
+                state: try EditStateRecord.encode(state),
+                createdAt: Date()
+            )
+            try record.insert(db)
+            return newVersion
+        }
+    }
+
+    /// Returns the most recent edit state for the given asset, or nil if no edits exist.
+    public func latestEditState(for assetId: UUID) throws -> EditState? {
+        try dbQueue.read { db in
+            let record = try EditStateRecord
+                .filter(Column("assetId") == assetId)
+                .order(Column("version").desc)
+                .fetchOne(db)
+            return try record?.decodeState()
+        }
+    }
+
+    /// Returns all edit state versions for the given asset, ordered newest-first.
+    public func editHistory(for assetId: UUID) throws -> [(version: Int, state: EditState, createdAt: Date)] {
+        try dbQueue.read { db in
+            let records = try EditStateRecord
+                .filter(Column("assetId") == assetId)
+                .order(Column("version").desc)
+                .fetchAll(db)
+            return try records.map { record in
+                (version: record.version, state: try record.decodeState(), createdAt: record.createdAt)
+            }
+        }
+    }
 }

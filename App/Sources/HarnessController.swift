@@ -13,6 +13,7 @@ final class HarnessController: @unchecked Sendable {
     private let originalsDirectory: URL
     private let previewStore: PreviewStore
     private let libraryViewModel: LibraryViewModel
+    private let editClipboard: EditClipboard
     private var server: HarnessServer?
 
     init(
@@ -20,13 +21,15 @@ final class HarnessController: @unchecked Sendable {
         catalog: CatalogDatabase?,
         originalsDirectory: URL,
         previewStore: PreviewStore,
-        libraryViewModel: LibraryViewModel
+        libraryViewModel: LibraryViewModel,
+        editClipboard: EditClipboard
     ) {
         self.router = router
         self.catalog = catalog
         self.originalsDirectory = originalsDirectory
         self.previewStore = previewStore
         self.libraryViewModel = libraryViewModel
+        self.editClipboard = editClipboard
     }
 
     func start(socketPath: String = HarnessServer.defaultSocketPath) throws {
@@ -94,6 +97,18 @@ final class HarnessController: @unchecked Sendable {
         case .setFilter(let minRating):
             await libraryViewModel.setMinRating(minRating)
             return .ok()
+
+        case .copyEdit(let assetId):
+            return handleCopyEdit(assetId: assetId)
+
+        case .pasteEdit(let assetId, let includeCrop):
+            return handlePasteEdit(assetId: assetId, includeCrop: includeCrop)
+
+        case .setEdit(let assetId, let stateJSON):
+            return handleSetEdit(assetId: assetId, stateJSON: stateJSON)
+
+        case .getEdit(let assetId):
+            return handleGetEdit(assetId: assetId)
         }
     }
 
@@ -156,6 +171,71 @@ final class HarnessController: @unchecked Sendable {
             return .ok(data: .array(array))
         } catch {
             return .error("fetchAssets failed: \(error.localizedDescription)")
+        }
+    }
+
+    // MARK: - Edit clipboard
+
+    private func handleCopyEdit(assetId: UUID) -> Response {
+        guard let catalog else {
+            return .error("catalog not loaded")
+        }
+        do {
+            let state = try catalog.latestEditState(for: assetId) ?? EditState()
+            editClipboard.copy(state, from: assetId)
+            return .ok()
+        } catch {
+            return .error("copyEdit failed: \(error.localizedDescription)")
+        }
+    }
+
+    private func handlePasteEdit(assetId: UUID, includeCrop: Bool) -> Response {
+        guard let catalog else {
+            return .error("catalog not loaded")
+        }
+        let state: EditState?
+        if includeCrop {
+            state = editClipboard.pasteIncludingCrop()
+        } else {
+            state = editClipboard.pasteExcludingCrop()
+        }
+        guard let state else {
+            return .ok(data: .dictionary(["pasted": .bool(false)]))
+        }
+        do {
+            _ = try catalog.saveEditState(state, for: assetId)
+            return .ok(data: .dictionary(["pasted": .bool(true)]))
+        } catch {
+            return .error("pasteEdit failed: \(error.localizedDescription)")
+        }
+    }
+
+    private func handleSetEdit(assetId: UUID, stateJSON: String) -> Response {
+        guard let catalog else {
+            return .error("catalog not loaded")
+        }
+        do {
+            let state = try JSONDecoder().decode(EditState.self, from: Data(stateJSON.utf8))
+            _ = try catalog.saveEditState(state, for: assetId)
+            return .ok()
+        } catch {
+            return .error("setEdit failed: \(error.localizedDescription)")
+        }
+    }
+
+    private func handleGetEdit(assetId: UUID) -> Response {
+        guard let catalog else {
+            return .error("catalog not loaded")
+        }
+        do {
+            guard let state = try catalog.latestEditState(for: assetId) else {
+                return .ok(data: .null)
+            }
+            let data = try JSONEncoder().encode(state)
+            let json = try JSONDecoder().decode(AnyCodableValue.self, from: data)
+            return .ok(data: json)
+        } catch {
+            return .error("getEdit failed: \(error.localizedDescription)")
         }
     }
 

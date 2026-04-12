@@ -49,10 +49,16 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     func applicationDidFinishLaunching(_ notification: Notification) {
         let args = ProcessInfo.processInfo.arguments
 
+        // Always claim regular activation policy so the app gets a Dock
+        // icon, its own menu bar, and can become frontmost. Without this,
+        // bare SPM executables run as accessory processes.
+        NSApplication.shared.setActivationPolicy(.regular)
+        NSApplication.shared.activate(ignoringOtherApps: true)
+
         let resolvedOriginalsDirectory = resolveOriginalsDirectory()
         let previewCacheDirectory = resolvePreviewCacheDirectory(from: args)
         let resolvedPreviewStore = PreviewStore(cacheDirectory: previewCacheDirectory)
-        let resolvedCatalog = loadCatalogIfRequested(from: args)
+        let resolvedCatalog = loadCatalog(from: args)
 
         self.catalog = resolvedCatalog
         self.previewStore = resolvedPreviewStore
@@ -71,9 +77,6 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         }
 
         guard args.contains("--harness") else { return }
-
-        NSApplication.shared.setActivationPolicy(.regular)
-        NSApplication.shared.activate(ignoringOtherApps: true)
 
         // Create a window explicitly for harness mode so screenshots work
         // even when running as a bare SPM executable without an app bundle.
@@ -169,21 +172,32 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         }
     }
 
-    /// Parses `--fixture-catalog <path>` out of the argument vector and opens
-    /// the SQLite file at that path as a `CatalogDatabase`. Returns nil when
-    /// the flag is absent or the open fails — the harness surface downgrades
-    /// gracefully rather than refusing to launch.
-    private func loadCatalogIfRequested(from args: [String]) -> CatalogDatabase? {
-        guard let index = args.firstIndex(of: "--fixture-catalog"),
-              index + 1 < args.count
-        else {
-            return nil
+    /// Opens the catalog database. Uses `--fixture-catalog <path>` when
+    /// present (harness / test mode); otherwise falls back to the default
+    /// user catalog at ~/Library/Application Support/Dimroom/catalog.sqlite.
+    private func loadCatalog(from args: [String]) -> CatalogDatabase? {
+        let path: String
+        if let index = args.firstIndex(of: "--fixture-catalog"),
+           index + 1 < args.count {
+            path = args[index + 1]
+        } else {
+            let appSupport = FileManager.default.urls(
+                for: .applicationSupportDirectory,
+                in: .userDomainMask
+            ).first ?? FileManager.default.temporaryDirectory
+            let catalogDir = appSupport.appendingPathComponent("Dimroom", isDirectory: true)
+            do {
+                try FileManager.default.createDirectory(at: catalogDir, withIntermediateDirectories: true)
+            } catch {
+                print("[Dimroom] Failed to create catalog directory: \(error)")
+                return nil
+            }
+            path = catalogDir.appendingPathComponent("catalog.sqlite").path
         }
-        let path = args[index + 1]
         do {
             return try CatalogDatabase(path: path)
         } catch {
-            print("[Dimroom] Failed to open fixture catalog at \(path): \(error)")
+            print("[Dimroom] Failed to open catalog at \(path): \(error)")
             return nil
         }
     }

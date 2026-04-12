@@ -11,7 +11,8 @@ public enum Command: Codable, Sendable, Equatable {
     case listAssets
     case selectAsset(id: UUID)
     case setRating(assetId: UUID, rating: Int)
-    case rotate(assetId: UUID)
+    case rotate(assetId: UUID, direction: String)
+    case goBack
     case setFilter(minRating: Int)
     case copyEdit(assetId: UUID)
     case pasteEdit(assetId: UUID, includeCrop: Bool)
@@ -25,6 +26,7 @@ public enum Command: Codable, Sendable, Equatable {
         case id
         case assetId
         case rating
+        case direction
         case minRating
         case includeCrop
         case stateJSON
@@ -40,6 +42,7 @@ public enum Command: Codable, Sendable, Equatable {
         case selectAsset
         case setRating
         case rotate
+        case goBack
         case setFilter
         case copyEdit
         case pasteEdit
@@ -75,7 +78,10 @@ public enum Command: Codable, Sendable, Equatable {
             self = .setRating(assetId: assetId, rating: rating)
         case .rotate:
             let assetId = try container.decode(UUID.self, forKey: .assetId)
-            self = .rotate(assetId: assetId)
+            let direction = try container.decodeIfPresent(String.self, forKey: .direction) ?? "cw"
+            self = .rotate(assetId: assetId, direction: direction)
+        case .goBack:
+            self = .goBack
         case .setFilter:
             let minRating = try container.decode(Int.self, forKey: .minRating)
             self = .setFilter(minRating: minRating)
@@ -121,9 +127,12 @@ public enum Command: Codable, Sendable, Equatable {
             try container.encode(CommandType.setRating, forKey: .type)
             try container.encode(assetId, forKey: .assetId)
             try container.encode(rating, forKey: .rating)
-        case .rotate(let assetId):
+        case .rotate(let assetId, let direction):
             try container.encode(CommandType.rotate, forKey: .type)
             try container.encode(assetId, forKey: .assetId)
+            try container.encode(direction, forKey: .direction)
+        case .goBack:
+            try container.encode(CommandType.goBack, forKey: .type)
         case .setFilter(let minRating):
             try container.encode(CommandType.setFilter, forKey: .type)
             try container.encode(minRating, forKey: .minRating)

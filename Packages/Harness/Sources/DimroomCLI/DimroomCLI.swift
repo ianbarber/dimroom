@@ -17,6 +17,7 @@ struct DimroomCLI: ParsableCommand {
             SelectAsset.self,
             SetRating.self,
             Rotate.self,
+            GoBack.self,
             SetFilter.self,
             CopyEdit.self,
             PasteEdit.self,
@@ -160,11 +161,14 @@ extension DimroomCLI {
     struct Rotate: ParsableCommand {
         static let configuration = CommandConfiguration(
             commandName: "rotate",
-            abstract: "Rotate the given asset 90° clockwise (non-destructive)."
+            abstract: "Rotate the given asset 90° (non-destructive). Default clockwise."
         )
 
         @Argument(help: "The UUID of the asset to rotate.")
         var id: String
+
+        @Option(name: .long, help: "Rotation direction: cw (clockwise) or ccw (counter-clockwise).")
+        var direction: String = "cw"
 
         @Option(name: .long, help: "Path to the harness socket.")
         var socket: String = HarnessServer.defaultSocketPath
@@ -173,7 +177,24 @@ extension DimroomCLI {
             guard let uuid = UUID(uuidString: id) else {
                 throw ValidationError("Invalid UUID '\(id)'.")
             }
-            try runCommand(.rotate(assetId: uuid), socket: socket)
+            guard direction == "cw" || direction == "ccw" else {
+                throw ValidationError("direction must be 'cw' or 'ccw', got '\(direction)'.")
+            }
+            try runCommand(.rotate(assetId: uuid, direction: direction), socket: socket)
+        }
+    }
+
+    struct GoBack: ParsableCommand {
+        static let configuration = CommandConfiguration(
+            commandName: "go-back",
+            abstract: "Navigate one level up (Develop → Loupe → Library)."
+        )
+
+        @Option(name: .long, help: "Path to the harness socket.")
+        var socket: String = HarnessServer.defaultSocketPath
+
+        func run() throws {
+            try runCommand(.goBack, socket: socket)
         }
     }
 

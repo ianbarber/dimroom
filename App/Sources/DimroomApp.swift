@@ -64,16 +64,15 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         self.previewStore = resolvedPreviewStore
         self.originalsDirectory = resolvedOriginalsDirectory
 
-        // Replace the placeholder view model with one backed by the real
-        // catalog when one is available. If there's no catalog, the
-        // placeholder stays — the empty-state grid renders cleanly and
-        // the harness `state` command still returns assetCount=0.
+        // Reconfigure the existing view model with the real catalog so
+        // the SwiftUI view tree — which already holds a reference to this
+        // instance — picks up the change. Creating a new instance here
+        // would leave the views observing the old (empty) placeholder.
         if let resolvedCatalog {
-            libraryViewModel = LibraryViewModel(
+            libraryViewModel.configure(
                 catalog: resolvedCatalog,
                 previewStore: resolvedPreviewStore
             )
-            libraryViewModel.reload()
         }
 
         guard args.contains("--harness") else { return }

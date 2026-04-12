@@ -11,13 +11,24 @@ public final class LibraryViewModel: ObservableObject {
     @Published public private(set) var rows: [LibraryRow] = []
     @Published public var selectedAssetId: UUID?
 
-    private let catalog: CatalogDatabase
-    private let previewStore: PreviewStore
+    private var catalog: CatalogDatabase
+    private var previewStore: PreviewStore
     private var reloadTask: Task<Void, Never>?
 
     public init(catalog: CatalogDatabase, previewStore: PreviewStore) {
         self.catalog = catalog
         self.previewStore = previewStore
+    }
+
+    /// Swap the backing catalog and preview store, then reload. Used by
+    /// `AppDelegate.applicationDidFinishLaunching` to upgrade the
+    /// placeholder in-memory catalog to the real one while keeping the
+    /// same object identity that the SwiftUI view tree is already
+    /// observing.
+    public func configure(catalog: CatalogDatabase, previewStore: PreviewStore) {
+        self.catalog = catalog
+        self.previewStore = previewStore
+        reload()
     }
 
     /// Reload non-deleted assets from the catalog, sort them newest-first,

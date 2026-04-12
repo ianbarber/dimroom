@@ -14,6 +14,10 @@ struct DimroomCLI: ParsableCommand {
             Quit.self,
             ImportFolder.self,
             ListAssets.self,
+            SelectAsset.self,
+            SetRating.self,
+            Rotate.self,
+            SetFilter.self,
         ]
     )
 }
@@ -100,6 +104,92 @@ extension DimroomCLI {
 
         func run() throws {
             try runCommand(.listAssets, socket: socket)
+        }
+    }
+
+    struct SelectAsset: ParsableCommand {
+        static let configuration = CommandConfiguration(
+            commandName: "select-asset",
+            abstract: "Set the library's single-selection to the given asset UUID."
+        )
+
+        @Argument(help: "The UUID of the asset to select.")
+        var id: String
+
+        @Option(name: .long, help: "Path to the harness socket.")
+        var socket: String = HarnessServer.defaultSocketPath
+
+        func run() throws {
+            guard let uuid = UUID(uuidString: id) else {
+                throw ValidationError("Invalid UUID '\(id)'.")
+            }
+            try runCommand(.selectAsset(id: uuid), socket: socket)
+        }
+    }
+
+    struct SetRating: ParsableCommand {
+        static let configuration = CommandConfiguration(
+            commandName: "set-rating",
+            abstract: "Set the star rating (0–5) for the asset with the given UUID."
+        )
+
+        @Argument(help: "The UUID of the asset to rate.")
+        var id: String
+
+        @Argument(help: "Rating value (0 clears, 1–5 set stars).")
+        var rating: Int
+
+        @Option(name: .long, help: "Path to the harness socket.")
+        var socket: String = HarnessServer.defaultSocketPath
+
+        func run() throws {
+            guard let uuid = UUID(uuidString: id) else {
+                throw ValidationError("Invalid UUID '\(id)'.")
+            }
+            guard (0...5).contains(rating) else {
+                throw ValidationError("Rating must be in 0...5, got \(rating).")
+            }
+            try runCommand(.setRating(assetId: uuid, rating: rating), socket: socket)
+        }
+    }
+
+    struct Rotate: ParsableCommand {
+        static let configuration = CommandConfiguration(
+            commandName: "rotate",
+            abstract: "Rotate the given asset 90° clockwise (non-destructive)."
+        )
+
+        @Argument(help: "The UUID of the asset to rotate.")
+        var id: String
+
+        @Option(name: .long, help: "Path to the harness socket.")
+        var socket: String = HarnessServer.defaultSocketPath
+
+        func run() throws {
+            guard let uuid = UUID(uuidString: id) else {
+                throw ValidationError("Invalid UUID '\(id)'.")
+            }
+            try runCommand(.rotate(assetId: uuid), socket: socket)
+        }
+    }
+
+    struct SetFilter: ParsableCommand {
+        static let configuration = CommandConfiguration(
+            commandName: "set-filter",
+            abstract: "Set the minimum-rating filter (0 = show everything, 1–5 = show >= N stars)."
+        )
+
+        @Argument(help: "Minimum rating to show (0–5).")
+        var minRating: Int
+
+        @Option(name: .long, help: "Path to the harness socket.")
+        var socket: String = HarnessServer.defaultSocketPath
+
+        func run() throws {
+            guard (0...5).contains(minRating) else {
+                throw ValidationError("minRating must be in 0...5, got \(minRating).")
+            }
+            try runCommand(.setFilter(minRating: minRating), socket: socket)
         }
     }
 }

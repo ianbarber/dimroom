@@ -55,6 +55,41 @@ final class CommandCodingTests: XCTestCase {
         XCTAssertEqual(command, decoded)
     }
 
+    func testSelectAssetRoundTrip() throws {
+        let id = UUID(uuidString: "12345678-1234-1234-1234-123456789012")!
+        let command = Command.selectAsset(id: id)
+        let data = try encoder.encode(command)
+        let decoded = try decoder.decode(Command.self, from: data)
+        XCTAssertEqual(command, decoded)
+    }
+
+    func testSetRatingRoundTrip() throws {
+        let id = UUID(uuidString: "12345678-1234-1234-1234-123456789012")!
+        for rating in 0...5 {
+            let command = Command.setRating(assetId: id, rating: rating)
+            let data = try encoder.encode(command)
+            let decoded = try decoder.decode(Command.self, from: data)
+            XCTAssertEqual(command, decoded)
+        }
+    }
+
+    func testRotateRoundTrip() throws {
+        let id = UUID(uuidString: "12345678-1234-1234-1234-123456789012")!
+        let command = Command.rotate(assetId: id)
+        let data = try encoder.encode(command)
+        let decoded = try decoder.decode(Command.self, from: data)
+        XCTAssertEqual(command, decoded)
+    }
+
+    func testSetFilterRoundTrip() throws {
+        for minRating in 0...5 {
+            let command = Command.setFilter(minRating: minRating)
+            let data = try encoder.encode(command)
+            let decoded = try decoder.decode(Command.self, from: data)
+            XCTAssertEqual(command, decoded)
+        }
+    }
+
     // MARK: - Command JSON shape
 
     func testNavigateJSON() throws {
@@ -99,6 +134,52 @@ final class CommandCodingTests: XCTestCase {
         XCTAssertEqual(json, #"{"type":"listAssets"}"#)
     }
 
+    func testSelectAssetJSON() throws {
+        // Swift's default JSONEncoder encodes UUIDs in uppercase per
+        // RFC 4122. This test pins the wire shape so downstream tools
+        // (the CLI, shell flows) can rely on it.
+        let id = UUID(uuidString: "12345678-1234-1234-1234-123456789012")!
+        let command = Command.selectAsset(id: id)
+        let data = try encoder.encode(command)
+        let json = String(data: data, encoding: .utf8)!
+        XCTAssertEqual(
+            json,
+            #"{"id":"12345678-1234-1234-1234-123456789012","type":"selectAsset"}"#
+        )
+    }
+
+    func testSetRatingJSON() throws {
+        let id = UUID(uuidString: "12345678-1234-1234-1234-123456789012")!
+        let command = Command.setRating(assetId: id, rating: 4)
+        let data = try encoder.encode(command)
+        let json = String(data: data, encoding: .utf8)!
+        XCTAssertEqual(
+            json,
+            #"{"assetId":"12345678-1234-1234-1234-123456789012","rating":4,"type":"setRating"}"#
+        )
+    }
+
+    func testRotateJSON() throws {
+        let id = UUID(uuidString: "12345678-1234-1234-1234-123456789012")!
+        let command = Command.rotate(assetId: id)
+        let data = try encoder.encode(command)
+        let json = String(data: data, encoding: .utf8)!
+        XCTAssertEqual(
+            json,
+            #"{"assetId":"12345678-1234-1234-1234-123456789012","type":"rotate"}"#
+        )
+    }
+
+    func testSetFilterJSON() throws {
+        let command = Command.setFilter(minRating: 3)
+        let data = try encoder.encode(command)
+        let json = String(data: data, encoding: .utf8)!
+        XCTAssertEqual(
+            json,
+            #"{"minRating":3,"type":"setFilter"}"#
+        )
+    }
+
     // MARK: - Command decoding from raw JSON
 
     func testDecodeNavigateFromJSON() throws {
@@ -117,6 +198,13 @@ final class CommandCodingTests: XCTestCase {
         let json = #"{"type":"listAssets"}"#
         let command = try decoder.decode(Command.self, from: Data(json.utf8))
         XCTAssertEqual(command, .listAssets)
+    }
+
+    func testDecodeSelectAssetFromJSON() throws {
+        let json = #"{"id":"12345678-1234-1234-1234-123456789012","type":"selectAsset"}"#
+        let command = try decoder.decode(Command.self, from: Data(json.utf8))
+        let expected = UUID(uuidString: "12345678-1234-1234-1234-123456789012")!
+        XCTAssertEqual(command, .selectAsset(id: expected))
     }
 
     // MARK: - Response round-trips
@@ -161,13 +249,15 @@ final class CommandCodingTests: XCTestCase {
         let state = AppState(
             route: .library,
             assetCount: 42,
-            selectedAssetId: id
+            selectedAssetId: id,
+            minRating: 4
         )
         let data = try encoder.encode(state)
         let decoded = try decoder.decode(AppState.self, from: data)
         XCTAssertEqual(state, decoded)
         XCTAssertEqual(decoded.assetCount, 42)
         XCTAssertEqual(decoded.selectedAssetId, id)
+        XCTAssertEqual(decoded.minRating, 4)
     }
 
     func testAppStateJSONShape() throws {
@@ -175,26 +265,29 @@ final class CommandCodingTests: XCTestCase {
         let state = AppState(
             route: .library,
             assetCount: 3,
-            selectedAssetId: id
+            selectedAssetId: id,
+            minRating: 3
         )
         let data = try encoder.encode(state)
         let json = String(data: data, encoding: .utf8)!
         XCTAssertEqual(
             json,
-            #"{"assetCount":3,"route":"library","selectedAssetId":"12345678-1234-1234-1234-123456789012"}"#
+            #"{"assetCount":3,"minRating":3,"route":"library","selectedAssetId":"12345678-1234-1234-1234-123456789012"}"#
         )
     }
 
     func testAppStateJSONShapeWithoutSelection() throws {
         // Swift's default JSONEncoder omits nil optionals rather than
         // emitting them as `null`. Pin that shape so the harness wire
-        // format is explicit about what consumers will see.
+        // format is explicit about what consumers will see. `minRating`
+        // is a non-optional Int with a default of 0 and must always be
+        // present in the encoded output.
         let state = AppState(route: .library, assetCount: 0, selectedAssetId: nil)
         let data = try encoder.encode(state)
         let json = String(data: data, encoding: .utf8)!
         XCTAssertEqual(
             json,
-            #"{"assetCount":0,"route":"library"}"#
+            #"{"assetCount":0,"minRating":0,"route":"library"}"#
         )
     }
 

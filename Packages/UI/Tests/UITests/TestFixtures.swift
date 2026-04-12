@@ -54,6 +54,44 @@ enum TestFixtures {
         return url
     }
 
+    /// Write a solid-colour JPEG at the preview path for this asset,
+    /// matching the filename `PreviewStore.previewURL(for:)` resolves.
+    /// Dimensions mimic a downscaled preview — bigger than a thumbnail,
+    /// smaller than a full RAW — so snapshots exercise aspect-fit
+    /// layout without decoding a 2048px image in the test process.
+    @discardableResult
+    static func placePreview(
+        for asset: Asset,
+        cacheDirectory: URL,
+        color: (r: UInt8, g: UInt8, b: UInt8),
+        width: Int = 800,
+        height: Int = 600
+    ) throws -> URL {
+        let prefix = String(asset.contentHash.prefix(2))
+        let dir = cacheDirectory.appendingPathComponent(prefix, isDirectory: true)
+        try FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true)
+        let url = dir.appendingPathComponent("\(asset.contentHash).preview.jpg")
+        try writeSolidColorJPEG(
+            width: width,
+            height: height,
+            color: color,
+            to: url
+        )
+        return url
+    }
+
+    /// Public entry point used by rotate tests that need a real JPEG on
+    /// disk for `PreviewStore.generate` to decode. Mirrors the internal
+    /// helper used by `placeThumbnail` / `placePreview`.
+    static func writeSolidJPEG(
+        width: Int,
+        height: Int,
+        color: (r: UInt8, g: UInt8, b: UInt8),
+        to url: URL
+    ) throws {
+        try writeSolidColorJPEG(width: width, height: height, color: color, to: url)
+    }
+
     private static func writeSolidColorJPEG(
         width: Int,
         height: Int,

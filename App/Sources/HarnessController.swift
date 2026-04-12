@@ -78,6 +78,22 @@ final class HarnessController: @unchecked Sendable {
 
         case .listAssets:
             return handleListAssets()
+
+        case .selectAsset(let id):
+            await MainActor.run { libraryViewModel.select(id) }
+            return .ok()
+
+        case .setRating(let assetId, let rating):
+            await libraryViewModel.setRating(for: assetId, to: rating)
+            return .ok()
+
+        case .rotate(let assetId):
+            await libraryViewModel.rotate(assetId: assetId)
+            return .ok()
+
+        case .setFilter(let minRating):
+            await libraryViewModel.setMinRating(minRating)
+            return .ok()
         }
     }
 

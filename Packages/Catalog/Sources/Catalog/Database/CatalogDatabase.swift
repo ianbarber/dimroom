@@ -62,6 +62,15 @@ public final class CatalogDatabase: Sendable {
         }
     }
 
+    public func updateRotation(assetId: UUID, rotation: Int) throws {
+        try dbQueue.write { db in
+            if var asset = try Asset.fetchOne(db, key: assetId) {
+                asset.rotation = rotation
+                try asset.update(db)
+            }
+        }
+    }
+
     public func deleteAsset(id: UUID) throws {
         try dbQueue.write { db in
             if var asset = try Asset.fetchOne(db, key: id) {

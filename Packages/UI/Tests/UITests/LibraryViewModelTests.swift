@@ -611,6 +611,29 @@ final class LibraryViewModelTests: XCTestCase {
         XCTAssertNil(vm.pendingZoomCommand)
     }
 
+    // MARK: - isZoomed
+
+    @MainActor
+    func testIsZoomedDefaultsToFalse() async throws {
+        let catalog = try CatalogDatabase.inMemory()
+        let store = PreviewStore(cacheDirectory: tempCacheDir)
+        let vm = LibraryViewModel(catalog: catalog, previewStore: store)
+        XCTAssertFalse(vm.isZoomed)
+    }
+
+    @MainActor
+    func testIsZoomedCanBeSet() async throws {
+        let catalog = try CatalogDatabase.inMemory()
+        let store = PreviewStore(cacheDirectory: tempCacheDir)
+        let vm = LibraryViewModel(catalog: catalog, previewStore: store)
+
+        vm.isZoomed = true
+        XCTAssertTrue(vm.isZoomed)
+
+        vm.isZoomed = false
+        XCTAssertFalse(vm.isZoomed)
+    }
+
     // MARK: - Helpers
 
     /// Produce a minimal 64×48 solid-red JPEG on disk and return its

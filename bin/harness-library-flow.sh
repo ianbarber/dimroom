@@ -3,8 +3,9 @@
 #
 # Seeds a throwaway catalog from fixtures/library-seed/ with the
 # dimroom-fixture binary, launches the app in harness mode, navigates to
-# the library route, takes a screenshot and asserts that the app's
-# `state` response reports assetCount > 0.
+# the library route, takes a screenshot, asserts assetCount > 0, then
+# selects an asset, rotates it, and screenshots the grid again to verify
+# the layout holds after rotation.
 #
 # Assumes the capture-screenshots skill already built the app, CLI, and
 # fixture seeder — this script must not rebuild. SCREENSHOT_DIR is set by
@@ -122,6 +123,58 @@ if [ -z "$ASSET_COUNT" ] || [ "$ASSET_COUNT" -le 0 ]; then
     exit 1
 fi
 echo "  OK: assetCount == $ASSET_COUNT"
+
+echo "=== list-assets — grab first UUID ==="
+LIST_OUT=$("$CLI_BIN" list-assets --socket "$SOCKET")
+echo "$LIST_OUT"
+FIRST_UUID=$(printf '%s' "$LIST_OUT" | /usr/bin/python3 -c "
+import json, sys
+doc = json.loads(sys.stdin.read())
+print(doc['data']['assets'][0]['id'])
+")
+if [ -z "$FIRST_UUID" ]; then
+    echo "ERROR: could not extract first asset UUID"
+    exit 1
+fi
+echo "  First asset UUID: $FIRST_UUID"
+
+echo "=== select-asset $FIRST_UUID ==="
+SEL_OUT=$("$CLI_BIN" select-asset "$FIRST_UUID" --socket "$SOCKET")
+echo "$SEL_OUT"
+if ! echo "$SEL_OUT" | grep -q '"ok"'; then
+    echo "ERROR: select-asset did not return ok"
+    exit 1
+fi
+
+echo "=== rotate $FIRST_UUID ==="
+ROT_OUT=$("$CLI_BIN" rotate "$FIRST_UUID" --socket "$SOCKET")
+echo "$ROT_OUT"
+if ! echo "$ROT_OUT" | grep -q '"ok"'; then
+    echo "ERROR: rotate did not return ok"
+    exit 1
+fi
+
+# Longer paint delay — rotate triggers preview regeneration + SwiftUI repaint
+sleep 2
+
+echo "=== screenshot after rotate ==="
+ROT_SHOT_PATH="$SCREENSHOT_DIR/library-after-rotate.png"
+ROT_SHOT_OUT=$("$CLI_BIN" screenshot "$ROT_SHOT_PATH" --socket "$SOCKET")
+echo "$ROT_SHOT_OUT"
+if ! echo "$ROT_SHOT_OUT" | grep -q '"ok"'; then
+    echo "ERROR: screenshot (after rotate) did not return ok"
+    exit 1
+fi
+if [ ! -f "$ROT_SHOT_PATH" ]; then
+    echo "ERROR: screenshot file not created at $ROT_SHOT_PATH"
+    exit 1
+fi
+ROT_FILE_TYPE=$(file -b "$ROT_SHOT_PATH")
+if ! echo "$ROT_FILE_TYPE" | grep -qi "png"; then
+    echo "ERROR: screenshot (after rotate) is not a valid PNG: $ROT_FILE_TYPE"
+    exit 1
+fi
+echo "Screenshot (after rotate) verified: $ROT_FILE_TYPE"
 
 echo "=== quit ==="
 "$CLI_BIN" quit --socket "$SOCKET" 2>&1 || true

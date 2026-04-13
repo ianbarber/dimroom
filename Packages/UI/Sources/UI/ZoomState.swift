@@ -40,7 +40,9 @@ public struct ZoomState: Equatable {
     }
 
     /// Whether the current zoom scale is at (or effectively at) fit-to-window.
+    /// A `zoomScale` of 0 is the sentinel for "fit", so it counts as at-fit.
     public func isAtFit(imageSize: CGSize, containerSize: CGSize) -> Bool {
+        zoomScale == 0 ||
         abs(zoomScale - Self.fitScale(imageSize: imageSize, containerSize: containerSize)) < 0.001
     }
 
@@ -157,6 +159,9 @@ public struct ZoomState: Equatable {
         imageSize: CGSize,
         containerSize: CGSize
     ) {
+        if zoomScale == 0 {
+            zoomScale = Self.fitScale(imageSize: imageSize, containerSize: containerSize)
+        }
         let factor: CGFloat = 1.0 + delta * 0.01
         zoomScale *= factor
         clampZoom(imageSize: imageSize, containerSize: containerSize)

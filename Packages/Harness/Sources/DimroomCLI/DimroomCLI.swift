@@ -25,6 +25,10 @@ struct DimroomCLI: ParsableCommand {
             GetEdit.self,
             SetScope.self,
             ListImportSessions.self,
+            SelectNext.self,
+            SelectPrevious.self,
+            ZoomToggle.self,
+            ZoomReset.self,
         ]
     )
 }
@@ -343,6 +347,62 @@ extension DimroomCLI {
 
         func run() throws {
             try runCommand(.listImportSessions, socket: socket)
+        }
+    }
+
+    struct SelectNext: ParsableCommand {
+        static let configuration = CommandConfiguration(
+            commandName: "select-next",
+            abstract: "Move selection to the next asset in the library grid."
+        )
+
+        @Option(name: .long, help: "Path to the harness socket.")
+        var socket: String = HarnessServer.defaultSocketPath
+
+        func run() throws {
+            try runCommand(.selectNext, socket: socket)
+        }
+    }
+
+    struct SelectPrevious: ParsableCommand {
+        static let configuration = CommandConfiguration(
+            commandName: "select-previous",
+            abstract: "Move selection to the previous asset in the library grid."
+        )
+
+        @Option(name: .long, help: "Path to the harness socket.")
+        var socket: String = HarnessServer.defaultSocketPath
+
+        func run() throws {
+            try runCommand(.selectPrevious, socket: socket)
+        }
+    }
+
+    struct ZoomToggle: ParsableCommand {
+        static let configuration = CommandConfiguration(
+            commandName: "zoom-toggle",
+            abstract: "Toggle zoom in the loupe view."
+        )
+
+        @Option(name: .long, help: "Path to the harness socket.")
+        var socket: String = HarnessServer.defaultSocketPath
+
+        func run() throws {
+            try runCommand(.zoomToggle, socket: socket)
+        }
+    }
+
+    struct ZoomReset: ParsableCommand {
+        static let configuration = CommandConfiguration(
+            commandName: "zoom-reset",
+            abstract: "Reset zoom to fit in the loupe view."
+        )
+
+        @Option(name: .long, help: "Path to the harness socket.")
+        var socket: String = HarnessServer.defaultSocketPath
+
+        func run() throws {
+            try runCommand(.zoomReset, socket: socket)
         }
     }
 }

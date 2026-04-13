@@ -112,15 +112,31 @@ struct ContentView: View {
             Task { await libraryViewModel.setRating(for: assetId, to: 0) }
             return .handled
         }
-        // Arrow keys — navigate between assets in Loupe.
+        // Arrow keys — navigate between assets in Library and Loupe.
+        // Left/Right move by one asset; Up/Down move by one grid row
+        // (Library only — no grid concept in Loupe).
         .onKeyPress(.leftArrow) {
-            guard router.route == .loupe else { return .ignored }
+            guard router.route == .library || router.route == .loupe else {
+                return .ignored
+            }
             libraryViewModel.selectPrevious()
             return .handled
         }
         .onKeyPress(.rightArrow) {
-            guard router.route == .loupe else { return .ignored }
+            guard router.route == .library || router.route == .loupe else {
+                return .ignored
+            }
             libraryViewModel.selectNext()
+            return .handled
+        }
+        .onKeyPress(.upArrow) {
+            guard router.route == .library else { return .ignored }
+            libraryViewModel.selectUp()
+            return .handled
+        }
+        .onKeyPress(.downArrow) {
+            guard router.route == .library else { return .ignored }
+            libraryViewModel.selectDown()
             return .handled
         }
         // Z — toggle fit ↔ 100% zoom in Loupe.

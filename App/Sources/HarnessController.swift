@@ -132,6 +132,14 @@ final class HarnessController: @unchecked Sendable {
             await MainActor.run { libraryViewModel.selectPrevious() }
             return .ok()
 
+        case .selectUp:
+            await MainActor.run { libraryViewModel.selectUp() }
+            return .ok()
+
+        case .selectDown:
+            await MainActor.run { libraryViewModel.selectDown() }
+            return .ok()
+
         case .zoomToggle:
             await MainActor.run { libraryViewModel.pendingZoomCommand = .toggleFitTo100 }
             return .ok()

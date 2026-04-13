@@ -1,5 +1,6 @@
 import AppKit
 import Catalog
+import EditEngine
 import Harness
 import ImportKit
 import Previews
@@ -15,7 +16,9 @@ struct DimroomApp: App {
             ContentView(
                 router: appDelegate.router,
                 libraryViewModel: appDelegate.libraryViewModel,
-                importCoordinator: appDelegate.importCoordinator
+                importCoordinator: appDelegate.importCoordinator,
+                exportCoordinator: appDelegate.exportCoordinator,
+                catalog: appDelegate.catalog
             )
         }
         .commands {
@@ -24,6 +27,11 @@ struct DimroomApp: App {
                     appDelegate.importFolderFromMenu()
                 }
                 .keyboardShortcut("i", modifiers: [.command, .shift])
+
+                Button("Export...") {
+                    NotificationCenter.default.post(name: .showExportSheet, object: nil)
+                }
+                .keyboardShortcut("e", modifiers: [.command, .shift])
             }
             CommandGroup(replacing: .pasteboard) {
                 Button("Copy Edit Settings") {
@@ -51,6 +59,7 @@ struct DimroomApp: App {
 final class AppDelegate: NSObject, NSApplicationDelegate {
     let router = AppRouter()
     let importCoordinator = ImportCoordinator()
+    let exportCoordinator = ExportCoordinator()
     let editClipboard = EditClipboard()
     /// View model shared between the SwiftUI tree and the harness
     /// controller. Initialised eagerly with an in-memory empty catalog so
@@ -59,7 +68,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     /// CLI flags are parsed and the real catalog + preview store are
     /// available.
     private(set) var libraryViewModel: LibraryViewModel = LibraryViewModel.empty()
-    private var catalog: CatalogDatabase?
+    private(set) var catalog: CatalogDatabase?
     private var previewStore: PreviewStore?
     private var originalsDirectory: URL?
     private var harnessController: HarnessController?
@@ -109,7 +118,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
                 rootView: ContentView(
                     router: router,
                     libraryViewModel: libraryViewModel,
-                    importCoordinator: importCoordinator
+                    importCoordinator: importCoordinator,
+                    exportCoordinator: exportCoordinator,
+                    catalog: resolvedCatalog
                 )
             )
             window.title = "Dimroom"
@@ -127,7 +138,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             originalsDirectory: resolvedOriginalsDirectory,
             previewStore: resolvedPreviewStore,
             libraryViewModel: libraryViewModel,
-            editClipboard: editClipboard
+            editClipboard: editClipboard,
+            exportCoordinator: exportCoordinator
         )
         do {
             try controller.start(socketPath: socketPath)
@@ -296,6 +308,10 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
 // flags. We fall back to an in-memory empty catalog for that early-init
 // window; `applicationDidFinishLaunching` replaces it with the real one
 // once flags are known.
+extension Notification.Name {
+    static let showExportSheet = Notification.Name("dimroom.showExportSheet")
+}
+
 private extension LibraryViewModel {
     static func empty() -> LibraryViewModel {
         let catalog: CatalogDatabase

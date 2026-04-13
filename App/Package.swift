@@ -8,6 +8,7 @@ let package = Package(
     dependencies: [
         .package(path: "../Packages/Harness"),
         .package(path: "../Packages/Catalog"),
+        .package(path: "../Packages/EditEngine"),
         .package(path: "../Packages/ImportKit"),
         .package(path: "../Packages/Previews"),
         .package(path: "../Packages/UI"),
@@ -18,6 +19,7 @@ let package = Package(
             dependencies: [
                 .product(name: "Harness", package: "Harness"),
                 .product(name: "Catalog", package: "Catalog"),
+                .product(name: "EditEngine", package: "EditEngine"),
                 .product(name: "ImportKit", package: "ImportKit"),
                 .product(name: "Previews", package: "Previews"),
                 .product(name: "UI", package: "UI"),

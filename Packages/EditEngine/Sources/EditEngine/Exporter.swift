@@ -33,19 +33,17 @@ public enum Exporter {
         case .original:
             return try exportOriginal(sourceURL: sourceURL, destinationURL: config.destinationURL)
         case .jpeg:
+            let quality = CGFloat(config.jpegQuality) / 100.0
             return try exportRendered(
                 sourceURL: sourceURL,
                 editState: config.applyEdits ? editState : nil,
                 destinationURL: config.destinationURL,
                 context: context,
                 writeImage: { rendered, dest, ctx in
-                    let colorSpace = CGColorSpace(name: CGColorSpace.sRGB)!
-                    let quality = CGFloat(config.jpegQuality) / 100.0
-                    try ctx.writeJPEGRepresentation(
-                        of: rendered,
-                        to: dest,
-                        colorSpace: colorSpace,
-                        options: [kCGImageDestinationLossyCompressionQuality: quality]
+                    try writeViaImageIO(
+                        rendered, to: dest, context: ctx,
+                        type: UTType.jpeg.identifier as CFString,
+                        properties: [kCGImageDestinationLossyCompressionQuality: quality]
                     )
                 }
             )
@@ -56,13 +54,10 @@ public enum Exporter {
                 destinationURL: config.destinationURL,
                 context: context,
                 writeImage: { rendered, dest, ctx in
-                    let colorSpace = CGColorSpace(name: CGColorSpace.sRGB)!
-                    try ctx.writeTIFFRepresentation(
-                        of: rendered,
-                        to: dest,
-                        format: .RGBA16,
-                        colorSpace: colorSpace,
-                        options: [:]
+                    try writeViaImageIO(
+                        rendered, to: dest, context: ctx,
+                        type: UTType.tiff.identifier as CFString,
+                        properties: [:]
                     )
                 }
             )
@@ -123,17 +118,41 @@ public enum Exporter {
         context: CIContext,
         writeImage: (CIImage, URL, CIContext) throws -> Void
     ) throws -> URL {
-        var image = CIImage(contentsOf: sourceURL)
-        guard image != nil else {
+        guard var image = CIImage(contentsOf: sourceURL) else {
             throw ExportError.unreadableSource(sourceURL)
         }
 
         if let editState {
-            image = Renderer.render(source: image!, editState: editState)
+            image = Renderer.render(source: image, editState: editState)
         }
 
-        try writeImage(image!, destinationURL, context)
+        try writeImage(image, destinationURL, context)
         return destinationURL
+    }
+
+    /// Render a CIImage to a CGImage and write it to disk via ImageIO.
+    /// This avoids the `CIImageRepresentationOption` bridging issues with
+    /// `CIContext.writeJPEGRepresentation` and gives us explicit control
+    /// over compression quality and output type.
+    private static func writeViaImageIO(
+        _ image: CIImage,
+        to url: URL,
+        context: CIContext,
+        type: CFString,
+        properties: [CFString: Any]
+    ) throws {
+        guard let cgImage = context.createCGImage(image, from: image.extent) else {
+            throw ExportError.unreadableSource(url)
+        }
+        guard let destination = CGImageDestinationCreateWithURL(
+            url as CFURL, type, 1, nil
+        ) else {
+            throw ExportError.unreadableSource(url)
+        }
+        CGImageDestinationAddImage(destination, cgImage, properties as CFDictionary)
+        guard CGImageDestinationFinalize(destination) else {
+            throw ExportError.unreadableSource(url)
+        }
     }
 }
 

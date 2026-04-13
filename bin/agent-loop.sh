@@ -134,6 +134,47 @@ pr_for_issue() {
     2>/dev/null | head -n1
 }
 
+# Check ready-to-merge PRs for merge conflicts or new human comments.
+# If found, flip the issue back to state:changes-requested so the
+# responder picks it up and fixes the problem.
+check_ready_to_merge() {
+  local issues
+  issues=$(gh issue list --state open --label "state:ready-to-merge" \
+    --json number -q '.[].number' 2>/dev/null || true)
+  [ -z "$issues" ] && return
+
+  for issue in $issues; do
+    local pr
+    pr=$(pr_for_issue "$issue")
+    [ -z "$pr" ] && continue
+
+    # Check for merge conflicts.
+    local mergeable
+    mergeable=$(gh pr view "$pr" --json mergeable -q .mergeable 2>/dev/null || true)
+    if [ "$mergeable" = "CONFLICTING" ]; then
+      log "PR #$pr (issue #$issue) has merge conflicts — moving to changes-requested"
+      gh issue edit "$issue" --remove-label "state:ready-to-merge" --add-label "state:changes-requested" 2>/dev/null
+      gh pr comment "$pr" --body "Merge conflicts detected. Moving to \`state:changes-requested\` for the responder to rebase." 2>/dev/null || true
+      continue
+    fi
+
+    # Check for new human comments after the last bot comment.
+    # If the human left feedback, the responder should address it.
+    local human_comment
+    human_comment=$(gh pr view "$pr" --json comments \
+      -q '[.comments[] | select(.author.login != "github-actions" and .author.login != "claude")] | last | .createdAt' 2>/dev/null || true)
+    local bot_comment
+    bot_comment=$(gh pr view "$pr" --json comments \
+      -q '[.comments[] | select(.body | test("ready.to.merge|ready for human merge|LGTM|approved"; "i"))] | last | .createdAt' 2>/dev/null || true)
+
+    if [ -n "$human_comment" ] && [ -n "$bot_comment" ] && [[ "$human_comment" > "$bot_comment" ]]; then
+      log "PR #$pr (issue #$issue) has new human comment after approval — moving to changes-requested"
+      gh issue edit "$issue" --remove-label "state:ready-to-merge" --add-label "state:changes-requested" 2>/dev/null
+      continue
+    fi
+  done
+}
+
 # Run a single pass.
 do_pass() {
   log "scanning for next issue..."
@@ -249,15 +290,18 @@ if [ "$WATCH" -eq 1 ]; then
   log "watching every ${SLEEP_SECONDS}s; ctrl-c to stop"
   while true; do
     sync_main
+    check_ready_to_merge
     do_pass || true
     sleep "$SLEEP_SECONDS"
   done
 else
   sync_main
+  check_ready_to_merge
   # Keep making passes until there's nothing actionable.
   while do_pass; do
     log "pass complete, checking for next action..."
     sync_main
+    check_ready_to_merge
   done
   log "no more actionable issues — done"
 fi

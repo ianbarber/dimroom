@@ -26,6 +26,7 @@ public enum Command: Codable, Sendable, Equatable {
     case selectDown
     case zoomToggle
     case zoomReset
+    case export(destinationPath: String, format: String, applyEdits: Bool)
 
     private enum CodingKeys: String, CodingKey {
         case type
@@ -39,6 +40,9 @@ public enum Command: Codable, Sendable, Equatable {
         case includeCrop
         case stateJSON
         case importSessionId
+        case destinationPath
+        case format
+        case applyEdits
     }
 
     private enum CommandType: String, Codable {
@@ -65,6 +69,7 @@ public enum Command: Codable, Sendable, Equatable {
         case selectDown
         case zoomToggle
         case zoomReset
+        case export
     }
 
     public init(from decoder: Decoder) throws {
@@ -133,6 +138,11 @@ public enum Command: Codable, Sendable, Equatable {
             self = .zoomToggle
         case .zoomReset:
             self = .zoomReset
+        case .export:
+            let destinationPath = try container.decode(String.self, forKey: .destinationPath)
+            let format = try container.decode(String.self, forKey: .format)
+            let applyEdits = try container.decode(Bool.self, forKey: .applyEdits)
+            self = .export(destinationPath: destinationPath, format: format, applyEdits: applyEdits)
         }
     }
 
@@ -201,6 +211,11 @@ public enum Command: Codable, Sendable, Equatable {
             try container.encode(CommandType.zoomToggle, forKey: .type)
         case .zoomReset:
             try container.encode(CommandType.zoomReset, forKey: .type)
+        case .export(let destinationPath, let format, let applyEdits):
+            try container.encode(CommandType.export, forKey: .type)
+            try container.encode(destinationPath, forKey: .destinationPath)
+            try container.encode(format, forKey: .format)
+            try container.encode(applyEdits, forKey: .applyEdits)
         }
     }
 }

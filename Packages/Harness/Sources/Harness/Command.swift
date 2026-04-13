@@ -20,6 +20,10 @@ public enum Command: Codable, Sendable, Equatable {
     case getEdit(assetId: UUID)
     case setScope(importSessionId: UUID?)
     case listImportSessions
+    case selectNext
+    case selectPrevious
+    case zoomToggle
+    case zoomReset
 
     private enum CodingKeys: String, CodingKey {
         case type
@@ -53,6 +57,10 @@ public enum Command: Codable, Sendable, Equatable {
         case getEdit
         case setScope
         case listImportSessions
+        case selectNext
+        case selectPrevious
+        case zoomToggle
+        case zoomReset
     }
 
     public init(from decoder: Decoder) throws {
@@ -109,6 +117,14 @@ public enum Command: Codable, Sendable, Equatable {
             self = .setScope(importSessionId: sessionId)
         case .listImportSessions:
             self = .listImportSessions
+        case .selectNext:
+            self = .selectNext
+        case .selectPrevious:
+            self = .selectPrevious
+        case .zoomToggle:
+            self = .zoomToggle
+        case .zoomReset:
+            self = .zoomReset
         }
     }
 
@@ -165,6 +181,14 @@ public enum Command: Codable, Sendable, Equatable {
             try container.encodeIfPresent(sessionId, forKey: .importSessionId)
         case .listImportSessions:
             try container.encode(CommandType.listImportSessions, forKey: .type)
+        case .selectNext:
+            try container.encode(CommandType.selectNext, forKey: .type)
+        case .selectPrevious:
+            try container.encode(CommandType.selectPrevious, forKey: .type)
+        case .zoomToggle:
+            try container.encode(CommandType.zoomToggle, forKey: .type)
+        case .zoomReset:
+            try container.encode(CommandType.zoomReset, forKey: .type)
         }
     }
 }

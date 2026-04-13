@@ -96,6 +96,61 @@ final class LibraryViewModelNavigationTests: XCTestCase {
         )
     }
 
+    // MARK: - Row-skip bounds helper (offset ±columnCount)
+
+    func testNeighborSkipByColumnCountMovesDownOneRow() {
+        // 8 items in a 4-column grid → 2 full rows.
+        let ids = (1...8).map { uuid($0) }
+        // From position 0, offset +4 → position 4 (first item of second row).
+        XCTAssertEqual(
+            LibraryViewModel.neighbor(in: ids, from: ids[0], offset: 4),
+            ids[4]
+        )
+    }
+
+    func testNeighborSkipByColumnCountMovesUpOneRow() {
+        let ids = (1...8).map { uuid($0) }
+        // From position 5, offset -4 → position 1.
+        XCTAssertEqual(
+            LibraryViewModel.neighbor(in: ids, from: ids[5], offset: -4),
+            ids[1]
+        )
+    }
+
+    func testNeighborSkipUpFromFirstRowReturnsNil() {
+        let ids = (1...8).map { uuid($0) }
+        // Position 2 is in the first row; offset -4 is out of bounds.
+        XCTAssertNil(
+            LibraryViewModel.neighbor(in: ids, from: ids[2], offset: -4)
+        )
+    }
+
+    func testNeighborSkipDownFromLastRowReturnsNil() {
+        let ids = (1...8).map { uuid($0) }
+        // Position 5 is in the second row; offset +4 exceeds the count.
+        XCTAssertNil(
+            LibraryViewModel.neighbor(in: ids, from: ids[5], offset: 4)
+        )
+    }
+
+    func testNeighborSkipDownIntoPartialLastRow() {
+        // 6 items → row 0: [0,1,2,3], row 1: [4,5].
+        // From position 1, offset +4 → position 5 (exists in partial row).
+        let ids = (1...6).map { uuid($0) }
+        XCTAssertEqual(
+            LibraryViewModel.neighbor(in: ids, from: ids[1], offset: 4),
+            ids[5]
+        )
+    }
+
+    func testNeighborSkipDownPastPartialLastRowReturnsNil() {
+        // 6 items → from position 2, offset +4 → position 6 (out of bounds).
+        let ids = (1...6).map { uuid($0) }
+        XCTAssertNil(
+            LibraryViewModel.neighbor(in: ids, from: ids[2], offset: 4)
+        )
+    }
+
     // MARK: - Instance wiring
 
     @MainActor
@@ -148,6 +203,64 @@ final class LibraryViewModelNavigationTests: XCTestCase {
         XCTAssertNil(vm.selectedAssetId)
     }
 
+    // MARK: - selectUp / selectDown instance wiring
+
+    @MainActor
+    func testSelectDownMovesToNextRow() async throws {
+        let (vm, assets) = try await makeEightAssetViewModel()
+        vm.select(assets[1].id)
+
+        vm.selectDown()
+        XCTAssertEqual(vm.selectedAssetId, assets[5].id)
+    }
+
+    @MainActor
+    func testSelectUpMovesToPreviousRow() async throws {
+        let (vm, assets) = try await makeEightAssetViewModel()
+        vm.select(assets[5].id)
+
+        vm.selectUp()
+        XCTAssertEqual(vm.selectedAssetId, assets[1].id)
+    }
+
+    @MainActor
+    func testSelectUpAtTopRowIsNoOp() async throws {
+        let (vm, assets) = try await makeEightAssetViewModel()
+        vm.select(assets[2].id)
+
+        vm.selectUp()
+        XCTAssertEqual(
+            vm.selectedAssetId,
+            assets[2].id,
+            "selectUp in the first row must not wrap or clear"
+        )
+    }
+
+    @MainActor
+    func testSelectDownAtBottomRowIsNoOp() async throws {
+        let (vm, assets) = try await makeEightAssetViewModel()
+        vm.select(assets[6].id)
+
+        vm.selectDown()
+        XCTAssertEqual(
+            vm.selectedAssetId,
+            assets[6].id,
+            "selectDown in the last row must not wrap or clear"
+        )
+    }
+
+    @MainActor
+    func testSelectUpDownWithNilSelectionIsNoOp() async throws {
+        let (vm, _) = try await makeEightAssetViewModel()
+        XCTAssertNil(vm.selectedAssetId)
+
+        vm.selectUp()
+        XCTAssertNil(vm.selectedAssetId)
+
+        vm.selectDown()
+        XCTAssertNil(vm.selectedAssetId)
+    }
+
     // MARK: - Helpers
 
     /// Build a UUID with a predictable trailing byte so tests can refer
@@ -161,6 +274,28 @@ final class LibraryViewModelNavigationTests: XCTestCase {
         )
         bytes.15 = suffix
         return UUID(uuid: bytes)
+    }
+
+    /// Build a view model with 8 assets for testing row-based navigation.
+    /// With columnCount=4, this gives exactly 2 full rows.
+    @MainActor
+    private func makeEightAssetViewModel() async throws -> (LibraryViewModel, [Asset]) {
+        let catalog = try CatalogDatabase.inMemory()
+        var assets: [Asset] = []
+        for i in 0..<8 {
+            let asset = TestFixtures.makeAsset(
+                hash: "row\(i)",
+                captureDate: Date(timeIntervalSince1970: Double(8_000_000 - i * 1_000_000))
+            )
+            try catalog.insertAsset(asset)
+            assets.append(asset)
+        }
+
+        let store = PreviewStore(cacheDirectory: tempCacheDir)
+        let vm = LibraryViewModel(catalog: catalog, previewStore: store)
+        await vm.reloadAndWait()
+        XCTAssertEqual(vm.rows.map(\.id), assets.map(\.id))
+        return (vm, assets)
     }
 
     @MainActor

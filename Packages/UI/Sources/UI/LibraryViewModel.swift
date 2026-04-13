@@ -57,6 +57,10 @@ public final class LibraryViewModel: ObservableObject {
         case resetToFit
     }
 
+    /// Number of columns in the library grid. Shared between `LibraryView`
+    /// (layout) and navigation (Up/Down arrow skip by this count).
+    public static let columnCount = 4
+
     private var catalog: CatalogDatabase
     private var previewStore: PreviewStore
     private var reloadTask: Task<Void, Never>?
@@ -146,6 +150,26 @@ public final class LibraryViewModel: ObservableObject {
             return
         }
         selectedAssetId = prev
+    }
+
+    /// Move selection up by one row in the grid (skip back by `columnCount`).
+    /// No-op if nothing is selected or the target would be out of bounds.
+    public func selectUp() {
+        let ids = rows.map(\.id)
+        guard let target = Self.neighbor(in: ids, from: selectedAssetId, offset: -Self.columnCount) else {
+            return
+        }
+        selectedAssetId = target
+    }
+
+    /// Move selection down by one row in the grid (skip forward by `columnCount`).
+    /// No-op if nothing is selected or the target would be out of bounds.
+    public func selectDown() {
+        let ids = rows.map(\.id)
+        guard let target = Self.neighbor(in: ids, from: selectedAssetId, offset: Self.columnCount) else {
+            return
+        }
+        selectedAssetId = target
     }
 
     /// Persist a new rating for `assetId` and reload the grid so the

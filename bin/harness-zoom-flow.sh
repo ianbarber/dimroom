@@ -40,6 +40,32 @@ for bin in "$APP_BIN" "$CLI_BIN" "$FIXTURE_BIN"; do
     fi
 done
 
+# Helper: take a screenshot, assert it's a valid PNG
+take_screenshot() {
+    local name="$1"
+    local shot_path="$SCREENSHOT_DIR/$name.png"
+    echo "=== screenshot: $name ==="
+    local shot_out
+    shot_out=$("$CLI_BIN" screenshot "$shot_path" --socket "$SOCKET")
+    echo "$shot_out"
+    if ! echo "$shot_out" | grep -q '"ok"'; then
+        echo "ERROR: screenshot command did not return ok"
+        exit 1
+    fi
+    if [ ! -f "$shot_path" ]; then
+        echo "ERROR: screenshot file not created at $shot_path"
+        exit 1
+    fi
+    local file_type
+    file_type=$(file -b "$shot_path")
+    if ! echo "$file_type" | grep -qi "png"; then
+        echo "ERROR: screenshot is not a valid PNG: $file_type"
+        exit 1
+    fi
+    echo "  Screenshot verified: $file_type"
+}
+
+
 echo "=== Seeding catalog from $SEED_SRC ==="
 rm -rf "$WORK_DIR"
 mkdir -p "$WORK_DIR"
@@ -118,6 +144,8 @@ fi
 # Let SwiftUI settle after route change
 sleep 1
 
+mkdir -p "$SCREENSHOT_DIR"
+
 echo "=== state — assert isZoomed == false before any zoom ==="
 STATE_OUT=$("$CLI_BIN" state --socket "$SOCKET")
 echo "$STATE_OUT"
@@ -157,15 +185,7 @@ if [ "$IS_ZOOMED" != "true" ]; then
 fi
 echo "  OK: isZoomed == true (after zoomToggle)"
 
-echo "=== screenshot (zoomed) ==="
-mkdir -p "$SCREENSHOT_DIR"
-SHOT_PATH="$SCREENSHOT_DIR/zoom-toggled.png"
-SHOT_OUT=$("$CLI_BIN" screenshot "$SHOT_PATH" --socket "$SOCKET")
-echo "$SHOT_OUT"
-if ! echo "$SHOT_OUT" | grep -q '"ok"'; then
-    echo "ERROR: screenshot command did not return ok"
-    exit 1
-fi
+take_screenshot "zoom-toggled"
 
 echo "=== zoomReset ==="
 RESET_OUT=$("$CLI_BIN" zoom-reset --socket "$SOCKET")
@@ -191,14 +211,7 @@ if [ "$IS_ZOOMED" != "false" ]; then
 fi
 echo "  OK: isZoomed == false (after zoomReset)"
 
-echo "=== screenshot (reset) ==="
-SHOT_PATH="$SCREENSHOT_DIR/zoom-reset.png"
-SHOT_OUT=$("$CLI_BIN" screenshot "$SHOT_PATH" --socket "$SOCKET")
-echo "$SHOT_OUT"
-if ! echo "$SHOT_OUT" | grep -q '"ok"'; then
-    echo "ERROR: screenshot command did not return ok"
-    exit 1
-fi
+take_screenshot "zoom-reset"
 
 echo "=== quit ==="
 "$CLI_BIN" quit --socket "$SOCKET" 2>&1 || true

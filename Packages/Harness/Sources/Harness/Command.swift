@@ -22,6 +22,8 @@ public enum Command: Codable, Sendable, Equatable {
     case listImportSessions
     case selectNext
     case selectPrevious
+    case selectUp
+    case selectDown
     case zoomToggle
     case zoomReset
 
@@ -59,6 +61,8 @@ public enum Command: Codable, Sendable, Equatable {
         case listImportSessions
         case selectNext
         case selectPrevious
+        case selectUp
+        case selectDown
         case zoomToggle
         case zoomReset
     }
@@ -121,6 +125,10 @@ public enum Command: Codable, Sendable, Equatable {
             self = .selectNext
         case .selectPrevious:
             self = .selectPrevious
+        case .selectUp:
+            self = .selectUp
+        case .selectDown:
+            self = .selectDown
         case .zoomToggle:
             self = .zoomToggle
         case .zoomReset:
@@ -185,6 +193,10 @@ public enum Command: Codable, Sendable, Equatable {
             try container.encode(CommandType.selectNext, forKey: .type)
         case .selectPrevious:
             try container.encode(CommandType.selectPrevious, forKey: .type)
+        case .selectUp:
+            try container.encode(CommandType.selectUp, forKey: .type)
+        case .selectDown:
+            try container.encode(CommandType.selectDown, forKey: .type)
         case .zoomToggle:
             try container.encode(CommandType.zoomToggle, forKey: .type)
         case .zoomReset:

@@ -13,13 +13,12 @@ public struct LibraryView: View {
         self.viewModel = viewModel
     }
 
-    private static let columnCount = 4
     private static let cellSpacing: CGFloat = 8
 
     private var columns: [GridItem] {
         Array(
             repeating: GridItem(.flexible(), spacing: Self.cellSpacing),
-            count: Self.columnCount
+            count: LibraryViewModel.columnCount
         )
     }
 

@@ -118,6 +118,32 @@ final class ZoomStateTests: XCTestCase {
         XCTAssertEqual(state.zoomScale, 2.0, accuracy: 0.01)
     }
 
+    // MARK: - Zero-scale sentinel
+
+    func test_isAtFit_when_zoomScale_is_zero() {
+        let state = ZoomState(zoomScale: 0)
+        XCTAssertTrue(state.isAtFit(imageSize: landscape, containerSize: container))
+    }
+
+    func test_toggleFitTo100_from_zero_scale() {
+        // A single toggle from the initial zoomScale==0 sentinel should
+        // jump straight to 1.0 (100%), not silently stay at fit.
+        var state = ZoomState(zoomScale: 0)
+        state.toggleFitTo100(imageSize: landscape, containerSize: container)
+        XCTAssertEqual(state.zoomScale, 1.0, accuracy: 0.001)
+    }
+
+    func test_applyScrollZoom_from_zero_scale() {
+        // Scroll-zoom from the 0 sentinel should resolve to fit first,
+        // then apply the delta — result must be non-zero and near fit.
+        var state = ZoomState(zoomScale: 0)
+        let fit = ZoomState.fitScale(imageSize: landscape, containerSize: container)
+        state.applyScrollZoom(delta: 5.0, imageSize: landscape, containerSize: container)
+        XCTAssertGreaterThan(state.zoomScale, 0)
+        // Should be close to fit × 1.05 (delta 5 × 0.01 factor).
+        XCTAssertEqual(state.zoomScale, fit * 1.05, accuracy: 0.01)
+    }
+
     // MARK: - displayLabel
 
     func test_zoomDisplayLabel() {

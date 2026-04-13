@@ -72,3 +72,10 @@ jobs:
             exit 0
           fi
           bin/harness-import-flow.sh
+      - name: Run harness library flow
+        run: |
+          if [ ! -x bin/harness-library-flow.sh ]; then
+            echo "No harness library flow script yet — skipping."
+            exit 0
+          fi
+          bin/harness-library-flow.sh

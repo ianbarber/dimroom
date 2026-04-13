@@ -123,6 +123,22 @@ final class HarnessController: @unchecked Sendable {
 
         case .listImportSessions:
             return handleListImportSessions()
+
+        case .selectNext:
+            await MainActor.run { libraryViewModel.selectNext() }
+            return .ok()
+
+        case .selectPrevious:
+            await MainActor.run { libraryViewModel.selectPrevious() }
+            return .ok()
+
+        case .zoomToggle:
+            await MainActor.run { libraryViewModel.pendingZoomCommand = .toggleFitTo100 }
+            return .ok()
+
+        case .zoomReset:
+            await MainActor.run { libraryViewModel.pendingZoomCommand = .resetToFit }
+            return .ok()
         }
     }
 

@@ -74,6 +74,7 @@ public struct LoupeView: View {
                         zoomState.clampPan(imageSize: imageSize, containerSize: newSize)
                     }
                 }
+                syncIsZoomed()
             }
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity)
@@ -141,6 +142,7 @@ public struct LoupeView: View {
             .onEnded { _ in
                 magnifyStartScale = zoomState.zoomScale
                 panStartOffset = zoomState.panOffset
+                syncIsZoomed()
             }
     }
 
@@ -173,6 +175,7 @@ public struct LoupeView: View {
                 magnifyStartScale = zoomState.zoomScale
                 panStartOffset = zoomState.panOffset
                 flashIndicator()
+                syncIsZoomed()
             }
     }
 
@@ -187,6 +190,7 @@ public struct LoupeView: View {
         magnifyStartScale = zoomState.zoomScale
         panStartOffset = zoomState.panOffset
         flashIndicator()
+        syncIsZoomed()
     }
 
     // MARK: - Keyboard actions
@@ -198,6 +202,7 @@ public struct LoupeView: View {
         magnifyStartScale = zoomState.zoomScale
         panStartOffset = zoomState.panOffset
         flashIndicator()
+        syncIsZoomed()
     }
 
     private func resetZoom() {
@@ -207,6 +212,7 @@ public struct LoupeView: View {
         magnifyStartScale = zoomState.zoomScale
         panStartOffset = zoomState.panOffset
         flashIndicator()
+        syncIsZoomed()
     }
 
     private func resetZoomOnAssetChange() {
@@ -215,6 +221,7 @@ public struct LoupeView: View {
         panStartOffset = .zero
         showZoomIndicator = false
         hideIndicatorTask?.cancel()
+        viewModel.isZoomed = false
     }
 
     // MARK: - Zoom indicator
@@ -237,6 +244,19 @@ public struct LoupeView: View {
             guard !Task.isCancelled else { return }
             showZoomIndicator = false
         }
+    }
+
+    // MARK: - isZoomed sync
+
+    private func syncIsZoomed() {
+        guard let row = selectedRow, let image = loadedImage(for: row) else {
+            viewModel.isZoomed = false
+            return
+        }
+        let imageSize = image.size
+        let scale = effectiveZoomScale(imageSize: imageSize, containerSize: containerSize)
+        let fit = ZoomState.fitScale(imageSize: imageSize, containerSize: containerSize)
+        viewModel.isZoomed = scale > fit + 0.001
     }
 
     // MARK: - Helpers

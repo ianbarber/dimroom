@@ -436,6 +436,88 @@ final class CommandCodingTests: XCTestCase {
         )
     }
 
+    // MARK: - selectNext / selectPrevious / zoomToggle / zoomReset
+
+    func testSelectNextRoundTrip() throws {
+        let command = Command.selectNext
+        let data = try encoder.encode(command)
+        let decoded = try decoder.decode(Command.self, from: data)
+        XCTAssertEqual(command, decoded)
+    }
+
+    func testSelectNextJSON() throws {
+        let command = Command.selectNext
+        let data = try encoder.encode(command)
+        let json = String(data: data, encoding: .utf8)!
+        XCTAssertEqual(json, #"{"type":"selectNext"}"#)
+    }
+
+    func testDecodeSelectNextFromJSON() throws {
+        let json = #"{"type":"selectNext"}"#
+        let command = try decoder.decode(Command.self, from: Data(json.utf8))
+        XCTAssertEqual(command, .selectNext)
+    }
+
+    func testSelectPreviousRoundTrip() throws {
+        let command = Command.selectPrevious
+        let data = try encoder.encode(command)
+        let decoded = try decoder.decode(Command.self, from: data)
+        XCTAssertEqual(command, decoded)
+    }
+
+    func testSelectPreviousJSON() throws {
+        let command = Command.selectPrevious
+        let data = try encoder.encode(command)
+        let json = String(data: data, encoding: .utf8)!
+        XCTAssertEqual(json, #"{"type":"selectPrevious"}"#)
+    }
+
+    func testDecodeSelectPreviousFromJSON() throws {
+        let json = #"{"type":"selectPrevious"}"#
+        let command = try decoder.decode(Command.self, from: Data(json.utf8))
+        XCTAssertEqual(command, .selectPrevious)
+    }
+
+    func testZoomToggleRoundTrip() throws {
+        let command = Command.zoomToggle
+        let data = try encoder.encode(command)
+        let decoded = try decoder.decode(Command.self, from: data)
+        XCTAssertEqual(command, decoded)
+    }
+
+    func testZoomToggleJSON() throws {
+        let command = Command.zoomToggle
+        let data = try encoder.encode(command)
+        let json = String(data: data, encoding: .utf8)!
+        XCTAssertEqual(json, #"{"type":"zoomToggle"}"#)
+    }
+
+    func testDecodeZoomToggleFromJSON() throws {
+        let json = #"{"type":"zoomToggle"}"#
+        let command = try decoder.decode(Command.self, from: Data(json.utf8))
+        XCTAssertEqual(command, .zoomToggle)
+    }
+
+    func testZoomResetRoundTrip() throws {
+        let command = Command.zoomReset
+        let data = try encoder.encode(command)
+        let decoded = try decoder.decode(Command.self, from: data)
+        XCTAssertEqual(command, decoded)
+    }
+
+    func testZoomResetJSON() throws {
+        let command = Command.zoomReset
+        let data = try encoder.encode(command)
+        let json = String(data: data, encoding: .utf8)!
+        XCTAssertEqual(json, #"{"type":"zoomReset"}"#)
+    }
+
+    func testDecodeZoomResetFromJSON() throws {
+        let json = #"{"type":"zoomReset"}"#
+        let command = try decoder.decode(Command.self, from: Data(json.utf8))
+        XCTAssertEqual(command, .zoomReset)
+    }
+
     // MARK: - Route
 
     func testRouteAllCases() {

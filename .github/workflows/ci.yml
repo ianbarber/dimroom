@@ -79,3 +79,24 @@ jobs:
             exit 0
           fi
           bin/harness-library-flow.sh
+      - name: Run harness import UI flow
+        run: |
+          if [ ! -x bin/harness-import-ui-flow.sh ]; then
+            echo "No harness import UI flow script yet — skipping."
+            exit 0
+          fi
+          bin/harness-import-ui-flow.sh
+      - name: Run harness loupe flow
+        run: |
+          if [ ! -x bin/harness-loupe-flow.sh ]; then
+            echo "No harness loupe flow script yet — skipping."
+            exit 0
+          fi
+          bin/harness-loupe-flow.sh
+      - name: Run harness copypaste flow
+        run: |
+          if [ ! -x bin/harness-copypaste-flow.sh ]; then
+            echo "No harness copypaste flow script yet — skipping."
+            exit 0
+          fi
+          bin/harness-copypaste-flow.sh

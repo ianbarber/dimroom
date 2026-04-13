@@ -478,6 +478,46 @@ final class CommandCodingTests: XCTestCase {
         XCTAssertEqual(command, .selectPrevious)
     }
 
+    func testSelectUpRoundTrip() throws {
+        let command = Command.selectUp
+        let data = try encoder.encode(command)
+        let decoded = try decoder.decode(Command.self, from: data)
+        XCTAssertEqual(command, decoded)
+    }
+
+    func testSelectUpJSON() throws {
+        let command = Command.selectUp
+        let data = try encoder.encode(command)
+        let json = String(data: data, encoding: .utf8)!
+        XCTAssertEqual(json, #"{"type":"selectUp"}"#)
+    }
+
+    func testDecodeSelectUpFromJSON() throws {
+        let json = #"{"type":"selectUp"}"#
+        let command = try decoder.decode(Command.self, from: Data(json.utf8))
+        XCTAssertEqual(command, .selectUp)
+    }
+
+    func testSelectDownRoundTrip() throws {
+        let command = Command.selectDown
+        let data = try encoder.encode(command)
+        let decoded = try decoder.decode(Command.self, from: data)
+        XCTAssertEqual(command, decoded)
+    }
+
+    func testSelectDownJSON() throws {
+        let command = Command.selectDown
+        let data = try encoder.encode(command)
+        let json = String(data: data, encoding: .utf8)!
+        XCTAssertEqual(json, #"{"type":"selectDown"}"#)
+    }
+
+    func testDecodeSelectDownFromJSON() throws {
+        let json = #"{"type":"selectDown"}"#
+        let command = try decoder.decode(Command.self, from: Data(json.utf8))
+        XCTAssertEqual(command, .selectDown)
+    }
+
     func testZoomToggleRoundTrip() throws {
         let command = Command.zoomToggle
         let data = try encoder.encode(command)

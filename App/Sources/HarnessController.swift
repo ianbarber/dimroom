@@ -61,7 +61,8 @@ final class HarnessController: @unchecked Sendable {
                     assetCount: libraryViewModel.rows.count,
                     selectedAssetId: libraryViewModel.selectedAssetId,
                     minRating: libraryViewModel.minRating,
-                    scopeSessionId: libraryViewModel.scopeSessionId
+                    scopeSessionId: libraryViewModel.scopeSessionId,
+                    isZoomed: libraryViewModel.isZoomed
                 )
             }
             let encoder = JSONEncoder()

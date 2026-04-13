@@ -417,7 +417,7 @@ final class CommandCodingTests: XCTestCase {
         let json = String(data: data, encoding: .utf8)!
         XCTAssertEqual(
             json,
-            #"{"assetCount":3,"minRating":3,"route":"library","selectedAssetId":"12345678-1234-1234-1234-123456789012"}"#
+            #"{"assetCount":3,"isZoomed":false,"minRating":3,"route":"library","selectedAssetId":"12345678-1234-1234-1234-123456789012"}"#
         )
     }
 
@@ -425,14 +425,31 @@ final class CommandCodingTests: XCTestCase {
         // Swift's default JSONEncoder omits nil optionals rather than
         // emitting them as `null`. Pin that shape so the harness wire
         // format is explicit about what consumers will see. `minRating`
-        // is a non-optional Int with a default of 0 and must always be
-        // present in the encoded output.
+        // and `isZoomed` are non-optional and must always be present.
         let state = AppState(route: .library, assetCount: 0, selectedAssetId: nil)
         let data = try encoder.encode(state)
         let json = String(data: data, encoding: .utf8)!
         XCTAssertEqual(
             json,
-            #"{"assetCount":0,"minRating":0,"route":"library"}"#
+            #"{"assetCount":0,"isZoomed":false,"minRating":0,"route":"library"}"#
+        )
+    }
+
+    func testAppStateRoundTripWithIsZoomed() throws {
+        let state = AppState(route: .loupe, isZoomed: true)
+        let data = try encoder.encode(state)
+        let decoded = try decoder.decode(AppState.self, from: data)
+        XCTAssertEqual(state, decoded)
+        XCTAssertTrue(decoded.isZoomed)
+    }
+
+    func testAppStateJSONShapeWithIsZoomedTrue() throws {
+        let state = AppState(route: .loupe, isZoomed: true)
+        let data = try encoder.encode(state)
+        let json = String(data: data, encoding: .utf8)!
+        XCTAssertEqual(
+            json,
+            #"{"assetCount":0,"isZoomed":true,"minRating":0,"route":"loupe"}"#
         )
     }
 

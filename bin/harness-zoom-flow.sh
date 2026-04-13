@@ -1,14 +1,10 @@
 #!/usr/bin/env bash
-# harness-zoom-flow.sh — Layer C flow for zoomToggle / zoomReset.
+# harness-zoom-flow.sh — Layer C flow for zoom toggle/reset with isZoomed assertions.
 #
-# Seeds a 3-asset catalog, selects an asset, navigates to loupe, takes a
-# baseline screenshot, sends zoomToggle and screenshots, sends zoomToggle
-# again and screenshots (toggle back), sends zoomReset and screenshots.
-# Asserts all commands return ok and all screenshots are valid PNGs.
-#
-# Note: AppState does not include a zoom-level field, so this flow can
-# only assert command success + valid PNG screenshots — it cannot
-# programmatically confirm the zoom level changed.
+# Seeds a throwaway catalog, launches the app in harness mode, selects an
+# asset, navigates to loupe, then exercises zoomToggle and zoomReset
+# commands while asserting isZoomed state transitions in the AppState
+# response.
 #
 # Assumes the capture-screenshots skill already built the app, CLI, and
 # fixture seeder — this script must not rebuild. SCREENSHOT_DIR is set
@@ -68,6 +64,7 @@ take_screenshot() {
     fi
     echo "  Screenshot verified: $file_type"
 }
+
 
 echo "=== Seeding catalog from $SEED_SRC ==="
 rm -rf "$WORK_DIR"
@@ -144,45 +141,76 @@ if ! echo "$LOUPE_OUT" | grep -q '"ok"'; then
     exit 1
 fi
 
-# SwiftUI needs a tick after the route change before the loupe view is drawn.
+# Let SwiftUI settle after route change
 sleep 1
 
 mkdir -p "$SCREENSHOT_DIR"
 
-# Baseline screenshot
-take_screenshot "zoom-baseline"
-
-# --- zoomToggle: zoom in ---
-echo "=== zoomToggle (zoom in) ==="
-ZT_OUT=$("$CLI_BIN" zoom-toggle --socket "$SOCKET")
-echo "$ZT_OUT"
-if ! echo "$ZT_OUT" | grep -q '"ok"'; then
-    echo "ERROR: zoom-toggle did not return ok"
+echo "=== state — assert isZoomed == false before any zoom ==="
+STATE_OUT=$("$CLI_BIN" state --socket "$SOCKET")
+echo "$STATE_OUT"
+IS_ZOOMED=$(printf '%s' "$STATE_OUT" | /usr/bin/python3 -c "
+import json, sys
+doc = json.loads(sys.stdin.read())
+print(str(doc['data']['isZoomed']).lower())
+")
+if [ "$IS_ZOOMED" != "false" ]; then
+    echo "ERROR: expected isZoomed == false before zoom, got '$IS_ZOOMED'"
     exit 1
 fi
-sleep 1
-take_screenshot "zoom-toggled-in"
+echo "  OK: isZoomed == false (initial)"
 
-# --- zoomToggle again: zoom back out ---
-echo "=== zoomToggle (zoom back out) ==="
-ZT_OUT=$("$CLI_BIN" zoom-toggle --socket "$SOCKET")
-echo "$ZT_OUT"
-if ! echo "$ZT_OUT" | grep -q '"ok"'; then
-    echo "ERROR: zoom-toggle did not return ok"
+echo "=== zoomToggle — zoom in ==="
+ZOOM_OUT=$("$CLI_BIN" zoom-toggle --socket "$SOCKET")
+echo "$ZOOM_OUT"
+if ! echo "$ZOOM_OUT" | grep -q '"ok"'; then
+    echo "ERROR: zoomToggle did not return ok"
     exit 1
 fi
-sleep 1
-take_screenshot "zoom-toggled-out"
 
-# --- zoomReset ---
+# Give SwiftUI time to execute the zoom command via .onChange
+sleep 1
+
+echo "=== state — assert isZoomed == true after zoomToggle ==="
+STATE_OUT=$("$CLI_BIN" state --socket "$SOCKET")
+echo "$STATE_OUT"
+IS_ZOOMED=$(printf '%s' "$STATE_OUT" | /usr/bin/python3 -c "
+import json, sys
+doc = json.loads(sys.stdin.read())
+print(str(doc['data']['isZoomed']).lower())
+")
+if [ "$IS_ZOOMED" != "true" ]; then
+    echo "ERROR: expected isZoomed == true after zoomToggle, got '$IS_ZOOMED'"
+    exit 1
+fi
+echo "  OK: isZoomed == true (after zoomToggle)"
+
+take_screenshot "zoom-toggled"
+
 echo "=== zoomReset ==="
-ZR_OUT=$("$CLI_BIN" zoom-reset --socket "$SOCKET")
-echo "$ZR_OUT"
-if ! echo "$ZR_OUT" | grep -q '"ok"'; then
-    echo "ERROR: zoom-reset did not return ok"
+RESET_OUT=$("$CLI_BIN" zoom-reset --socket "$SOCKET")
+echo "$RESET_OUT"
+if ! echo "$RESET_OUT" | grep -q '"ok"'; then
+    echo "ERROR: zoomReset did not return ok"
     exit 1
 fi
+
 sleep 1
+
+echo "=== state — assert isZoomed == false after zoomReset ==="
+STATE_OUT=$("$CLI_BIN" state --socket "$SOCKET")
+echo "$STATE_OUT"
+IS_ZOOMED=$(printf '%s' "$STATE_OUT" | /usr/bin/python3 -c "
+import json, sys
+doc = json.loads(sys.stdin.read())
+print(str(doc['data']['isZoomed']).lower())
+")
+if [ "$IS_ZOOMED" != "false" ]; then
+    echo "ERROR: expected isZoomed == false after zoomReset, got '$IS_ZOOMED'"
+    exit 1
+fi
+echo "  OK: isZoomed == false (after zoomReset)"
+
 take_screenshot "zoom-reset"
 
 echo "=== quit ==="

@@ -16,18 +16,22 @@ public struct AppState: Codable, Sendable, Equatable {
     public let minRating: Int
     /// Active import-session scope. `nil` means "All Photos".
     public let scopeSessionId: UUID?
+    /// Whether the loupe is currently zoomed beyond fit-to-window.
+    public let isZoomed: Bool
 
     public init(
         route: Route,
         assetCount: Int = 0,
         selectedAssetId: UUID? = nil,
         minRating: Int = 0,
-        scopeSessionId: UUID? = nil
+        scopeSessionId: UUID? = nil,
+        isZoomed: Bool = false
     ) {
         self.route = route
         self.assetCount = assetCount
         self.selectedAssetId = selectedAssetId
         self.minRating = minRating
         self.scopeSessionId = scopeSessionId
+        self.isZoomed = isZoomed
     }
 }

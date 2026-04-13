@@ -39,6 +39,11 @@ public final class LibraryViewModel: ObservableObject {
     /// clears it back to `nil`.
     @Published public var pendingZoomCommand: ZoomCommand?
 
+    /// Whether the loupe is currently zoomed beyond fit-to-window.
+    /// LoupeView writes this after every zoom mutation so the harness
+    /// can assert zoom state without inspecting screenshots.
+    @Published public var isZoomed: Bool = false
+
     /// Lightweight value published when a rating changes so the UI can
     /// show brief visual feedback.
     public struct RatingToast: Equatable {

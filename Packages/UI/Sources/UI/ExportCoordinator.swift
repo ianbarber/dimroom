@@ -76,6 +76,7 @@ public final class ExportCoordinator: ObservableObject {
         for asset in assets {
             guard let localPath = asset.localPath else {
                 currentItem += 1
+                await Task.yield()
                 continue
             }
 
@@ -115,6 +116,7 @@ public final class ExportCoordinator: ObservableObject {
             }
 
             currentItem += 1
+            await Task.yield()
         }
 
         phase = .done(exportedCount: exportedCount)

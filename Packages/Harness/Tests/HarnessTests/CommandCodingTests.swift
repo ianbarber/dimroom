@@ -626,6 +626,48 @@ final class CommandCodingTests: XCTestCase {
         XCTAssertEqual(command, .zoomReset)
     }
 
+    // MARK: - undo / redo
+
+    func testUndoRoundTrip() throws {
+        let command = Command.undo
+        let data = try encoder.encode(command)
+        let decoded = try decoder.decode(Command.self, from: data)
+        XCTAssertEqual(command, decoded)
+    }
+
+    func testUndoJSON() throws {
+        let command = Command.undo
+        let data = try encoder.encode(command)
+        let json = String(data: data, encoding: .utf8)!
+        XCTAssertEqual(json, #"{"type":"undo"}"#)
+    }
+
+    func testDecodeUndoFromJSON() throws {
+        let json = #"{"type":"undo"}"#
+        let command = try decoder.decode(Command.self, from: Data(json.utf8))
+        XCTAssertEqual(command, .undo)
+    }
+
+    func testRedoRoundTrip() throws {
+        let command = Command.redo
+        let data = try encoder.encode(command)
+        let decoded = try decoder.decode(Command.self, from: data)
+        XCTAssertEqual(command, decoded)
+    }
+
+    func testRedoJSON() throws {
+        let command = Command.redo
+        let data = try encoder.encode(command)
+        let json = String(data: data, encoding: .utf8)!
+        XCTAssertEqual(json, #"{"type":"redo"}"#)
+    }
+
+    func testDecodeRedoFromJSON() throws {
+        let json = #"{"type":"redo"}"#
+        let command = try decoder.decode(Command.self, from: Data(json.utf8))
+        XCTAssertEqual(command, .redo)
+    }
+
     // MARK: - Route
 
     func testRouteAllCases() {

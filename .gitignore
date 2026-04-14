@@ -63,6 +63,7 @@ fastlane/test_output
 .env.local
 secrets.json
 google-oauth-client.json
+oauth.json
 
 # IDE
 .idea/

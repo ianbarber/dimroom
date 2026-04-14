@@ -2,14 +2,20 @@
 # agent-loop.sh — pick the next dimroom issue and run the matching agent prompt.
 #
 # Usage:
-#   bin/agent-loop.sh                 # one pass, exit
-#   bin/agent-loop.sh --watch         # loop forever, sleeping between passes
-#   bin/agent-loop.sh --issue N       # force a specific issue
-#   bin/agent-loop.sh --dry-run       # print what it would do, no execution
-#   bin/agent-loop.sh --post-merge N  # run cleanup-artifacts skill for merged PR N
-#   bin/agent-loop.sh --planner-only  # only plan needs-plan issues (run in parallel
-#                                     # with the main loop to pre-plan ahead of the
-#                                     # implementer)
+#   bin/agent-loop.sh                    # one pass, exit
+#   bin/agent-loop.sh --watch            # loop forever, sleeping between passes
+#   bin/agent-loop.sh --issue N          # force a specific issue
+#   bin/agent-loop.sh --dry-run          # print what it would do, no execution
+#   bin/agent-loop.sh --post-merge N     # run cleanup-artifacts skill for merged PR N
+#   bin/agent-loop.sh --planner-only     # only plan needs-plan issues
+#   bin/agent-loop.sh --reviewer-only    # only review in-review PRs
+#   bin/agent-loop.sh --implementer-only # only implement planned / in-progress / changes-requested
+#
+# Parallel setup — run each in a separate terminal:
+#   Terminal 1: bin/agent-loop.sh --watch --planner-only
+#   Terminal 2: bin/agent-loop.sh --watch --implementer-only
+#   Terminal 3: bin/agent-loop.sh --watch --reviewer-only
+# Each owns different state labels so they don't race on the same issue.
 #
 # Requirements:
 #   - gh authenticated against the dimroom repo
@@ -27,6 +33,8 @@ FORCE_ISSUE=""
 POST_MERGE_PR=""
 SLEEP_SECONDS=300
 PLANNER_ONLY=0
+REVIEWER_ONLY=0
+IMPLEMENTER_ONLY=0
 
 while [ $# -gt 0 ]; do
   case "$1" in
@@ -36,13 +44,22 @@ while [ $# -gt 0 ]; do
     --post-merge) POST_MERGE_PR="$2"; shift 2 ;;
     --sleep) SLEEP_SECONDS="$2"; shift 2 ;;
     --planner-only) PLANNER_ONLY=1; shift ;;
+    --reviewer-only) REVIEWER_ONLY=1; shift ;;
+    --implementer-only) IMPLEMENTER_ONLY=1; shift ;;
     -h|--help)
-      sed -n '2,12p' "$0"
+      sed -n '2,18p' "$0"
       exit 0
       ;;
     *) echo "Unknown arg: $1" >&2; exit 2 ;;
   esac
 done
+
+# Enforce mutual exclusivity of the role-specific modes.
+MODE_COUNT=$((PLANNER_ONLY + REVIEWER_ONLY + IMPLEMENTER_ONLY))
+if [ "$MODE_COUNT" -gt 1 ]; then
+  echo "--planner-only, --reviewer-only, and --implementer-only are mutually exclusive" >&2
+  exit 2
+fi
 
 LOG_DIR="$REPO_ROOT/.artifacts/logs"
 mkdir -p "$LOG_DIR"
@@ -76,15 +93,26 @@ fi
 
 # State precedence: highest priority first.
 #
-# --planner-only restricts to state:needs-plan so a separate loop can
-# plan issues ahead of the implementer. The default loop then drops
-# needs-plan from its precedence to avoid racing the planner on the
-# same issue.
+# Role-specific modes restrict the precedence list so multiple loops
+# can run in parallel without racing on the same issue. Each mode owns
+# a disjoint set of state labels.
 if [ "$PLANNER_ONLY" -eq 1 ]; then
   STATE_PRECEDENCE=(
     "state:needs-plan"
   )
   log "planner-only mode: only processing state:needs-plan"
+elif [ "$REVIEWER_ONLY" -eq 1 ]; then
+  STATE_PRECEDENCE=(
+    "state:in-review"
+  )
+  log "reviewer-only mode: only processing state:in-review"
+elif [ "$IMPLEMENTER_ONLY" -eq 1 ]; then
+  STATE_PRECEDENCE=(
+    "state:changes-requested"
+    "state:in-progress"
+    "state:planned"
+  )
+  log "implementer-only mode: processing changes-requested / in-progress / planned"
 else
   STATE_PRECEDENCE=(
     "state:changes-requested"

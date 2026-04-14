@@ -50,6 +50,7 @@ fastlane/test_output
 # Agent loop scratch space
 .artifacts/
 .worktrees/
+.review-worktrees/
 .claude/local/
 .claude/cache/
 .claude/worktrees/

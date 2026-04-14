@@ -34,10 +34,19 @@ You are reviewing a PR for **dimroom**. You will read the diff adversarially, ru
    - Are there new dependencies? Are they justified?
    - Are tests genuinely testing behaviour, or are they tautologies that mirror the implementation?
 
-5. **Run the verification ladder locally** (in a fresh worktree or by checking out the PR branch):
-   - `swift test` for affected packages
-   - Snapshot tests
-   - Harness smoke flow described in the PR's test plan
+5. **Run the verification ladder locally** in an isolated worktree. The review may run in parallel with the implementer working on a different issue, so the reviewer MUST use its own worktree path and scoped paths for any app processes it launches.
+   - **Worktree:** `git worktree add .review-worktrees/pr-${PR_NUMBER} <branch>` (use the PR's headRefName). If the path already exists from a previous review run, remove it first with `git worktree remove`.
+   - Work inside that worktree for all verification. Never `cd` into the main checkout or into `.worktrees/issue-*` (those belong to the implementer).
+   - `swift test` for affected packages — runs inside the review worktree, uses its own `.build/`.
+   - Snapshot tests — same.
+   - Harness smoke flow described in the PR's test plan. If a flow launches the app, invoke it with a unique socket and scoped caches to avoid colliding with a parallel implementer run:
+     ```bash
+     DIMROOM_HARNESS_SOCKET="/tmp/dimroom-review-$$.sock" \
+       DIMROOM_ORIGINALS_DIR="$(mktemp -d)" \
+       bash bin/harness-<flow>.sh
+     ```
+     (The flow scripts typically already use `$$`-based socket paths and respect these env vars; pass explicit values if a flow hardcodes defaults.)
+   - After verification, `git worktree remove .review-worktrees/pr-${PR_NUMBER}` to leave the tree clean.
    - **Do not just trust CI** — CI's harness fixtures may be a subset.
 
 6. **Look at the screenshots** attached to the PR. Compare them to the goldens / to what the plan said the UI would look like. Flag obvious regressions.

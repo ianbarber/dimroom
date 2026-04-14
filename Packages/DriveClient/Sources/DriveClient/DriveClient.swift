@@ -76,6 +76,30 @@ public actor DriveClient {
         accessTokenExpiresAt = nil
     }
 
+    /// Download a Drive file's media to `destinationURL`. Issues
+    /// `GET files/{id}?alt=media` through `AuthorizedSession`, writing
+    /// atomically to disk so a partial download never masquerades as a
+    /// complete file. Progress callback fires once at completion — the
+    /// buffered `HTTPClient` abstraction can't surface byte-level progress
+    /// today, but the signature lets us swap in a streaming delegate later.
+    public func downloadFile(
+        id: String,
+        to destinationURL: URL,
+        progress: (@Sendable (Double) -> Void)? = nil
+    ) async throws {
+        let url = URL(string: "https://www.googleapis.com/drive/v3/files/\(id)?alt=media")!
+        let request = URLRequest(url: url)
+        let session = AuthorizedSession(client: httpClient, provider: self)
+        let (data, response) = try await session.data(for: request)
+        guard response.statusCode == 200 else {
+            throw DriveClientError.downloadFailed(status: response.statusCode)
+        }
+        let parent = destinationURL.deletingLastPathComponent()
+        try FileManager.default.createDirectory(at: parent, withIntermediateDirectories: true)
+        try data.write(to: destinationURL, options: .atomic)
+        progress?(1.0)
+    }
+
     public func authenticate(options: AuthenticateOptions = AuthenticateOptions()) async throws {
         let server = redirectServerFactory()
         let port: UInt16

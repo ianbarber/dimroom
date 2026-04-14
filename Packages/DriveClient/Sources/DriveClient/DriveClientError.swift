@@ -11,4 +11,5 @@ public enum DriveClientError: Error, Equatable {
     case authorizationTimedOut
     case stateMismatch
     case keychainFailure(OSStatus)
+    case downloadFailed(status: Int)
 }

@@ -124,6 +124,19 @@ final class CatalogDatabaseTests: XCTestCase {
         XCTAssertNotNil(allResults.first?.deletedAt)
     }
 
+    func testRestoreAssetClearsDeletedAt() throws {
+        let db = try makeDatabase()
+        let asset = makeSampleAsset()
+        try db.insertAsset(asset)
+        try db.deleteAsset(id: asset.id)
+
+        try db.restoreAsset(id: asset.id)
+
+        let defaultResults = try db.fetchAssets()
+        XCTAssertEqual(defaultResults.count, 1)
+        XCTAssertNil(defaultResults.first?.deletedAt)
+    }
+
     // MARK: - Filter by Rating
 
     func testFilterByRating() throws {

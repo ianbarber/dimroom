@@ -17,6 +17,13 @@ public struct LoupeView: View {
     @State private var showZoomIndicator = false
     @State private var hideIndicatorTask: Task<Void, Never>?
     @State private var containerSize: CGSize = .zero
+    /// Local URLs we've resolved to full-resolution originals during
+    /// this Loupe session. Key is `asset.id`. A miss here falls back to
+    /// the preview, so Loupe never blocks on a fetch that's in flight.
+    @State private var originalURLs: [UUID: URL] = [:]
+    /// Ids we've already kicked off a fetch for in this session. Prevents
+    /// the `.onChange` triggers from spawning duplicate work.
+    @State private var requestedOriginalIds: Set<UUID> = []
 
     public init(viewModel: LibraryViewModel) {
         self.viewModel = viewModel
@@ -58,6 +65,22 @@ public struct LoupeView: View {
                         }
                     }
                 }
+
+                // Originals download overlay — top-right corner, visible
+                // only while the cache is fetching bytes for the selected
+                // asset. Falls back to the preview underneath while the
+                // download is in flight so the user still sees something.
+                if let row = selectedRow,
+                   viewModel.downloadingAssetIds.contains(row.id) {
+                    VStack {
+                        HStack {
+                            Spacer()
+                            DownloadIndicatorView()
+                                .padding(12)
+                        }
+                        Spacer()
+                    }
+                }
             }
             .onAppear {
                 containerSize = geometry.size
@@ -90,6 +113,21 @@ public struct LoupeView: View {
                 resetZoom()
             }
             viewModel.pendingZoomCommand = nil
+        }
+        .onChange(of: viewModel.isZoomed) { _, zoomed in
+            guard zoomed, let id = viewModel.selectedAssetId else { return }
+            requestOriginalIfNeeded(assetId: id)
+        }
+    }
+
+    private func requestOriginalIfNeeded(assetId: UUID) {
+        guard originalURLs[assetId] == nil,
+              !requestedOriginalIds.contains(assetId) else { return }
+        requestedOriginalIds.insert(assetId)
+        Task { @MainActor in
+            if let url = await viewModel.fetchOriginalIfNeeded(assetId: assetId) {
+                originalURLs[assetId] = url
+            }
         }
     }
 
@@ -274,6 +312,10 @@ public struct LoupeView: View {
     }
 
     private func loadedImage(for row: LibraryRow) -> NSImage? {
+        if let originalURL = originalURLs[row.id],
+           let image = NSImage(contentsOf: originalURL) {
+            return image
+        }
         guard let url = row.previewURL else { return nil }
         return NSImage(contentsOf: url)
     }

@@ -1,5 +1,6 @@
 import AppKit
 import Catalog
+import DriveClient
 import EditEngine
 import Harness
 import ImportKit
@@ -73,6 +74,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     private var originalsDirectory: URL?
     private var harnessController: HarnessController?
     private var harnessWindow: NSWindow?
+    private var originalsCoordinator: OriginalsCoordinator?
 
     func applicationDidFinishLaunching(_ notification: Notification) {
         let args = ProcessInfo.processInfo.arguments
@@ -101,6 +103,25 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
                 catalog: resolvedCatalog,
                 previewStore: resolvedPreviewStore
             )
+        }
+
+        if let resolvedCatalog {
+            let cacheDir = resolveOriginalsCacheDirectory(from: args)
+            let budget = resolveOriginalsCacheBudget()
+            let downloader: OriginalsDownloader = resolveDriveClient() ?? UnavailableOriginalsDownloader()
+            let coordinator = OriginalsCoordinator(catalog: resolvedCatalog)
+            if let cache = try? OriginalsCache(
+                directory: cacheDir,
+                budgetBytes: budget,
+                downloader: downloader,
+                onEvict: { [weak coordinator] id in
+                    coordinator?.handleEviction(assetId: id)
+                }
+            ) {
+                coordinator.attach(cache: cache)
+                libraryViewModel.originalFetcher = coordinator
+                originalsCoordinator = coordinator
+            }
         }
 
         guard args.contains("--harness") else { return }
@@ -139,7 +160,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             previewStore: resolvedPreviewStore,
             libraryViewModel: libraryViewModel,
             editClipboard: editClipboard,
-            exportCoordinator: exportCoordinator
+            exportCoordinator: exportCoordinator,
+            originalsCoordinator: originalsCoordinator
         )
         do {
             try controller.start(socketPath: socketPath)
@@ -300,6 +322,50 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         return appSupport
             .appendingPathComponent("Dimroom", isDirectory: true)
             .appendingPathComponent("originals", isDirectory: true)
+    }
+
+    /// Directory used by the LRU originals cache. Defaults to the same
+    /// location as the import-staging directory so pinned originals and
+    /// downloaded originals share storage. `--originals-cache <path>`
+    /// overrides for harness/test runs.
+    private func resolveOriginalsCacheDirectory(from args: [String]) -> URL {
+        if let index = args.firstIndex(of: "--originals-cache"),
+           index + 1 < args.count {
+            return URL(fileURLWithPath: args[index + 1])
+        }
+        return resolveOriginalsDirectory()
+    }
+
+    /// Byte budget for the originals cache. Defaults to 10 GB; override
+    /// via `DIMROOM_ORIGINALS_CACHE_BYTES` for tests.
+    private func resolveOriginalsCacheBudget() -> Int64 {
+        if let raw = ProcessInfo.processInfo.environment["DIMROOM_ORIGINALS_CACHE_BYTES"],
+           let value = Int64(raw), value > 0 {
+            return value
+        }
+        return 10 * 1024 * 1024 * 1024
+    }
+
+    /// Best-effort `DriveClient` construction: returns `nil` when OAuth
+    /// isn't configured so harness runs without credentials don't fail
+    /// to launch. The fallback downloader surfaces "unreachable" to the
+    /// UI, which is the documented degraded state.
+    private func resolveDriveClient() -> DriveClient? {
+        guard let config = try? OAuthConfig.load() else { return nil }
+        return DriveClient(config: config)
+    }
+}
+
+/// Downloader used when Drive credentials aren't configured. Keeps the
+/// cache layer functional for already-resident (pinned) files while
+/// making the degraded state explicit for Drive-backed assets.
+private struct UnavailableOriginalsDownloader: OriginalsDownloader {
+    func download(
+        driveFileId: String,
+        to destinationURL: URL,
+        progress: (@Sendable (Double) -> Void)?
+    ) async throws {
+        throw OriginalsCacheError.unreachable
     }
 }
 

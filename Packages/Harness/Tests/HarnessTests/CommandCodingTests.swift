@@ -594,6 +594,32 @@ final class CommandCodingTests: XCTestCase {
         )
     }
 
+    func testFetchOriginalRoundTrip() throws {
+        let id = UUID(uuidString: "12345678-1234-1234-1234-123456789012")!
+        let command = Command.fetchOriginal(assetId: id)
+        let data = try encoder.encode(command)
+        let decoded = try decoder.decode(Command.self, from: data)
+        XCTAssertEqual(command, decoded)
+    }
+
+    func testFetchOriginalJSON() throws {
+        let id = UUID(uuidString: "12345678-1234-1234-1234-123456789012")!
+        let command = Command.fetchOriginal(assetId: id)
+        let data = try encoder.encode(command)
+        let json = String(data: data, encoding: .utf8)!
+        XCTAssertEqual(
+            json,
+            #"{"assetId":"12345678-1234-1234-1234-123456789012","type":"fetchOriginal"}"#
+        )
+    }
+
+    func testDecodeFetchOriginalFromJSON() throws {
+        let json = #"{"type":"fetchOriginal","assetId":"12345678-1234-1234-1234-123456789012"}"#
+        let command = try decoder.decode(Command.self, from: Data(json.utf8))
+        let expected = UUID(uuidString: "12345678-1234-1234-1234-123456789012")!
+        XCTAssertEqual(command, .fetchOriginal(assetId: expected))
+    }
+
     func testDecodeZoomResetFromJSON() throws {
         let json = #"{"type":"zoomReset"}"#
         let command = try decoder.decode(Command.self, from: Data(json.utf8))

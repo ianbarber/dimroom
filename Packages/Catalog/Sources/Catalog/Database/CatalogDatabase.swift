@@ -35,6 +35,15 @@ public final class CatalogDatabase: Sendable {
         }
     }
 
+    /// O(1) lookup by primary key, used on hot paths (originals fetch,
+    /// eviction bookkeeping) where scanning `fetchAssets(filter:)` would
+    /// be linear in catalog size.
+    public func fetchAsset(id: UUID) throws -> Asset? {
+        try dbQueue.read { db in
+            try Asset.fetchOne(db, key: id)
+        }
+    }
+
     public func fetchAssets(filter: AssetFilter = AssetFilter()) throws -> [Asset] {
         try dbQueue.read { db in
             var request = Asset.all()
@@ -69,6 +78,18 @@ public final class CatalogDatabase: Sendable {
         try dbQueue.write { db in
             if var asset = try Asset.fetchOne(db, key: assetId) {
                 asset.rotation = rotation
+                try asset.update(db)
+            }
+        }
+    }
+
+    /// Set `Asset.localPath` for the given asset. Passing `nil` clears it,
+    /// which is what the originals cache does on eviction so stale paths
+    /// never serve a deleted file.
+    public func updateLocalPath(assetId: UUID, path: String?) throws {
+        try dbQueue.write { db in
+            if var asset = try Asset.fetchOne(db, key: assetId) {
+                asset.localPath = path
                 try asset.update(db)
             }
         }

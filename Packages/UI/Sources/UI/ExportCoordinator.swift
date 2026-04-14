@@ -57,13 +57,17 @@ public final class ExportCoordinator: ObservableObject {
     ///   - jpegQuality: JPEG quality 0-100. Ignored for non-JPEG.
     ///   - applyEdits: Whether to bake edits into the output.
     ///   - destinationDirectory: Directory to write exported files into.
+    ///   - originalFetcher: Optional coordinator used to pull originals
+    ///     from Drive on demand when the asset isn't present locally.
+    ///     When `nil`, missing-local assets are skipped as before.
     public func run(
         assets: [Asset],
         catalog: CatalogDatabase,
         format: ExportFormat,
         jpegQuality: Int,
         applyEdits: Bool,
-        destinationDirectory: URL
+        destinationDirectory: URL,
+        originalFetcher: (any OriginalFetcher)? = nil
     ) async {
         phase = .exporting
         currentItem = 0
@@ -74,7 +78,13 @@ public final class ExportCoordinator: ObservableObject {
         var exportedCount = 0
 
         for asset in assets {
-            guard let localPath = asset.localPath else {
+            var resolvedLocalPath = asset.localPath
+            if resolvedLocalPath == nil, let fetcher = originalFetcher {
+                if let url = await fetcher.fetchOriginal(assetId: asset.id) {
+                    resolvedLocalPath = url.path
+                }
+            }
+            guard let localPath = resolvedLocalPath else {
                 currentItem += 1
                 await Task.yield()
                 continue

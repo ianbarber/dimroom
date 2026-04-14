@@ -27,6 +27,7 @@ public enum Command: Codable, Sendable, Equatable {
     case zoomToggle
     case zoomReset
     case export(destinationPath: String, format: String, applyEdits: Bool)
+    case fetchOriginal(assetId: UUID)
 
     private enum CodingKeys: String, CodingKey {
         case type
@@ -70,6 +71,7 @@ public enum Command: Codable, Sendable, Equatable {
         case zoomToggle
         case zoomReset
         case export
+        case fetchOriginal
     }
 
     public init(from decoder: Decoder) throws {
@@ -143,6 +145,9 @@ public enum Command: Codable, Sendable, Equatable {
             let format = try container.decode(String.self, forKey: .format)
             let applyEdits = try container.decode(Bool.self, forKey: .applyEdits)
             self = .export(destinationPath: destinationPath, format: format, applyEdits: applyEdits)
+        case .fetchOriginal:
+            let assetId = try container.decode(UUID.self, forKey: .assetId)
+            self = .fetchOriginal(assetId: assetId)
         }
     }
 
@@ -216,6 +221,9 @@ public enum Command: Codable, Sendable, Equatable {
             try container.encode(destinationPath, forKey: .destinationPath)
             try container.encode(format, forKey: .format)
             try container.encode(applyEdits, forKey: .applyEdits)
+        case .fetchOriginal(let assetId):
+            try container.encode(CommandType.fetchOriginal, forKey: .type)
+            try container.encode(assetId, forKey: .assetId)
         }
     }
 }

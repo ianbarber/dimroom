@@ -12,6 +12,7 @@ let package = Package(
         .package(path: "../Packages/ImportKit"),
         .package(path: "../Packages/Previews"),
         .package(path: "../Packages/UI"),
+        .package(path: "../Packages/DriveClient"),
     ],
     targets: [
         .executableTarget(
@@ -23,8 +24,18 @@ let package = Package(
                 .product(name: "ImportKit", package: "ImportKit"),
                 .product(name: "Previews", package: "Previews"),
                 .product(name: "UI", package: "UI"),
+                .product(name: "DriveClient", package: "DriveClient"),
             ],
             path: "Sources"
+        ),
+        .testTarget(
+            name: "DimroomTests",
+            dependencies: [
+                "Dimroom",
+                .product(name: "Catalog", package: "Catalog"),
+                .product(name: "DriveClient", package: "DriveClient"),
+            ],
+            path: "Tests"
         ),
     ]
 )

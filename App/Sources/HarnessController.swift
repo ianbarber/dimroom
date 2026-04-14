@@ -16,6 +16,7 @@ final class HarnessController: @unchecked Sendable {
     private let libraryViewModel: LibraryViewModel
     private let editClipboard: EditClipboard
     private let exportCoordinator: ExportCoordinator
+    private let originalsCoordinator: OriginalsCoordinator?
     private var server: HarnessServer?
 
     init(
@@ -25,7 +26,8 @@ final class HarnessController: @unchecked Sendable {
         previewStore: PreviewStore,
         libraryViewModel: LibraryViewModel,
         editClipboard: EditClipboard,
-        exportCoordinator: ExportCoordinator
+        exportCoordinator: ExportCoordinator,
+        originalsCoordinator: OriginalsCoordinator? = nil
     ) {
         self.router = router
         self.catalog = catalog
@@ -34,6 +36,7 @@ final class HarnessController: @unchecked Sendable {
         self.libraryViewModel = libraryViewModel
         self.editClipboard = editClipboard
         self.exportCoordinator = exportCoordinator
+        self.originalsCoordinator = originalsCoordinator
     }
 
     func start(socketPath: String = HarnessServer.defaultSocketPath) throws {
@@ -155,7 +158,24 @@ final class HarnessController: @unchecked Sendable {
 
         case .export(let destinationPath, let format, let applyEdits):
             return await handleExport(destinationPath: destinationPath, format: format, applyEdits: applyEdits)
+
+        case .fetchOriginal(let assetId):
+            return await handleFetchOriginal(assetId: assetId)
         }
+    }
+
+    // MARK: - Fetch original
+
+    private func handleFetchOriginal(assetId: UUID) async -> Response {
+        guard let coordinator = originalsCoordinator else {
+            return .error("originals coordinator not configured")
+        }
+        guard let url = await coordinator.fetchOriginal(assetId: assetId) else {
+            return .error("failed to fetch original; Drive unreachable or asset missing driveFileId")
+        }
+        return .ok(data: .dictionary([
+            "localPath": .string(url.path),
+        ]))
     }
 
     // MARK: - Import

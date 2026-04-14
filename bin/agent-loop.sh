@@ -328,15 +328,26 @@ fi
 
 sync_main() {
   log "pulling latest main..."
-  # Serialize pulls across parallel loops using a flock on a repo-local
-  # lock file. Without this, concurrent `git pull` calls produce
+  # Serialize pulls across parallel loops with a mkdir-based lock
+  # (atomic on POSIX, works on macOS where flock isn't available).
+  # Without this, concurrent `git pull` calls produce
   # "Cannot fast-forward to multiple branches" errors.
-  local lock="$REPO_ROOT/.artifacts/sync-main.lock"
-  mkdir -p "$(dirname "$lock")"
-  (
-    flock -x -w 60 9 || { log "  sync_main: flock timeout; skipping pull this pass"; exit 0; }
-    git pull --ff-only origin main 2>&1 | while read -r line; do log "  $line"; done
-  ) 9>"$lock" || log "  sync_main: non-fatal pull issue, continuing"
+  local lockdir="$REPO_ROOT/.artifacts/sync-main.lock.d"
+  mkdir -p "$(dirname "$lockdir")"
+  local waited=0
+  while ! mkdir "$lockdir" 2>/dev/null; do
+    if [ "$waited" -ge 60 ]; then
+      log "  sync_main: lock timeout after 60s; skipping pull this pass"
+      return 0
+    fi
+    sleep 1
+    waited=$((waited + 1))
+  done
+  trap 'rmdir "$lockdir" 2>/dev/null || true' EXIT RETURN
+  git pull --ff-only origin main 2>&1 | while read -r line; do log "  $line"; done || \
+    log "  sync_main: non-fatal pull issue, continuing"
+  rmdir "$lockdir" 2>/dev/null || true
+  trap - EXIT RETURN
 }
 
 if [ "$WATCH" -eq 1 ]; then

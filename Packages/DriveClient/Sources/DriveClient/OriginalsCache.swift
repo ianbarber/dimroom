@@ -66,27 +66,6 @@ public actor OriginalsCache {
         try? index.save(to: indexURL)
     }
 
-    /// Pin an existing local file into the cache (no Drive round-trip).
-    /// Used when the import path has already staged the original; we
-    /// wrap it so eviction doesn't delete the only local copy.
-    public func adoptPinnedFile(assetId: UUID, sourceURL: URL) throws -> URL {
-        let filename = "\(assetId.uuidString)-\(sourceURL.lastPathComponent)"
-        let destination = directory.appendingPathComponent(filename)
-        if sourceURL != destination, !fileManager.fileExists(atPath: destination.path) {
-            try fileManager.copyItem(at: sourceURL, to: destination)
-        }
-        let attrs = try fileManager.attributesOfItem(atPath: destination.path)
-        let size = (attrs[.size] as? NSNumber)?.int64Value ?? 0
-        index.entries[assetId.uuidString] = OriginalsCacheIndex.Entry(
-            filename: filename,
-            bytes: size,
-            lastAccess: clock(),
-            pinned: true
-        )
-        try index.save(to: indexURL)
-        return destination
-    }
-
     /// Return a local URL for the original. On a hit, bumps the access
     /// time. On a miss, downloads via `OriginalsDownloader`, writes
     /// under `directory`, updates the index, and evicts LRU entries to
@@ -150,8 +129,7 @@ public actor OriginalsCache {
         index.entries[assetId.uuidString] = OriginalsCacheIndex.Entry(
             filename: destination.lastPathComponent,
             bytes: size,
-            lastAccess: clock(),
-            pinned: false
+            lastAccess: clock()
         )
         evictIfNeeded(protectedId: assetId)
         try? index.save(to: indexURL)
@@ -163,7 +141,7 @@ public actor OriginalsCache {
     private func evictIfNeeded(protectedId: UUID) {
         guard index.totalBytes > budgetBytes else { return }
         let sorted = index.entries
-            .filter { $0.key != protectedId.uuidString && !$0.value.pinned }
+            .filter { $0.key != protectedId.uuidString }
             .sorted { $0.value.lastAccess < $1.value.lastAccess }
 
         for (key, entry) in sorted {

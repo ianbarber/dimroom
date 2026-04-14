@@ -9,9 +9,6 @@ struct OriginalsCacheIndex: Codable, Equatable {
         var filename: String
         var bytes: Int64
         var lastAccess: Date
-        /// When `true`, the file is the only local copy (e.g. an asset
-        /// imported but not yet uploaded to Drive). Eviction skips these.
-        var pinned: Bool
     }
 
     var entries: [String: Entry]

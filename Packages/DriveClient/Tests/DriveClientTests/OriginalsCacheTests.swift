@@ -270,44 +270,6 @@ final class OriginalsCacheTests: XCTestCase {
         XCTAssertEqual(c2, 0)
     }
 
-    func testPinnedEntriesAreNotEvicted() async throws {
-        let dir = try makeTempDirectory()
-        defer { try? FileManager.default.removeItem(at: dir) }
-        let pinnedId = UUID()
-        let downloadId = UUID()
-
-        // Stage a pinned file on disk as if import had just placed it.
-        let sourceDir = try makeTempDirectory()
-        defer { try? FileManager.default.removeItem(at: sourceDir) }
-        let sourceURL = sourceDir.appendingPathComponent("imported.jpg")
-        try Data(repeating: 0x01, count: 500).write(to: sourceURL)
-
-        let payload = Data(repeating: 0x66, count: 300)
-        let downloader = FakeDownloader(payloads: ["d": payload])
-        let clock = AdvancingClock(start: Date(timeIntervalSince1970: 1_000))
-        let evictions = EvictionLog()
-        let cache = try OriginalsCache(
-            directory: dir,
-            budgetBytes: 400,
-            downloader: downloader,
-            clock: clock.now,
-            onEvict: { id in evictions.record(id) }
-        )
-
-        _ = try await cache.adoptPinnedFile(assetId: pinnedId, sourceURL: sourceURL)
-        clock.advance(by: 10)
-        _ = try await cache.fetch(
-            assetId: downloadId, driveFileId: "d", suggestedFilename: "d.jpg", progress: nil
-        )
-
-        // Pinned file must remain even though total (800) exceeds budget.
-        let pinnedCached = await cache.cachedURL(for: pinnedId)
-        XCTAssertNotNil(pinnedCached)
-        let downloadCached = await cache.cachedURL(for: downloadId)
-        XCTAssertNotNil(downloadCached)
-        XCTAssertFalse(evictions.ids.contains(pinnedId))
-    }
-
     // MARK: - Helpers
 
     private func readIndex(at dir: URL) async throws -> OriginalsCacheIndex {

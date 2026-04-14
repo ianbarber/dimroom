@@ -634,6 +634,121 @@ final class LibraryViewModelTests: XCTestCase {
         XCTAssertFalse(vm.isZoomed)
     }
 
+    // MARK: - Undo / redo integration
+
+    @MainActor
+    func testUndoAfterSetRatingRestoresPreviousValue() async throws {
+        let catalog = try CatalogDatabase.inMemory()
+        let asset = TestFixtures.makeAsset(hash: "undo-rating")
+        try catalog.insertAsset(asset)
+
+        let store = PreviewStore(cacheDirectory: tempCacheDir)
+        let vm = LibraryViewModel(catalog: catalog, previewStore: store)
+        let stack = UndoStack(catalog: catalog, libraryViewModel: vm)
+        vm.undoStack = stack
+        await vm.reloadAndWait()
+
+        await vm.setRating(for: asset.id, to: 3)
+        XCTAssertEqual(vm.rows.first?.asset.rating, 3)
+        XCTAssertTrue(stack.canUndo)
+
+        await stack.undo()
+        XCTAssertEqual(vm.rows.first?.asset.rating, 0)
+        XCTAssertFalse(stack.canUndo)
+        XCTAssertTrue(stack.canRedo)
+    }
+
+    @MainActor
+    func testRedoAfterUndoReappliesRatingChange() async throws {
+        let catalog = try CatalogDatabase.inMemory()
+        let asset = TestFixtures.makeAsset(hash: "redo-rating")
+        try catalog.insertAsset(asset)
+
+        let store = PreviewStore(cacheDirectory: tempCacheDir)
+        let vm = LibraryViewModel(catalog: catalog, previewStore: store)
+        let stack = UndoStack(catalog: catalog, libraryViewModel: vm)
+        vm.undoStack = stack
+        await vm.reloadAndWait()
+
+        await vm.setRating(for: asset.id, to: 4)
+        await stack.undo()
+        XCTAssertEqual(vm.rows.first?.asset.rating, 0)
+
+        await stack.redo()
+        XCTAssertEqual(vm.rows.first?.asset.rating, 4)
+    }
+
+    /// Two rating changes in a row should push two frames. Two undos walk
+    /// back through both; a third undo is a no-op.
+    @MainActor
+    func testTwoRatingChangesWalkBackThroughBoth() async throws {
+        let catalog = try CatalogDatabase.inMemory()
+        let asset = TestFixtures.makeAsset(hash: "undo-two")
+        try catalog.insertAsset(asset)
+
+        let store = PreviewStore(cacheDirectory: tempCacheDir)
+        let vm = LibraryViewModel(catalog: catalog, previewStore: store)
+        let stack = UndoStack(catalog: catalog, libraryViewModel: vm)
+        vm.undoStack = stack
+        await vm.reloadAndWait()
+
+        await vm.setRating(for: asset.id, to: 2)
+        await vm.setRating(for: asset.id, to: 4)
+        XCTAssertEqual(vm.rows.first?.asset.rating, 4)
+
+        await stack.undo()
+        XCTAssertEqual(vm.rows.first?.asset.rating, 2)
+
+        await stack.undo()
+        XCTAssertEqual(vm.rows.first?.asset.rating, 0)
+
+        // Third undo: no-op.
+        await stack.undo()
+        XCTAssertEqual(vm.rows.first?.asset.rating, 0)
+    }
+
+    @MainActor
+    func testUndoAfterRotateRestoresRotation() async throws {
+        let catalog = try CatalogDatabase.inMemory()
+        let asset = TestFixtures.makeAsset(hash: "undo-rotate")
+        try catalog.insertAsset(asset)
+
+        let store = PreviewStore(cacheDirectory: tempCacheDir)
+        let vm = LibraryViewModel(catalog: catalog, previewStore: store)
+        let stack = UndoStack(catalog: catalog, libraryViewModel: vm)
+        vm.undoStack = stack
+        await vm.reloadAndWait()
+
+        await vm.rotate(assetId: asset.id)
+        let afterRotate = try catalog.fetchAsset(byHash: "undo-rotate")
+        XCTAssertEqual(afterRotate?.rotation, 90)
+
+        await stack.undo()
+        let afterUndo = try catalog.fetchAsset(byHash: "undo-rotate")
+        XCTAssertEqual(afterUndo?.rotation, 0)
+    }
+
+    /// Redo after a rating undo must re-apply the clamp + toast path, not
+    /// the raw catalog write. This exercises the view-model entrypoint
+    /// that `UndoStack.apply` reaches for rating replay.
+    @MainActor
+    func testRedoRatingRepublishesToast() async throws {
+        let catalog = try CatalogDatabase.inMemory()
+        let asset = TestFixtures.makeAsset(hash: "redo-toast")
+        try catalog.insertAsset(asset)
+
+        let store = PreviewStore(cacheDirectory: tempCacheDir)
+        let vm = LibraryViewModel(catalog: catalog, previewStore: store)
+        let stack = UndoStack(catalog: catalog, libraryViewModel: vm)
+        vm.undoStack = stack
+        await vm.reloadAndWait()
+
+        await vm.setRating(for: asset.id, to: 5)
+        await stack.undo()
+        await stack.redo()
+        XCTAssertEqual(vm.ratingToast?.rating, 5)
+    }
+
     // MARK: - Helpers
 
     /// Produce a minimal 64×48 solid-red JPEG on disk and return its

@@ -7,6 +7,9 @@
 #   bin/agent-loop.sh --issue N       # force a specific issue
 #   bin/agent-loop.sh --dry-run       # print what it would do, no execution
 #   bin/agent-loop.sh --post-merge N  # run cleanup-artifacts skill for merged PR N
+#   bin/agent-loop.sh --planner-only  # only plan needs-plan issues (run in parallel
+#                                     # with the main loop to pre-plan ahead of the
+#                                     # implementer)
 #
 # Requirements:
 #   - gh authenticated against the dimroom repo
@@ -23,6 +26,7 @@ WATCH=0
 FORCE_ISSUE=""
 POST_MERGE_PR=""
 SLEEP_SECONDS=300
+PLANNER_ONLY=0
 
 while [ $# -gt 0 ]; do
   case "$1" in
@@ -31,6 +35,7 @@ while [ $# -gt 0 ]; do
     --issue) FORCE_ISSUE="$2"; shift 2 ;;
     --post-merge) POST_MERGE_PR="$2"; shift 2 ;;
     --sleep) SLEEP_SECONDS="$2"; shift 2 ;;
+    --planner-only) PLANNER_ONLY=1; shift ;;
     -h|--help)
       sed -n '2,12p' "$0"
       exit 0
@@ -70,13 +75,25 @@ if [ "$DRY_RUN" -eq 0 ]; then
 fi
 
 # State precedence: highest priority first.
-STATE_PRECEDENCE=(
-  "state:changes-requested"
-  "state:in-review"
-  "state:in-progress"
-  "state:planned"
-  "state:needs-plan"
-)
+#
+# --planner-only restricts to state:needs-plan so a separate loop can
+# plan issues ahead of the implementer. The default loop then drops
+# needs-plan from its precedence to avoid racing the planner on the
+# same issue.
+if [ "$PLANNER_ONLY" -eq 1 ]; then
+  STATE_PRECEDENCE=(
+    "state:needs-plan"
+  )
+  log "planner-only mode: only processing state:needs-plan"
+else
+  STATE_PRECEDENCE=(
+    "state:changes-requested"
+    "state:in-review"
+    "state:in-progress"
+    "state:planned"
+    "state:needs-plan"
+  )
+fi
 
 # Map state label to prompt file.
 prompt_for_state() {

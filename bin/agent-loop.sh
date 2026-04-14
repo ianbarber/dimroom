@@ -328,7 +328,15 @@ fi
 
 sync_main() {
   log "pulling latest main..."
-  git pull --ff-only origin main 2>&1 | while read -r line; do log "  $line"; done
+  # Serialize pulls across parallel loops using a flock on a repo-local
+  # lock file. Without this, concurrent `git pull` calls produce
+  # "Cannot fast-forward to multiple branches" errors.
+  local lock="$REPO_ROOT/.artifacts/sync-main.lock"
+  mkdir -p "$(dirname "$lock")"
+  (
+    flock -x -w 60 9 || { log "  sync_main: flock timeout; skipping pull this pass"; exit 0; }
+    git pull --ff-only origin main 2>&1 | while read -r line; do log "  $line"; done
+  ) 9>"$lock" || log "  sync_main: non-fatal pull issue, continuing"
 }
 
 if [ "$WATCH" -eq 1 ]; then

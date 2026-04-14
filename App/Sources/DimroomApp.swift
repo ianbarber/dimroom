@@ -109,12 +109,16 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             let cacheDir = resolveOriginalsCacheDirectory(from: args)
             let budget = resolveOriginalsCacheBudget()
             let downloader: OriginalsDownloader = resolveDriveClient() ?? UnavailableOriginalsDownloader()
+            let coordinator = OriginalsCoordinator(catalog: resolvedCatalog)
             if let cache = try? OriginalsCache(
                 directory: cacheDir,
                 budgetBytes: budget,
-                downloader: downloader
+                downloader: downloader,
+                onEvict: { [weak coordinator] id in
+                    coordinator?.handleEviction(assetId: id)
+                }
             ) {
-                let coordinator = OriginalsCoordinator(cache: cache, catalog: resolvedCatalog)
+                coordinator.attach(cache: cache)
                 libraryViewModel.originalFetcher = coordinator
                 originalsCoordinator = coordinator
             }

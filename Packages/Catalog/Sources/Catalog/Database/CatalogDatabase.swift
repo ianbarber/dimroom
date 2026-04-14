@@ -35,6 +35,15 @@ public final class CatalogDatabase: Sendable {
         }
     }
 
+    /// O(1) lookup by primary key, used on hot paths (originals fetch,
+    /// eviction bookkeeping) where scanning `fetchAssets(filter:)` would
+    /// be linear in catalog size.
+    public func fetchAsset(id: UUID) throws -> Asset? {
+        try dbQueue.read { db in
+            try Asset.fetchOne(db, key: id)
+        }
+    }
+
     public func fetchAssets(filter: AssetFilter = AssetFilter()) throws -> [Asset] {
         try dbQueue.read { db in
             var request = Asset.all()

@@ -28,5 +28,14 @@ let package = Package(
             ],
             path: "Sources"
         ),
+        .testTarget(
+            name: "DimroomTests",
+            dependencies: [
+                "Dimroom",
+                .product(name: "Catalog", package: "Catalog"),
+                .product(name: "DriveClient", package: "DriveClient"),
+            ],
+            path: "Tests"
+        ),
     ]
 )

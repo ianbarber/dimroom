@@ -44,6 +44,17 @@ public final class LibraryViewModel: ObservableObject {
     /// can assert zoom state without inspecting screenshots.
     @Published public var isZoomed: Bool = false
 
+    /// Asset ids for which an original-fetch is currently in flight.
+    /// The Loupe overlay observes this to show a download indicator;
+    /// entries land here when `fetchOriginalIfNeeded(assetId:)` kicks
+    /// off and are removed when the task resolves.
+    @Published public private(set) var downloadingAssetIds: Set<UUID> = []
+
+    /// App-level coordinator that returns a local URL for an original,
+    /// downloading it from Drive if needed. `nil` in tests and the
+    /// empty placeholder view model so the view degrades to preview-only.
+    public var originalFetcher: (any OriginalFetcher)?
+
     /// Lightweight value published when a rating changes so the UI can
     /// show brief visual feedback.
     public struct RatingToast: Equatable {
@@ -128,6 +139,19 @@ public final class LibraryViewModel: ObservableObject {
     /// Set the current single-selection. Passing `nil` clears it.
     public func select(_ assetId: UUID?) {
         selectedAssetId = assetId
+    }
+
+    /// Request the full-resolution original for `assetId` via the
+    /// injected `OriginalFetcher`. Tracks in-flight state on
+    /// `downloadingAssetIds` so the Loupe overlay can show a spinner
+    /// without callers having to orchestrate the UI side-effects. Returns
+    /// `nil` when no fetcher is wired or the fetcher reports failure —
+    /// callers must fall back to the preview in that case.
+    public func fetchOriginalIfNeeded(assetId: UUID) async -> URL? {
+        guard let fetcher = originalFetcher else { return nil }
+        downloadingAssetIds.insert(assetId)
+        defer { downloadingAssetIds.remove(assetId) }
+        return await fetcher.fetchOriginal(assetId: assetId)
     }
 
     /// Move selection to the next row after the current selection. Wraps

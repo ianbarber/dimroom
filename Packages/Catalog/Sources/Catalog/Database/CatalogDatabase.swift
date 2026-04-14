@@ -74,6 +74,18 @@ public final class CatalogDatabase: Sendable {
         }
     }
 
+    /// Set `Asset.localPath` for the given asset. Passing `nil` clears it,
+    /// which is what the originals cache does on eviction so stale paths
+    /// never serve a deleted file.
+    public func updateLocalPath(assetId: UUID, path: String?) throws {
+        try dbQueue.write { db in
+            if var asset = try Asset.fetchOne(db, key: assetId) {
+                asset.localPath = path
+                try asset.update(db)
+            }
+        }
+    }
+
     public func deleteAsset(id: UUID) throws {
         try dbQueue.write { db in
             if var asset = try Asset.fetchOne(db, key: id) {

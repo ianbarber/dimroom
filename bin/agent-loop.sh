@@ -297,7 +297,7 @@ EOF
   PR_NUMBER="$pr" \
   claude \
     --print \
-    --permission-mode acceptEdits \
+    --dangerously-skip-permissions \
     < "$prompt_file" 2>&1 | tee -a "$LOG_FILE"
   local rc=${PIPESTATUS[0]}
   set -e

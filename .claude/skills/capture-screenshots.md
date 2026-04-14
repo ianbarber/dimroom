@@ -82,17 +82,27 @@ if command -v magick >/dev/null 2>&1; then
 fi
 ```
 
-### 4. Attach to the PR — primary path
+### 4. Attach to the PR — primary path (in-repo snapshot goldens)
 
-GitHub PR comments accept image uploads. `gh pr comment` will upload local files referenced in markdown and rewrite the URLs to `https://github.com/user-attachments/...`.
+**IMPORTANT: This repo is private.** `raw.githubusercontent.com` URLs require authentication that GitHub's PR renderer doesn't pass, so **external** URLs (including the orphan branch in step 5) silently 404 and images never render inline.
+
+The reliable approach for a private repo: reference image files that are **committed to the PR branch** using paths relative to the repo root. GitHub renders those images inline in PR comments because it serves them from the PR's HEAD with the viewer's auth.
+
+**Layer B snapshot goldens are already committed** under `Packages/*/Tests/*/__Snapshots__/` — those render inline for free. Prefer them for PR screenshots whenever possible.
 
 ```bash
 PR_NUMBER=$(gh pr view --json number -q .number)
 
-shopt -s globstar nullglob
-PNGS=( .artifacts/issue-${ISSUE_NUMBER}/**/*.png )
+# Collect Layer B snapshot goldens that this PR added or modified.
+# These are in-repo paths, so GitHub will render them inline.
+SNAPSHOT_PNGS=$(git diff --name-only --diff-filter=AM main...HEAD \
+  | grep -E '^Packages/.*__Snapshots__/.*\.png$' || true)
 
-if [ ${#PNGS[@]} -eq 0 ]; then
+# Also collect Layer C harness screenshots from .artifacts (may be empty).
+shopt -s globstar nullglob
+HARNESS_PNGS=( .artifacts/issue-${ISSUE_NUMBER}/**/*.png )
+
+if [ -z "$SNAPSHOT_PNGS" ] && [ ${#HARNESS_PNGS[@]} -eq 0 ]; then
   # No screenshots — see "No-UI escape hatch" below.
   exit 0
 fi
@@ -100,19 +110,33 @@ fi
 {
   echo "## Screenshots for $(git rev-parse --short HEAD)"
   echo
-  for img in "${PNGS[@]}"; do
-    rel="${img#.artifacts/issue-${ISSUE_NUMBER}/}"
-    echo "### ${rel}"
+
+  if [ -n "$SNAPSHOT_PNGS" ]; then
+    echo "### Layer B snapshot goldens"
     echo
-    echo "![](${img})"
+    while IFS= read -r img; do
+      name=$(basename "$img" .1.png)
+      echo "**${name}**"
+      echo
+      echo "![${name}](/${img})"
+      echo
+    done <<< "$SNAPSHOT_PNGS"
+  fi
+
+  if [ ${#HARNESS_PNGS[@]} -gt 0 ]; then
+    echo "### Layer C harness screenshots"
     echo
-  done
+    echo "_(Uploaded to orphan branch — follow the link in step 5 below to view them; they won't render inline because this is a private repo.)_"
+    echo
+  fi
 } > /tmp/screenshot-comment.md
 
 gh pr comment "$PR_NUMBER" --body-file /tmp/screenshot-comment.md
 ```
 
-Verify by re-fetching: `gh pr view "$PR_NUMBER" --comments`. The image references should now point to `https://github.com/user-attachments/...`. If they still point to local paths, the upload silently failed — fall through to step 5.
+The leading `/` in `![alt](/${img})` makes the path absolute-from-repo-root, which GitHub resolves against the PR's HEAD. The images render inline in the PR comment because they're in the PR branch.
+
+If there are no Layer B goldens AND the PR has Layer C harness screenshots worth showing, fall through to step 5 for the orphan branch fallback (with the caveat that inline rendering won't work — only the link will).
 
 ### 5. Fallback path — orphan artifacts branch
 

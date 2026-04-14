@@ -1,5 +1,6 @@
 import AppKit
 import Catalog
+import EditEngine
 import Foundation
 import Harness
 import ImportKit
@@ -14,6 +15,7 @@ final class HarnessController: @unchecked Sendable {
     private let previewStore: PreviewStore
     private let libraryViewModel: LibraryViewModel
     private let editClipboard: EditClipboard
+    private let exportCoordinator: ExportCoordinator
     private var server: HarnessServer?
 
     init(
@@ -22,7 +24,8 @@ final class HarnessController: @unchecked Sendable {
         originalsDirectory: URL,
         previewStore: PreviewStore,
         libraryViewModel: LibraryViewModel,
-        editClipboard: EditClipboard
+        editClipboard: EditClipboard,
+        exportCoordinator: ExportCoordinator
     ) {
         self.router = router
         self.catalog = catalog
@@ -30,6 +33,7 @@ final class HarnessController: @unchecked Sendable {
         self.previewStore = previewStore
         self.libraryViewModel = libraryViewModel
         self.editClipboard = editClipboard
+        self.exportCoordinator = exportCoordinator
     }
 
     func start(socketPath: String = HarnessServer.defaultSocketPath) throws {
@@ -148,6 +152,9 @@ final class HarnessController: @unchecked Sendable {
         case .zoomReset:
             await MainActor.run { libraryViewModel.pendingZoomCommand = .resetToFit }
             return .ok()
+
+        case .export(let destinationPath, let format, let applyEdits):
+            return await handleExport(destinationPath: destinationPath, format: format, applyEdits: applyEdits)
         }
     }
 
@@ -179,6 +186,49 @@ final class HarnessController: @unchecked Sendable {
             "importedCount": .int(result.importedCount),
             "skippedCount": .int(result.skippedCount),
             "sessionId": .string(result.sessionId.uuidString),
+        ]))
+    }
+
+    // MARK: - Export
+
+    private func handleExport(destinationPath: String, format: String, applyEdits: Bool) async -> Response {
+        guard let catalog else {
+            return .error("catalog not loaded")
+        }
+        guard let exportFormat = ExportFormat(rawValue: format) else {
+            return .error("invalid format '\(format)'; expected original, jpeg, or tiff")
+        }
+        let destinationURL = URL(fileURLWithPath: destinationPath)
+
+        // Create the destination directory if it doesn't exist.
+        do {
+            try FileManager.default.createDirectory(at: destinationURL, withIntermediateDirectories: true)
+        } catch {
+            return .error("failed to create destination directory: \(error.localizedDescription)")
+        }
+
+        // Use visible assets from the library view model (respects current filter).
+        let assets = await MainActor.run { libraryViewModel.rows.map(\.asset) }
+
+        await exportCoordinator.run(
+            assets: assets,
+            catalog: catalog,
+            format: exportFormat,
+            jpegQuality: 85,
+            applyEdits: applyEdits,
+            destinationDirectory: destinationURL
+        )
+
+        let exportedCount: Int
+        if case .done(let count) = await exportCoordinator.phase {
+            exportedCount = count
+        } else {
+            exportedCount = 0
+        }
+
+        return .ok(data: .dictionary([
+            "exportedCount": .int(exportedCount),
+            "destinationPath": .string(destinationPath),
         ]))
     }
 

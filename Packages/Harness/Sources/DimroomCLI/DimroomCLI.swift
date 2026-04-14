@@ -29,6 +29,7 @@ struct DimroomCLI: ParsableCommand {
             SelectPrevious.self,
             ZoomToggle.self,
             ZoomReset.self,
+            Export.self,
         ]
     )
 }
@@ -403,6 +404,33 @@ extension DimroomCLI {
 
         func run() throws {
             try runCommand(.zoomReset, socket: socket)
+        }
+    }
+
+    struct Export: ParsableCommand {
+        static let configuration = CommandConfiguration(
+            commandName: "export",
+            abstract: "Export visible/selected assets to a local folder."
+        )
+
+        @Argument(help: "Absolute path to the destination directory.")
+        var destinationPath: String
+
+        @Option(name: .long, help: "Export format: original, jpeg, or tiff.")
+        var format: String = "jpeg"
+
+        @Flag(name: .long, help: "Apply edits to exported files.")
+        var applyEdits: Bool = false
+
+        @Option(name: .long, help: "Path to the harness socket.")
+        var socket: String = HarnessServer.defaultSocketPath
+
+        func run() throws {
+            let validFormats = ["original", "jpeg", "tiff"]
+            guard validFormats.contains(format) else {
+                throw ValidationError("format must be one of \(validFormats.joined(separator: ", ")), got '\(format)'.")
+            }
+            try runCommand(.export(destinationPath: destinationPath, format: format, applyEdits: applyEdits), socket: socket)
         }
     }
 }

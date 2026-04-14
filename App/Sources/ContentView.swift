@@ -1,3 +1,5 @@
+import Catalog
+import EditEngine
 import Harness
 import SwiftUI
 import UI
@@ -6,6 +8,9 @@ struct ContentView: View {
     let router: AppRouter
     @ObservedObject var libraryViewModel: LibraryViewModel
     @ObservedObject var importCoordinator: ImportCoordinator
+    @ObservedObject var exportCoordinator: ExportCoordinator
+    let catalog: CatalogDatabase?
+    @State private var showExportSheet = false
 
     private var currentMode: NavigationMode {
         switch router.route {
@@ -47,7 +52,38 @@ struct ContentView: View {
             }
         }
         .overlay {
+            if exportCoordinator.isActive {
+                ExportProgressView(coordinator: exportCoordinator)
+            }
+        }
+        .overlay {
             RatingToastView(toast: $libraryViewModel.ratingToast)
+        }
+        .sheet(isPresented: $showExportSheet) {
+            ExportSheetView(
+                assetCount: libraryViewModel.rows.count,
+                onExport: { [catalog] destinationURL, format, jpegQuality, applyEdits in
+                    showExportSheet = false
+                    guard let catalog else { return }
+                    let assets = libraryViewModel.rows.map(\.asset)
+                    Task {
+                        await exportCoordinator.run(
+                            assets: assets,
+                            catalog: catalog,
+                            format: format,
+                            jpegQuality: jpegQuality,
+                            applyEdits: applyEdits,
+                            destinationDirectory: destinationURL
+                        )
+                    }
+                },
+                onCancel: {
+                    showExportSheet = false
+                }
+            )
+        }
+        .onReceive(exportSheetPublisher) { _ in
+            showExportSheet = true
         }
         // Mode switch keys, Lightroom-style: G → Library, E → Loupe,
         // D → Develop. Attached at the root so they fire regardless of
@@ -146,6 +182,12 @@ struct ContentView: View {
             libraryViewModel.pendingZoomCommand = .toggleFitTo100
             return .handled
         }
+    }
+
+    /// The export sheet is triggered by File → Export… (Cmd+Shift+E) via
+    /// a notification from the menu command in DimroomApp.
+    private var exportSheetPublisher: NotificationCenter.Publisher {
+        NotificationCenter.default.publisher(for: .showExportSheet)
     }
 
     private func placeholder(_ label: String) -> some View {

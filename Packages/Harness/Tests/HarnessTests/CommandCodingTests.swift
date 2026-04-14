@@ -562,11 +562,36 @@ final class CommandCodingTests: XCTestCase {
         XCTAssertEqual(command, decoded)
     }
 
+    func testExportRoundTrip() throws {
+        let command = Command.export(
+            destinationPath: "/tmp/export",
+            format: "jpeg",
+            applyEdits: true
+        )
+        let data = try encoder.encode(command)
+        let decoded = try decoder.decode(Command.self, from: data)
+        XCTAssertEqual(command, decoded)
+    }
+
     func testZoomResetJSON() throws {
         let command = Command.zoomReset
         let data = try encoder.encode(command)
         let json = String(data: data, encoding: .utf8)!
         XCTAssertEqual(json, #"{"type":"zoomReset"}"#)
+    }
+
+    func testExportJSON() throws {
+        let command = Command.export(
+            destinationPath: "/tmp/out",
+            format: "tiff",
+            applyEdits: false
+        )
+        let data = try encoder.encode(command)
+        let json = String(data: data, encoding: .utf8)!
+        XCTAssertEqual(
+            json,
+            #"{"applyEdits":false,"destinationPath":"\/tmp\/out","format":"tiff","type":"export"}"#
+        )
     }
 
     func testDecodeZoomResetFromJSON() throws {

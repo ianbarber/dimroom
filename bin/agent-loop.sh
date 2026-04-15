@@ -353,19 +353,22 @@ sync_main() {
 if [ "$WATCH" -eq 1 ]; then
   log "watching every ${SLEEP_SECONDS}s; ctrl-c to stop"
   while true; do
-    sync_main
-    check_ready_to_merge
+    # Wrap each pass's prelude in || true so a network blip (overnight
+    # sleep, flaky connection, github SSH hiccup) doesn't kill the loop.
+    # The loop stays alive and tries again next pass.
+    sync_main || log "sync_main failed, continuing"
+    check_ready_to_merge || log "check_ready_to_merge failed, continuing"
     do_pass || true
     sleep "$SLEEP_SECONDS"
   done
 else
-  sync_main
-  check_ready_to_merge
+  sync_main || log "sync_main failed, continuing"
+  check_ready_to_merge || log "check_ready_to_merge failed, continuing"
   # Keep making passes until there's nothing actionable.
   while do_pass; do
     log "pass complete, checking for next action..."
-    sync_main
-    check_ready_to_merge
+    sync_main || log "sync_main failed, continuing"
+    check_ready_to_merge || log "check_ready_to_merge failed, continuing"
   done
   log "no more actionable issues — done"
 fi

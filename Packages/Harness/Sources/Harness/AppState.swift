@@ -14,10 +14,23 @@ public struct AppState: Codable, Sendable, Equatable {
     /// `rating >= minRating`. Harness flows check this to prove that
     /// `setFilter` actually reached the view model.
     public let minRating: Int
-    /// Active import-session scope. `nil` means "All Photos".
+    /// Active import-session scope. `nil` means "All Photos" or
+    /// "Recently Deleted" (distinguished by `scopeKind`).
     public let scopeSessionId: UUID?
+    /// Which scope kind is active: `all`, `session` (pair with
+    /// `scopeSessionId`), or `recentlyDeleted`. Harness flows assert on
+    /// this to verify trash scope transitions.
+    public let scopeKind: String
+    /// Every asset id currently included in the library multi-selection.
+    /// When nothing is selected this is empty. `selectedAssetId` is the
+    /// most-recently-clicked id inside this set.
+    public let selectedAssetIds: [UUID]
     /// Whether the loupe is currently zoomed beyond fit-to-window.
     public let isZoomed: Bool
+    /// True while the undo toast is on screen. Harness flows use this to
+    /// verify a soft-delete surfaced the toast without having to look
+    /// inside the screenshot.
+    public let hasUndoToast: Bool
 
     public init(
         route: Route,
@@ -25,13 +38,19 @@ public struct AppState: Codable, Sendable, Equatable {
         selectedAssetId: UUID? = nil,
         minRating: Int = 0,
         scopeSessionId: UUID? = nil,
-        isZoomed: Bool = false
+        scopeKind: String = "all",
+        selectedAssetIds: [UUID] = [],
+        isZoomed: Bool = false,
+        hasUndoToast: Bool = false
     ) {
         self.route = route
         self.assetCount = assetCount
         self.selectedAssetId = selectedAssetId
         self.minRating = minRating
         self.scopeSessionId = scopeSessionId
+        self.scopeKind = scopeKind
+        self.selectedAssetIds = selectedAssetIds
         self.isZoomed = isZoomed
+        self.hasUndoToast = hasUndoToast
     }
 }

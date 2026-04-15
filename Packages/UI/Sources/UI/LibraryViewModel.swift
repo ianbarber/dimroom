@@ -44,6 +44,11 @@ public final class LibraryViewModel: ObservableObject {
     /// can assert zoom state without inspecting screenshots.
     @Published public var isZoomed: Bool = false
 
+    /// Scroll-to trigger set by arrow-key navigation methods. LibraryView
+    /// observes this via `.onChange` and calls `ScrollViewProxy.scrollTo`
+    /// then clears it. Tap/harness `select(_:)` does not set this.
+    @Published public var pendingScrollToAssetId: UUID?
+
     /// Asset ids for which an original-fetch is currently in flight.
     /// The Loupe overlay observes this to show a download indicator;
     /// entries land here when `fetchOriginalIfNeeded(assetId:)` kicks
@@ -163,6 +168,7 @@ public final class LibraryViewModel: ObservableObject {
             return
         }
         selectedAssetId = next
+        pendingScrollToAssetId = next
     }
 
     /// Move selection to the previous row before the current selection.
@@ -174,6 +180,7 @@ public final class LibraryViewModel: ObservableObject {
             return
         }
         selectedAssetId = prev
+        pendingScrollToAssetId = prev
     }
 
     /// Move selection up by one row in the grid (skip back by `columnCount`).
@@ -184,6 +191,7 @@ public final class LibraryViewModel: ObservableObject {
             return
         }
         selectedAssetId = target
+        pendingScrollToAssetId = target
     }
 
     /// Move selection down by one row in the grid (skip forward by `columnCount`).
@@ -194,6 +202,7 @@ public final class LibraryViewModel: ObservableObject {
             return
         }
         selectedAssetId = target
+        pendingScrollToAssetId = target
     }
 
     /// Persist a new rating for `assetId` and reload the grid so the

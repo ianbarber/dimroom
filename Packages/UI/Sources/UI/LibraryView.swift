@@ -94,20 +94,29 @@ public struct LibraryView: View {
     }
 
     private var grid: some View {
-        ScrollView {
-            LazyVGrid(columns: columns, spacing: Self.cellSpacing) {
-                ForEach(viewModel.rows) { row in
-                    LibraryCell(
-                        row: row,
-                        isSelected: row.id == viewModel.selectedAssetId,
-                        rowVersion: viewModel.rowVersion
-                    )
-                    .onTapGesture {
-                        viewModel.select(row.id)
+        ScrollViewReader { proxy in
+            ScrollView {
+                LazyVGrid(columns: columns, spacing: Self.cellSpacing) {
+                    ForEach(viewModel.rows) { row in
+                        LibraryCell(
+                            row: row,
+                            isSelected: row.id == viewModel.selectedAssetId,
+                            rowVersion: viewModel.rowVersion
+                        )
+                        .id(row.id)
+                        .onTapGesture {
+                            viewModel.select(row.id)
+                        }
                     }
                 }
+                .padding(Self.cellSpacing)
             }
-            .padding(Self.cellSpacing)
+            .onChange(of: viewModel.pendingScrollToAssetId) { _, newValue in
+                if let id = newValue {
+                    proxy.scrollTo(id, anchor: nil)
+                    viewModel.pendingScrollToAssetId = nil
+                }
+            }
         }
     }
 }

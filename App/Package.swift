@@ -13,6 +13,7 @@ let package = Package(
         .package(path: "../Packages/Previews"),
         .package(path: "../Packages/UI"),
         .package(path: "../Packages/DriveClient"),
+        .package(path: "../Packages/AppIcon"),
     ],
     targets: [
         .executableTarget(
@@ -25,8 +26,12 @@ let package = Package(
                 .product(name: "Previews", package: "Previews"),
                 .product(name: "UI", package: "UI"),
                 .product(name: "DriveClient", package: "DriveClient"),
+                .product(name: "AppIcon", package: "AppIcon"),
             ],
-            path: "Sources"
+            path: "Sources",
+            resources: [
+                .copy("Resources/AppIcon.icns"),
+            ]
         ),
         .testTarget(
             name: "DimroomTests",

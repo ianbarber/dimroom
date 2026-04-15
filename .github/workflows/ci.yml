@@ -100,3 +100,10 @@ jobs:
             exit 0
           fi
           bin/harness-copypaste-flow.sh
+      - name: Run harness navigation flow
+        run: |
+          if [ ! -x bin/harness-navigation-flow.sh ]; then
+            echo "No harness navigation flow script yet — skipping."
+            exit 0
+          fi
+          bin/harness-navigation-flow.sh

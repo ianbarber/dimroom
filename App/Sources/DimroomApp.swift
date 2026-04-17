@@ -17,6 +17,7 @@ struct DimroomApp: App {
             ContentView(
                 router: appDelegate.router,
                 libraryViewModel: appDelegate.libraryViewModel,
+                developViewModel: appDelegate.developViewModel,
                 importCoordinator: appDelegate.importCoordinator,
                 exportCoordinator: appDelegate.exportCoordinator,
                 catalog: appDelegate.catalog
@@ -69,6 +70,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     /// CLI flags are parsed and the real catalog + preview store are
     /// available.
     private(set) var libraryViewModel: LibraryViewModel = LibraryViewModel.empty()
+    private(set) var developViewModel: DevelopViewModel = DevelopViewModel.empty()
     private(set) var catalog: CatalogDatabase?
     private var previewStore: PreviewStore?
     private var originalsDirectory: URL?
@@ -100,6 +102,10 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         // would leave the views observing the old (empty) placeholder.
         if let resolvedCatalog {
             libraryViewModel.configure(
+                catalog: resolvedCatalog,
+                previewStore: resolvedPreviewStore
+            )
+            developViewModel.configure(
                 catalog: resolvedCatalog,
                 previewStore: resolvedPreviewStore
             )
@@ -139,6 +145,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
                 rootView: ContentView(
                     router: router,
                     libraryViewModel: libraryViewModel,
+                    developViewModel: developViewModel,
                     importCoordinator: importCoordinator,
                     exportCoordinator: exportCoordinator,
                     catalog: resolvedCatalog
@@ -159,6 +166,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             originalsDirectory: resolvedOriginalsDirectory,
             previewStore: resolvedPreviewStore,
             libraryViewModel: libraryViewModel,
+            developViewModel: developViewModel,
             editClipboard: editClipboard,
             exportCoordinator: exportCoordinator,
             originalsCoordinator: originalsCoordinator
@@ -376,6 +384,19 @@ private struct UnavailableOriginalsDownloader: OriginalsDownloader {
 // once flags are known.
 extension Notification.Name {
     static let showExportSheet = Notification.Name("dimroom.showExportSheet")
+}
+
+private extension DevelopViewModel {
+    static func empty() -> DevelopViewModel {
+        let catalog: CatalogDatabase
+        do {
+            catalog = try CatalogDatabase.inMemory()
+        } catch {
+            fatalError("in-memory catalog init failed: \(error)")
+        }
+        let store = PreviewStore(cacheDirectory: FileManager.default.temporaryDirectory)
+        return DevelopViewModel(catalog: catalog, previewStore: store)
+    }
 }
 
 private extension LibraryViewModel {

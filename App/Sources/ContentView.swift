@@ -7,6 +7,7 @@ import UI
 struct ContentView: View {
     let router: AppRouter
     @ObservedObject var libraryViewModel: LibraryViewModel
+    @ObservedObject var developViewModel: DevelopViewModel
     @ObservedObject var importCoordinator: ImportCoordinator
     @ObservedObject var exportCoordinator: ExportCoordinator
     let catalog: CatalogDatabase?
@@ -41,7 +42,7 @@ struct ContentView: View {
                 case .loupe:
                     LoupeView(viewModel: libraryViewModel)
                 case .develop:
-                    placeholder("Develop")
+                    DevelopView(viewModel: developViewModel)
                 }
             }
             .frame(maxWidth: .infinity, maxHeight: .infinity)
@@ -181,6 +182,16 @@ struct ContentView: View {
             guard router.route == .loupe else { return .ignored }
             libraryViewModel.pendingZoomCommand = .toggleFitTo100
             return .handled
+        }
+        .onChange(of: router.route) { oldRoute, newRoute in
+            if newRoute == .develop {
+                Task {
+                    await developViewModel.activate(assetId: libraryViewModel.selectedAssetId)
+                }
+            }
+            if oldRoute == .develop {
+                developViewModel.deactivate()
+            }
         }
     }
 

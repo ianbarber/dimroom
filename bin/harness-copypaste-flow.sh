@@ -42,6 +42,35 @@ print(node)
     echo "  OK: $label — $field == $expected"
 }
 
+# JSON numbers don't round-trip through string comparison: Swift's JSONEncoder
+# writes Double(2.0) as the integer-looking `2`, Python parses it as int, and
+# str(2) != "2.0". Parse both sides as floats and compare with an epsilon.
+assert_json_number() {
+    local label="$1" json="$2" field="$3" expected="$4"
+    local actual
+    actual=$(printf '%s' "$json" | /usr/bin/python3 -c "
+import json, sys
+doc = json.loads(sys.stdin.read())
+node = doc
+for key in '$field'.split('.'):
+    node = node[key]
+print(float(node))
+")
+    local matches
+    matches=$(/usr/bin/python3 -c "
+import sys
+a = float('$actual')
+b = float('$expected')
+print('yes' if abs(a - b) < 1e-9 else 'no')
+")
+    if [ "$matches" != "yes" ]; then
+        echo "ERROR: $label — expected $field == $expected, got $actual"
+        echo "Response: $json"
+        exit 1
+    fi
+    echo "  OK: $label — $field ≈ $expected"
+}
+
 assert_json_field_absent() {
     local label="$1" json="$2" field="$3"
     local present
@@ -156,7 +185,7 @@ echo "=== Get edit for asset B ==="
 GET_OUT=$("$CLI_BIN" get-edit "$ASSET_B" --socket "$SOCKET")
 echo "$GET_OUT"
 assert_json_field "getEdit status" "$GET_OUT" "status" "ok"
-assert_json_field "getEdit exposure" "$GET_OUT" "data.exposure" "2.0"
+assert_json_number "getEdit exposure" "$GET_OUT" "data.exposure" "2.0"
 assert_json_field_absent "getEdit cropRect" "$GET_OUT" "data.cropRect"
 assert_json_field_absent "getEdit cropAngle" "$GET_OUT" "data.cropAngle"
 

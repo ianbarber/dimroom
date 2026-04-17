@@ -17,6 +17,15 @@ for pkg in "$REPO_ROOT"/Packages/*/; do
     fi
 done
 
+echo "::group::bin/tests/test-harness-json-extract.sh"
+if "$REPO_ROOT/bin/tests/test-harness-json-extract.sh"; then
+    echo "PASS: harness-json-extract"
+else
+    echo "FAIL: harness-json-extract"
+    FAILED=1
+fi
+echo "::endgroup::"
+
 if [ "$FAILED" -ne 0 ]; then
     echo "One or more packages failed testing."
     exit 1

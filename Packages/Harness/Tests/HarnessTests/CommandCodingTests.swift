@@ -417,21 +417,22 @@ final class CommandCodingTests: XCTestCase {
         let json = String(data: data, encoding: .utf8)!
         XCTAssertEqual(
             json,
-            #"{"assetCount":3,"isZoomed":false,"minRating":3,"route":"library","selectedAssetId":"12345678-1234-1234-1234-123456789012"}"#
+            #"{"assetCount":3,"hasUndoToast":false,"isZoomed":false,"minRating":3,"route":"library","scopeKind":"all","selectedAssetId":"12345678-1234-1234-1234-123456789012","selectedAssetIds":[]}"#
         )
     }
 
     func testAppStateJSONShapeWithoutSelection() throws {
         // Swift's default JSONEncoder omits nil optionals rather than
         // emitting them as `null`. Pin that shape so the harness wire
-        // format is explicit about what consumers will see. `minRating`
-        // and `isZoomed` are non-optional and must always be present.
+        // format is explicit about what consumers will see. `minRating`,
+        // `isZoomed`, `scopeKind`, `selectedAssetIds`, and
+        // `hasUndoToast` are non-optional and must always be present.
         let state = AppState(route: .library, assetCount: 0, selectedAssetId: nil)
         let data = try encoder.encode(state)
         let json = String(data: data, encoding: .utf8)!
         XCTAssertEqual(
             json,
-            #"{"assetCount":0,"isZoomed":false,"minRating":0,"route":"library"}"#
+            #"{"assetCount":0,"hasUndoToast":false,"isZoomed":false,"minRating":0,"route":"library","scopeKind":"all","selectedAssetIds":[]}"#
         )
     }
 
@@ -449,8 +450,27 @@ final class CommandCodingTests: XCTestCase {
         let json = String(data: data, encoding: .utf8)!
         XCTAssertEqual(
             json,
-            #"{"assetCount":0,"isZoomed":true,"minRating":0,"route":"loupe"}"#
+            #"{"assetCount":0,"hasUndoToast":false,"isZoomed":true,"minRating":0,"route":"loupe","scopeKind":"all","selectedAssetIds":[]}"#
         )
+    }
+
+    func testAppStateRoundTripWithMultiSelection() throws {
+        let a = UUID()
+        let b = UUID()
+        let state = AppState(
+            route: .library,
+            assetCount: 5,
+            selectedAssetId: b,
+            scopeKind: "recentlyDeleted",
+            selectedAssetIds: [a, b],
+            hasUndoToast: true
+        )
+        let data = try encoder.encode(state)
+        let decoded = try decoder.decode(AppState.self, from: data)
+        XCTAssertEqual(state, decoded)
+        XCTAssertEqual(decoded.scopeKind, "recentlyDeleted")
+        XCTAssertEqual(Set(decoded.selectedAssetIds), [a, b])
+        XCTAssertTrue(decoded.hasUndoToast)
     }
 
     // MARK: - selectNext / selectPrevious / zoomToggle / zoomReset
@@ -624,6 +644,62 @@ final class CommandCodingTests: XCTestCase {
         let json = #"{"type":"zoomReset"}"#
         let command = try decoder.decode(Command.self, from: Data(json.utf8))
         XCTAssertEqual(command, .zoomReset)
+    }
+
+    // MARK: - Multi-select / delete commands
+
+    func testSelectAssetsRoundTrip() throws {
+        let ids = [UUID(), UUID(), UUID()]
+        let command = Command.selectAssets(ids: ids)
+        let data = try encoder.encode(command)
+        let decoded = try decoder.decode(Command.self, from: data)
+        XCTAssertEqual(command, decoded)
+    }
+
+    func testDeleteAssetsRoundTrip() throws {
+        let command = Command.deleteAssets(ids: [UUID(), UUID()])
+        let data = try encoder.encode(command)
+        let decoded = try decoder.decode(Command.self, from: data)
+        XCTAssertEqual(command, decoded)
+    }
+
+    func testRestoreAssetsRoundTrip() throws {
+        let command = Command.restoreAssets(ids: [UUID()])
+        let data = try encoder.encode(command)
+        let decoded = try decoder.decode(Command.self, from: data)
+        XCTAssertEqual(command, decoded)
+    }
+
+    func testPermanentlyDeleteAssetsRoundTrip() throws {
+        let command = Command.permanentlyDeleteAssets(ids: [UUID(), UUID()])
+        let data = try encoder.encode(command)
+        let decoded = try decoder.decode(Command.self, from: data)
+        XCTAssertEqual(command, decoded)
+    }
+
+    func testSetScopeRecentlyDeletedRoundTrip() throws {
+        let command = Command.setScopeRecentlyDeleted
+        let data = try encoder.encode(command)
+        let decoded = try decoder.decode(Command.self, from: data)
+        XCTAssertEqual(command, decoded)
+    }
+
+    func testSetScopeRecentlyDeletedJSON() throws {
+        let command = Command.setScopeRecentlyDeleted
+        let data = try encoder.encode(command)
+        let json = String(data: data, encoding: .utf8)!
+        XCTAssertEqual(json, #"{"type":"setScopeRecentlyDeleted"}"#)
+    }
+
+    func testDeleteAssetsJSONShape() throws {
+        let id = UUID(uuidString: "11111111-2222-3333-4444-555555555555")!
+        let command = Command.deleteAssets(ids: [id])
+        let data = try encoder.encode(command)
+        let json = String(data: data, encoding: .utf8)!
+        XCTAssertEqual(
+            json,
+            #"{"ids":["11111111-2222-3333-4444-555555555555"],"type":"deleteAssets"}"#
+        )
     }
 
     // MARK: - Route

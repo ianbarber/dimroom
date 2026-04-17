@@ -1,16 +1,26 @@
+import AppKit
 import SwiftUI
 
 /// The library grid — home screen for browsing the catalog.
 ///
 /// Always renders either the empty-state placeholder or a 4-column
 /// `LazyVGrid` of cached thumbnails. Selection lives on the view model
-/// (`selectedAssetId`) so the harness and keyboard shortcuts can observe
+/// (`selectedAssetIds`) so the harness and keyboard shortcuts can observe
 /// and mutate it without threading state through view hierarchy.
 public struct LibraryView: View {
     @ObservedObject private var viewModel: LibraryViewModel
+    /// Binding controlled by `ContentView` so Delete/Backspace can open
+    /// the confirmation dialog hosted by this view. Bound externally so
+    /// the key handler at the app root can set it without the grid
+    /// needing to be focused. Optional so previews / tests can ignore it.
+    @Binding private var pendingDeleteCount: Int?
 
-    public init(viewModel: LibraryViewModel) {
+    public init(
+        viewModel: LibraryViewModel,
+        pendingDeleteCount: Binding<Int?> = .constant(nil)
+    ) {
         self.viewModel = viewModel
+        self._pendingDeleteCount = pendingDeleteCount
     }
 
     private static let cellSpacing: CGFloat = 8
@@ -34,6 +44,30 @@ public struct LibraryView: View {
             }
         }
         .background(Color(white: 0.08))
+        .overlay(alignment: .bottom) {
+            UndoToastView(
+                toast: $viewModel.undoToast,
+                onUndo: { Task { await viewModel.undoLastDelete() } }
+            )
+            .padding(.bottom, 24)
+            .animation(.easeInOut(duration: 0.2), value: viewModel.undoToast)
+        }
+        .confirmationDialog(
+            confirmationTitle,
+            isPresented: confirmationBinding,
+            titleVisibility: .visible,
+            presenting: pendingDeleteCount
+        ) { count in
+            Button("Delete", role: .destructive) {
+                pendingDeleteCount = nil
+                Task { await viewModel.deleteSelected() }
+            }
+            Button("Cancel", role: .cancel) {
+                pendingDeleteCount = nil
+            }
+        } message: { count in
+            Text("They will be moved to Recently Deleted and can be recovered within 30 days.")
+        }
         .task {
             viewModel.reload()
         }
@@ -48,7 +82,7 @@ public struct LibraryView: View {
         HStack(spacing: 12) {
             ScopePicker(
                 sessions: viewModel.recentSessions,
-                selectedSessionId: scopeBinding
+                selectedScope: scopeBinding
             )
             Divider()
                 .frame(height: 16)
@@ -84,13 +118,27 @@ public struct LibraryView: View {
         )
     }
 
-    private var scopeBinding: Binding<UUID?> {
+    private var scopeBinding: Binding<LibraryViewModel.Scope> {
         Binding(
-            get: { viewModel.scopeSessionId },
+            get: { viewModel.scope },
             set: { newValue in
                 Task { await viewModel.setScope(newValue) }
             }
         )
+    }
+
+    private var confirmationBinding: Binding<Bool> {
+        Binding(
+            get: { pendingDeleteCount != nil },
+            set: { newValue in
+                if !newValue { pendingDeleteCount = nil }
+            }
+        )
+    }
+
+    private var confirmationTitle: String {
+        let count = pendingDeleteCount ?? 0
+        return count == 1 ? "Delete 1 photo?" : "Delete \(count) photos?"
     }
 
     private var grid: some View {
@@ -100,12 +148,12 @@ public struct LibraryView: View {
                     ForEach(viewModel.rows) { row in
                         LibraryCell(
                             row: row,
-                            isSelected: row.id == viewModel.selectedAssetId,
+                            isSelected: viewModel.selectedAssetIds.contains(row.id),
                             rowVersion: viewModel.rowVersion
                         )
                         .id(row.id)
                         .onTapGesture {
-                            viewModel.select(row.id)
+                            handleTap(on: row.id)
                         }
                     }
                 }
@@ -117,6 +165,21 @@ public struct LibraryView: View {
                     viewModel.pendingScrollToAssetId = nil
                 }
             }
+        }
+    }
+
+    /// Translate a raw tap plus the current `NSEvent.modifierFlags` into
+    /// the matching view-model action. `onTapGesture` doesn't expose
+    /// modifiers, so we read them off the current event directly — this
+    /// is the same trick AppKit selection handlers use.
+    private func handleTap(on id: UUID) {
+        let modifiers = NSApp.currentEvent?.modifierFlags ?? []
+        if modifiers.contains(.shift) {
+            viewModel.extendSelect(to: id)
+        } else if modifiers.contains(.command) {
+            viewModel.toggleSelect(id)
+        } else {
+            viewModel.select(id)
         }
     }
 }

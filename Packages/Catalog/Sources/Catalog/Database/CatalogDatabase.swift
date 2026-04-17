@@ -48,7 +48,9 @@ public final class CatalogDatabase: Sendable {
         try dbQueue.read { db in
             var request = Asset.all()
 
-            if !filter.includeDeleted {
+            if filter.onlyDeleted {
+                request = request.filter(Column("deletedAt") != nil)
+            } else if !filter.includeDeleted {
                 request = request.filter(Column("deletedAt") == nil)
             }
             if let rating = filter.rating {
@@ -104,6 +106,25 @@ public final class CatalogDatabase: Sendable {
         }
     }
 
+    /// Soft-delete multiple assets in a single write transaction. Unknown
+    /// ids are skipped. Returns the set of ids that were actually marked
+    /// deleted (i.e. existed in the catalog at write time).
+    @discardableResult
+    public func deleteAssets(ids: [UUID]) throws -> [UUID] {
+        try dbQueue.write { db in
+            let now = Date()
+            var updated: [UUID] = []
+            for id in ids {
+                if var asset = try Asset.fetchOne(db, key: id) {
+                    asset.deletedAt = now
+                    try asset.update(db)
+                    updated.append(id)
+                }
+            }
+            return updated
+        }
+    }
+
     /// Inverse of `deleteAsset`: clears `deletedAt` so the asset shows up
     /// in default queries again. Used by the undo stack to reverse a
     /// soft-delete.
@@ -113,6 +134,51 @@ public final class CatalogDatabase: Sendable {
                 asset.deletedAt = nil
                 try asset.update(db)
             }
+        }
+    }
+
+    /// Clear `deletedAt` for multiple assets in a single write
+    /// transaction. Returns the ids that were actually restored.
+    @discardableResult
+    public func restoreAssets(ids: [UUID]) throws -> [UUID] {
+        try dbQueue.write { db in
+            var updated: [UUID] = []
+            for id in ids {
+                if var asset = try Asset.fetchOne(db, key: id) {
+                    asset.deletedAt = nil
+                    try asset.update(db)
+                    updated.append(id)
+                }
+            }
+            return updated
+        }
+    }
+
+    /// Permanently remove an asset row from the catalog. Returns the
+    /// `Asset` value that was deleted so callers can clean up cached
+    /// previews and local originals.
+    @discardableResult
+    public func permanentlyDeleteAsset(id: UUID) throws -> Asset? {
+        try dbQueue.write { db in
+            guard let asset = try Asset.fetchOne(db, key: id) else { return nil }
+            try asset.delete(db)
+            return asset
+        }
+    }
+
+    /// Permanently remove multiple asset rows in a single write
+    /// transaction. Returns the `Asset` values that were deleted.
+    @discardableResult
+    public func permanentlyDeleteAssets(ids: [UUID]) throws -> [Asset] {
+        try dbQueue.write { db in
+            var removed: [Asset] = []
+            for id in ids {
+                if let asset = try Asset.fetchOne(db, key: id) {
+                    try asset.delete(db)
+                    removed.append(asset)
+                }
+            }
+            return removed
         }
     }
 

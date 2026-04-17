@@ -53,6 +53,10 @@ If a feature isn't reachable through the harness, it isn't done.
 - **Stage 7** — Advanced edit tools (NR, colour balance, perspective)
 - **Stage 8** — NAS archive
 
+## Icon / bundle
+
+`bin/build-icon.sh` regenerates the app icon from the Core Graphics renderer in `Packages/AppIcon`. `bin/build-app-bundle.sh` wraps the built executable into a `Dimroom.app` bundle with the icon for Finder.
+
 ## Agent loop
 
 ```sh

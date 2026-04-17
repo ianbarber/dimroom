@@ -11,6 +11,9 @@ struct ContentView: View {
     @ObservedObject var exportCoordinator: ExportCoordinator
     let catalog: CatalogDatabase?
     @State private var showExportSheet = false
+    /// Non-nil while the delete-confirmation dialog is presented.
+    /// Carries the count so the dialog title reads e.g. "Delete 3 photos?".
+    @State private var pendingDeleteCount: Int?
 
     private var currentMode: NavigationMode {
         switch router.route {
@@ -37,7 +40,10 @@ struct ContentView: View {
             Group {
                 switch router.route {
                 case .library:
-                    LibraryView(viewModel: libraryViewModel)
+                    LibraryView(
+                        viewModel: libraryViewModel,
+                        pendingDeleteCount: $pendingDeleteCount
+                    )
                 case .loupe:
                     LoupeView(viewModel: libraryViewModel)
                 case .develop:
@@ -180,6 +186,29 @@ struct ContentView: View {
             guard keyPress.modifiers.isEmpty else { return .ignored }
             guard router.route == .loupe else { return .ignored }
             libraryViewModel.pendingZoomCommand = .toggleFitTo100
+            return .handled
+        }
+        // Cmd+A — select every visible row. Library only, matches Finder.
+        .onKeyPress(keys: ["a"], phases: .down) { keyPress in
+            guard keyPress.modifiers == .command else { return .ignored }
+            guard router.route == .library else { return .ignored }
+            libraryViewModel.selectAllVisible()
+            return .handled
+        }
+        // Delete / Backspace — open the delete-confirmation dialog.
+        // Library only so Loupe rating keys aren't disturbed.
+        .onKeyPress(.delete) {
+            guard router.route == .library else { return .ignored }
+            let count = libraryViewModel.selectedAssetIds.count
+            guard count > 0 else { return .ignored }
+            pendingDeleteCount = count
+            return .handled
+        }
+        .onKeyPress(.deleteForward) {
+            guard router.route == .library else { return .ignored }
+            let count = libraryViewModel.selectedAssetIds.count
+            guard count > 0 else { return .ignored }
+            pendingDeleteCount = count
             return .handled
         }
     }

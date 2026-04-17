@@ -124,17 +124,108 @@ final class CatalogDatabaseTests: XCTestCase {
         XCTAssertNotNil(allResults.first?.deletedAt)
     }
 
+    // MARK: - Restore
+
     func testRestoreAssetClearsDeletedAt() throws {
         let db = try makeDatabase()
         let asset = makeSampleAsset()
         try db.insertAsset(asset)
         try db.deleteAsset(id: asset.id)
+        XCTAssertNotNil(try db.fetchAssets(filter: AssetFilter(includeDeleted: true)).first?.deletedAt)
 
         try db.restoreAsset(id: asset.id)
 
-        let defaultResults = try db.fetchAssets()
-        XCTAssertEqual(defaultResults.count, 1)
-        XCTAssertNil(defaultResults.first?.deletedAt)
+        let live = try db.fetchAssets()
+        XCTAssertEqual(live.count, 1)
+        XCTAssertNil(live.first?.deletedAt)
+    }
+
+    func testRestoreUnknownIdIsNoOp() throws {
+        let db = try makeDatabase()
+        XCTAssertNoThrow(try db.restoreAsset(id: UUID()))
+    }
+
+    // MARK: - Permanent delete
+
+    func testPermanentlyDeleteAssetRemovesRow() throws {
+        let db = try makeDatabase()
+        let asset = makeSampleAsset()
+        try db.insertAsset(asset)
+
+        let removed = try db.permanentlyDeleteAsset(id: asset.id)
+        XCTAssertEqual(removed?.id, asset.id)
+
+        // Row is gone — not just hidden.
+        let all = try db.fetchAssets(filter: AssetFilter(includeDeleted: true))
+        XCTAssertTrue(all.isEmpty)
+        XCTAssertNil(try db.fetchAsset(byHash: asset.contentHash))
+    }
+
+    func testPermanentlyDeleteUnknownReturnsNil() throws {
+        let db = try makeDatabase()
+        XCTAssertNil(try db.permanentlyDeleteAsset(id: UUID()))
+    }
+
+    // MARK: - Batch delete / restore / permanent
+
+    func testBatchDeleteMarksAllAndSkipsUnknown() throws {
+        let db = try makeDatabase()
+        let a = makeSampleAsset(contentHash: "bd1")
+        let b = makeSampleAsset(contentHash: "bd2")
+        let c = makeSampleAsset(contentHash: "bd3")
+        try db.insertAsset(a)
+        try db.insertAsset(b)
+        try db.insertAsset(c)
+
+        let phantom = UUID()
+        let updated = try db.deleteAssets(ids: [a.id, b.id, phantom])
+        XCTAssertEqual(Set(updated), Set([a.id, b.id]))
+
+        let live = try db.fetchAssets()
+        XCTAssertEqual(live.map(\.id), [c.id])
+    }
+
+    func testBatchRestoreReturnsIds() throws {
+        let db = try makeDatabase()
+        let a = makeSampleAsset(contentHash: "br1")
+        let b = makeSampleAsset(contentHash: "br2")
+        try db.insertAsset(a)
+        try db.insertAsset(b)
+        try db.deleteAssets(ids: [a.id, b.id])
+
+        let restored = try db.restoreAssets(ids: [a.id, b.id])
+        XCTAssertEqual(Set(restored), Set([a.id, b.id]))
+
+        let live = try db.fetchAssets()
+        XCTAssertEqual(live.count, 2)
+        XCTAssertTrue(live.allSatisfy { $0.deletedAt == nil })
+    }
+
+    func testBatchPermanentlyDeleteReturnsRemovedAssets() throws {
+        let db = try makeDatabase()
+        let a = makeSampleAsset(contentHash: "bp1")
+        let b = makeSampleAsset(contentHash: "bp2")
+        try db.insertAsset(a)
+        try db.insertAsset(b)
+
+        let removed = try db.permanentlyDeleteAssets(ids: [a.id, b.id, UUID()])
+        XCTAssertEqual(Set(removed.map(\.id)), Set([a.id, b.id]))
+        XCTAssertEqual(try db.fetchAssets(filter: AssetFilter(includeDeleted: true)).count, 0)
+    }
+
+    // MARK: - Recently Deleted filter
+
+    func testOnlyDeletedFilterReturnsExactlySoftDeletedRows() throws {
+        let db = try makeDatabase()
+        let live = makeSampleAsset(contentHash: "live")
+        let gone = makeSampleAsset(contentHash: "gone")
+        try db.insertAsset(live)
+        try db.insertAsset(gone)
+        try db.deleteAsset(id: gone.id)
+
+        let trash = try db.fetchAssets(filter: AssetFilter(onlyDeleted: true))
+        XCTAssertEqual(trash.map(\.id), [gone.id])
+        XCTAssertNotNil(trash.first?.deletedAt)
     }
 
     // MARK: - Filter by Rating

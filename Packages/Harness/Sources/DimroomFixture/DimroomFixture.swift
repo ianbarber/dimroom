@@ -84,7 +84,7 @@ extension DimroomFixture {
 
             let copies = max(1, duplicate)
             var assetIndex = 0
-            for (_, url) in jpegs.enumerated() {
+            for url in jpegs {
                 let fileData = try Data(contentsOf: url)
                 let (width, height) = Self.pixelSize(of: url) ?? (800, 600)
                 let size = (try url.resourceValues(forKeys: [.fileSizeKey]).fileSize) ?? 0

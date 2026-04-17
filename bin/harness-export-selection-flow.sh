@@ -137,6 +137,14 @@ echo "  Selecting asset id $TARGET_ID (IMG_0002.jpg)"
 echo "=== Select the single target asset ==="
 "$CLI_BIN" select-asset "$TARGET_ID" --socket "$SOCKET" > /dev/null
 
+# When the capture-screenshots skill runs the flow, $SCREENSHOT_DIR is
+# set to the per-flow output directory. Grab a library shot showing the
+# selected cell so reviewers can see the input state visually.
+if [ -n "${SCREENSHOT_DIR:-}" ]; then
+    mkdir -p "$SCREENSHOT_DIR"
+    "$CLI_BIN" screenshot "$SCREENSHOT_DIR/library-with-selection.png" --socket "$SOCKET" > /dev/null || true
+fi
+
 echo "=== Selection branch: export with selection (expect exactly 1) ==="
 EXPORT_OUT_ONE=$("$CLI_BIN" export "$EXPORT_DIR_ONE" --format jpeg --socket "$SOCKET")
 echo "$EXPORT_OUT_ONE"

@@ -333,9 +333,10 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     }
 
     /// Directory used by the LRU originals cache. Defaults to the same
-    /// location as the import-staging directory so pinned originals and
-    /// downloaded originals share storage. `--originals-cache <path>`
-    /// overrides for harness/test runs.
+    /// location as the import-staging directory so a freshly copied
+    /// original is immediately available to the cache layer without an
+    /// extra move. `--originals-cache <path>` overrides for harness/test
+    /// runs.
     private func resolveOriginalsCacheDirectory(from args: [String]) -> URL {
         if let index = args.firstIndex(of: "--originals-cache"),
            index + 1 < args.count {
@@ -364,9 +365,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     }
 }
 
-/// Downloader used when Drive credentials aren't configured. Keeps the
-/// cache layer functional for already-resident (pinned) files while
-/// making the degraded state explicit for Drive-backed assets.
+/// Downloader used when Drive credentials aren't configured. Always
+/// throws `OriginalsCacheError.unreachable`, making the degraded state
+/// explicit for Drive-backed assets.
 private struct UnavailableOriginalsDownloader: OriginalsDownloader {
     func download(
         driveFileId: String,

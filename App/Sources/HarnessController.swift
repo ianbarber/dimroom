@@ -63,13 +63,22 @@ final class HarnessController: @unchecked Sendable {
 
         case .state:
             let snapshot = await MainActor.run { () -> AppState in
-                AppState(
+                let kind: String
+                switch libraryViewModel.scope {
+                case .all: kind = "all"
+                case .session: kind = "session"
+                case .recentlyDeleted: kind = "recentlyDeleted"
+                }
+                return AppState(
                     route: router.route,
                     assetCount: libraryViewModel.rows.count,
                     selectedAssetId: libraryViewModel.selectedAssetId,
                     minRating: libraryViewModel.minRating,
                     scopeSessionId: libraryViewModel.scopeSessionId,
-                    isZoomed: libraryViewModel.isZoomed
+                    scopeKind: kind,
+                    selectedAssetIds: Array(libraryViewModel.selectedAssetIds),
+                    isZoomed: libraryViewModel.isZoomed,
+                    hasUndoToast: libraryViewModel.undoToast != nil
                 )
             }
             let encoder = JSONEncoder()
@@ -129,6 +138,10 @@ final class HarnessController: @unchecked Sendable {
             await libraryViewModel.setScope(sessionId)
             return .ok()
 
+        case .setScopeRecentlyDeleted:
+            await libraryViewModel.setScope(.recentlyDeleted)
+            return .ok()
+
         case .listImportSessions:
             return handleListImportSessions()
 
@@ -161,6 +174,31 @@ final class HarnessController: @unchecked Sendable {
 
         case .fetchOriginal(let assetId):
             return await handleFetchOriginal(assetId: assetId)
+
+        case .selectAssets(let ids):
+            await MainActor.run {
+                libraryViewModel.select(nil)
+                for (index, id) in ids.enumerated() {
+                    if index == 0 {
+                        libraryViewModel.select(id)
+                    } else {
+                        libraryViewModel.toggleSelect(id)
+                    }
+                }
+            }
+            return .ok()
+
+        case .deleteAssets(let ids):
+            await libraryViewModel.deleteAssets(ids: ids)
+            return .ok()
+
+        case .restoreAssets(let ids):
+            await libraryViewModel.restoreAssets(ids: ids)
+            return .ok()
+
+        case .permanentlyDeleteAssets(let ids):
+            await libraryViewModel.permanentlyDeleteAssets(ids: ids)
+            return .ok()
         }
     }
 

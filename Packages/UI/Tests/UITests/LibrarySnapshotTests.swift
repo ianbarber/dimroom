@@ -294,6 +294,79 @@ final class LibrarySnapshotTests: XCTestCase {
         }
     }
 
+    // MARK: - Multi-selection
+
+    /// Three non-contiguous cells selected to exercise the shared
+    /// "selected border" rendering on multiple cells at once.
+    @MainActor
+    func test_populated_grid_multi_selection() async throws {
+        let (vm, assets) = try await makePopulatedViewModel()
+        vm.select(assets[0].id)
+        vm.toggleSelect(assets[2].id)
+        XCTAssertEqual(vm.selectedAssetIds.count, 2)
+
+        let image = renderFixedPixelImage(for: LibraryView(viewModel: vm))
+
+        runAssertSnapshot {
+            assertSnapshot(
+                of: image,
+                as: .image(
+                    precision: Self.snapshotPrecision,
+                    perceptualPrecision: Self.snapshotPerceptualPrecision
+                )
+            )
+        }
+    }
+
+    // MARK: - Undo toast
+
+    /// Library grid with the 10-second undo toast visible at the bottom
+    /// after a simulated delete. Verifies the overlay layout so the
+    /// reviewer can catch clipped/overlapping states.
+    @MainActor
+    func test_library_with_undo_toast() async throws {
+        let (vm, _) = try await makePopulatedViewModel()
+        vm.undoToast = LibraryViewModel.UndoToast(deletedIds: [UUID(), UUID()])
+
+        let image = renderFixedPixelImage(for: LibraryView(viewModel: vm))
+
+        runAssertSnapshot {
+            assertSnapshot(
+                of: image,
+                as: .image(
+                    precision: Self.snapshotPrecision,
+                    perceptualPrecision: Self.snapshotPerceptualPrecision
+                )
+            )
+        }
+    }
+
+    // MARK: - Recently Deleted scope
+
+    /// Soft-delete two of three assets, switch to the Recently Deleted
+    /// scope, and snapshot — both soft-deleted cells should render, the
+    /// live one should be hidden, and the scope picker should read
+    /// "Recently Deleted".
+    @MainActor
+    func test_recently_deleted_scope() async throws {
+        let (vm, assets) = try await makePopulatedViewModel()
+        await vm.deleteAssets(ids: [assets[0].id, assets[1].id])
+        vm.undoToast = nil
+        await vm.setScope(.recentlyDeleted)
+
+        let image = renderFixedPixelImage(for: LibraryView(viewModel: vm))
+
+        runAssertSnapshot {
+            assertSnapshot(
+                of: image,
+                as: .image(
+                    precision: Self.snapshotPrecision,
+                    perceptualPrecision: Self.snapshotPerceptualPrecision
+                )
+            )
+        }
+    }
+
     // MARK: - Scope picker
 
     @MainActor

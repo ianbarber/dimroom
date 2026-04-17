@@ -1,22 +1,32 @@
 import Catalog
 import SwiftUI
 
-/// Dropdown menu for scoping the Library grid to a single import
-/// session or showing all photos. Sits in the filter bar alongside
-/// the rating picker.
+/// Dropdown menu for scoping the Library grid: All Photos, one of the
+/// recent import sessions, or the Recently Deleted trash. Sits in the
+/// filter bar alongside the rating picker.
 struct ScopePicker: View {
     let sessions: [ImportSessionSummary]
-    @Binding var selectedSessionId: UUID?
+    @Binding var selectedScope: LibraryViewModel.Scope
 
     var body: some View {
         Menu {
             Button {
-                selectedSessionId = nil
+                selectedScope = .all
             } label: {
-                if selectedSessionId == nil {
+                if selectedScope == .all {
                     Label("All Photos", systemImage: "checkmark")
                 } else {
                     Text("All Photos")
+                }
+            }
+
+            Button {
+                selectedScope = .recentlyDeleted
+            } label: {
+                if selectedScope == .recentlyDeleted {
+                    Label("Recently Deleted", systemImage: "checkmark")
+                } else {
+                    Text("Recently Deleted")
                 }
             }
 
@@ -24,9 +34,9 @@ struct ScopePicker: View {
                 Divider()
                 ForEach(sessions) { session in
                     Button {
-                        selectedSessionId = session.id
+                        selectedScope = .session(session.id)
                     } label: {
-                        if selectedSessionId == session.id {
+                        if selectedScope == .session(session.id) {
                             Label(
                                 "\(session.displayName) (\(session.assetCount))",
                                 systemImage: "checkmark"
@@ -39,7 +49,7 @@ struct ScopePicker: View {
             }
         } label: {
             HStack(spacing: 4) {
-                Image(systemName: "tray.2")
+                Image(systemName: iconName)
                 Text(currentLabel)
                     .lineLimit(1)
             }
@@ -50,11 +60,21 @@ struct ScopePicker: View {
         .fixedSize()
     }
 
-    private var currentLabel: String {
-        guard let id = selectedSessionId,
-              let session = sessions.first(where: { $0.id == id }) else {
-            return "All Photos"
+    private var iconName: String {
+        switch selectedScope {
+        case .recentlyDeleted: return "trash"
+        default: return "tray.2"
         }
-        return session.displayName
+    }
+
+    private var currentLabel: String {
+        switch selectedScope {
+        case .all:
+            return "All Photos"
+        case .recentlyDeleted:
+            return "Recently Deleted"
+        case .session(let id):
+            return sessions.first(where: { $0.id == id })?.displayName ?? "Session"
+        }
     }
 }

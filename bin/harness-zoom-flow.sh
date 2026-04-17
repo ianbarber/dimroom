@@ -114,11 +114,7 @@ fi
 echo "=== list-assets — pick first asset id ==="
 LIST_OUT=$("$CLI_BIN" list-assets --socket "$SOCKET")
 echo "$LIST_OUT"
-ASSET_ID=$(printf '%s' "$LIST_OUT" | /usr/bin/python3 -c "
-import json, sys
-doc = json.loads(sys.stdin.read())
-print(doc['data'][0]['id'])
-")
+ASSET_ID=$(printf '%s' "$LIST_OUT" | "$REPO_ROOT/bin/harness-json-extract" 'data[0].id')
 if [ -z "$ASSET_ID" ]; then
     echo "ERROR: failed to extract asset id from list-assets response"
     exit 1
@@ -149,11 +145,7 @@ mkdir -p "$SCREENSHOT_DIR"
 echo "=== state — assert isZoomed == false before any zoom ==="
 STATE_OUT=$("$CLI_BIN" state --socket "$SOCKET")
 echo "$STATE_OUT"
-IS_ZOOMED=$(printf '%s' "$STATE_OUT" | /usr/bin/python3 -c "
-import json, sys
-doc = json.loads(sys.stdin.read())
-print(str(doc['data']['isZoomed']).lower())
-")
+IS_ZOOMED=$(printf '%s' "$STATE_OUT" | "$REPO_ROOT/bin/harness-json-extract" 'data.isZoomed')
 if [ "$IS_ZOOMED" != "false" ]; then
     echo "ERROR: expected isZoomed == false before zoom, got '$IS_ZOOMED'"
     exit 1
@@ -174,11 +166,7 @@ sleep 1
 echo "=== state — assert isZoomed == true after zoomToggle ==="
 STATE_OUT=$("$CLI_BIN" state --socket "$SOCKET")
 echo "$STATE_OUT"
-IS_ZOOMED=$(printf '%s' "$STATE_OUT" | /usr/bin/python3 -c "
-import json, sys
-doc = json.loads(sys.stdin.read())
-print(str(doc['data']['isZoomed']).lower())
-")
+IS_ZOOMED=$(printf '%s' "$STATE_OUT" | "$REPO_ROOT/bin/harness-json-extract" 'data.isZoomed')
 if [ "$IS_ZOOMED" != "true" ]; then
     echo "ERROR: expected isZoomed == true after zoomToggle, got '$IS_ZOOMED'"
     exit 1
@@ -200,11 +188,7 @@ sleep 1
 echo "=== state — assert isZoomed == false after zoomReset ==="
 STATE_OUT=$("$CLI_BIN" state --socket "$SOCKET")
 echo "$STATE_OUT"
-IS_ZOOMED=$(printf '%s' "$STATE_OUT" | /usr/bin/python3 -c "
-import json, sys
-doc = json.loads(sys.stdin.read())
-print(str(doc['data']['isZoomed']).lower())
-")
+IS_ZOOMED=$(printf '%s' "$STATE_OUT" | "$REPO_ROOT/bin/harness-json-extract" 'data.isZoomed')
 if [ "$IS_ZOOMED" != "false" ]; then
     echo "ERROR: expected isZoomed == false after zoomReset, got '$IS_ZOOMED'"
     exit 1

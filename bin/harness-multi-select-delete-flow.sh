@@ -29,14 +29,7 @@ trap cleanup EXIT
 assert_json_field() {
     local label="$1" json="$2" field="$3" expected="$4"
     local actual
-    actual=$(printf '%s' "$json" | /usr/bin/python3 -c "
-import json, sys
-doc = json.loads(sys.stdin.read())
-node = doc
-for key in '$field'.split('.'):
-    node = node[key]
-print(node)
-")
+    actual=$(printf '%s' "$json" | "$REPO_ROOT/bin/harness-json-extract" "$field")
     if [ "$actual" != "$expected" ]; then
         echo "ERROR: $label — expected $field == $expected, got $actual"
         echo "Response: $json"
@@ -48,14 +41,7 @@ print(node)
 assert_array_length() {
     local label="$1" json="$2" field="$3" expected="$4"
     local actual
-    actual=$(printf '%s' "$json" | /usr/bin/python3 -c "
-import json, sys
-doc = json.loads(sys.stdin.read())
-node = doc
-for key in '$field'.split('.'):
-    node = node[key]
-print(len(node))
-")
+    actual=$(printf '%s' "$json" | "$REPO_ROOT/bin/harness-json-extract" "$field" --length)
     if [ "$actual" != "$expected" ]; then
         echo "ERROR: $label — expected len($field) == $expected, got $actual"
         echo "Response: $json"
@@ -128,14 +114,8 @@ assert_json_field "list status" "$LIST_OUT" "status" "ok"
 assert_array_length "list length" "$LIST_OUT" "data" "3"
 
 # Pull the first two UUIDs — the ones we'll delete.
-ID1=$(printf '%s' "$LIST_OUT" | /usr/bin/python3 -c "
-import json, sys
-print(json.loads(sys.stdin.read())['data'][0]['id'])
-")
-ID2=$(printf '%s' "$LIST_OUT" | /usr/bin/python3 -c "
-import json, sys
-print(json.loads(sys.stdin.read())['data'][1]['id'])
-")
+ID1=$(printf '%s' "$LIST_OUT" | "$REPO_ROOT/bin/harness-json-extract" 'data[0].id')
+ID2=$(printf '%s' "$LIST_OUT" | "$REPO_ROOT/bin/harness-json-extract" 'data[1].id')
 echo "ID1=$ID1"
 echo "ID2=$ID2"
 
@@ -150,7 +130,7 @@ echo "=== deleteAssets [ID1, ID2] ==="
 STATE_OUT=$("$CLI_BIN" state --socket "$SOCKET")
 echo "$STATE_OUT"
 assert_json_field "assetCount after delete" "$STATE_OUT" "data.assetCount" "1"
-assert_json_field "undo toast visible" "$STATE_OUT" "data.hasUndoToast" "True"
+assert_json_field "undo toast visible" "$STATE_OUT" "data.hasUndoToast" "true"
 
 sleep 1
 echo "=== screenshot grid after delete ==="

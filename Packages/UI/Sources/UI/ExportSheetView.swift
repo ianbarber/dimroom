@@ -11,7 +11,7 @@ import SwiftUI
 /// `ExportCoordinator`.
 public struct ExportSheetView: View {
     @State private var destinationURL: URL?
-    @State private var format: ExportFormat = .original
+    @State private var format: ExportFormat
     @State private var jpegQuality: Double = 85
     @State private var applyEdits: Bool = true
 
@@ -21,12 +21,14 @@ public struct ExportSheetView: View {
 
     public init(
         assetCount: Int,
+        initialFormat: ExportFormat = .original,
         onExport: @escaping (URL, ExportFormat, Int, Bool) -> Void,
         onCancel: @escaping () -> Void
     ) {
         self.assetCount = assetCount
         self.onExport = onExport
         self.onCancel = onCancel
+        self._format = State(initialValue: initialFormat)
     }
 
     public var body: some View {

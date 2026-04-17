@@ -12,6 +12,7 @@ public actor DriveClient {
 
     private let config: OAuthConfig
     private let httpClient: HTTPClient
+    private let streamingClient: StreamingHTTPClient
     private let tokenStore: TokenStore
     private let browserLauncher: BrowserLauncher
     private let redirectServerFactory: @Sendable () -> LoopbackRedirectServer
@@ -24,6 +25,7 @@ public actor DriveClient {
     public init(
         config: OAuthConfig,
         httpClient: HTTPClient = URLSessionHTTPClient(),
+        streamingClient: StreamingHTTPClient = URLSessionStreamingHTTPClient(),
         tokenStore: TokenStore = KeychainTokenStore(),
         browserLauncher: BrowserLauncher = NSWorkspaceBrowserLauncher(),
         redirectServerFactory: @escaping @Sendable () -> LoopbackRedirectServer = { LoopbackRedirectServer() },
@@ -32,6 +34,7 @@ public actor DriveClient {
     ) {
         self.config = config
         self.httpClient = httpClient
+        self.streamingClient = streamingClient
         self.tokenStore = tokenStore
         self.browserLauncher = browserLauncher
         self.redirectServerFactory = redirectServerFactory
@@ -76,12 +79,11 @@ public actor DriveClient {
         accessTokenExpiresAt = nil
     }
 
-    /// Download a Drive file's media to `destinationURL`. Issues
-    /// `GET files/{id}?alt=media` through `AuthorizedSession`, writing
-    /// atomically to disk so a partial download never masquerades as a
-    /// complete file. Progress callback fires once at completion — the
-    /// buffered `HTTPClient` abstraction can't surface byte-level progress
-    /// today, but the signature lets us swap in a streaming delegate later.
+    /// Download a Drive file's media to `destinationURL`. Streams bytes to a
+    /// temp file via `StreamingHTTPClient` so originals — often 50–100MB+ RAW
+    /// or TIFF — never have to live entirely in memory. Progress fires
+    /// incrementally from the URLSession delegate and a final 1.0 tick once
+    /// the file is in place.
     public func downloadFile(
         id: String,
         to destinationURL: URL,
@@ -89,14 +91,15 @@ public actor DriveClient {
     ) async throws {
         let url = URL(string: "https://www.googleapis.com/drive/v3/files/\(id)?alt=media")!
         let request = URLRequest(url: url)
-        let session = AuthorizedSession(client: httpClient, provider: self)
-        let (data, response) = try await session.data(for: request)
+        let session = AuthorizedSession(
+            client: httpClient,
+            streamingClient: streamingClient,
+            provider: self
+        )
+        let response = try await session.download(for: request, to: destinationURL, progress: progress)
         guard response.statusCode == 200 else {
             throw DriveClientError.downloadFailed(status: response.statusCode)
         }
-        let parent = destinationURL.deletingLastPathComponent()
-        try FileManager.default.createDirectory(at: parent, withIntermediateDirectories: true)
-        try data.write(to: destinationURL, options: .atomic)
         progress?(1.0)
     }
 

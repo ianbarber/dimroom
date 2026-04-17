@@ -19,6 +19,7 @@ public enum Command: Codable, Sendable, Equatable {
     case setEdit(assetId: UUID, stateJSON: String)
     case getEdit(assetId: UUID)
     case setScope(importSessionId: UUID?)
+    case setScopeRecentlyDeleted
     case listImportSessions
     case selectNext
     case selectPrevious
@@ -29,12 +30,17 @@ public enum Command: Codable, Sendable, Equatable {
     case export(destinationPath: String, format: String, applyEdits: Bool)
     case fetchOriginal(assetId: UUID)
     case setEditParameter(assetId: UUID, parameter: String, value: Double)
+    case selectAssets(ids: [UUID])
+    case deleteAssets(ids: [UUID])
+    case restoreAssets(ids: [UUID])
+    case permanentlyDeleteAssets(ids: [UUID])
 
     private enum CodingKeys: String, CodingKey {
         case type
         case route
         case path
         case id
+        case ids
         case assetId
         case rating
         case direction
@@ -66,6 +72,7 @@ public enum Command: Codable, Sendable, Equatable {
         case setEdit
         case getEdit
         case setScope
+        case setScopeRecentlyDeleted
         case listImportSessions
         case selectNext
         case selectPrevious
@@ -76,6 +83,10 @@ public enum Command: Codable, Sendable, Equatable {
         case export
         case fetchOriginal
         case setEditParameter
+        case selectAssets
+        case deleteAssets
+        case restoreAssets
+        case permanentlyDeleteAssets
     }
 
     public init(from decoder: Decoder) throws {
@@ -130,6 +141,8 @@ public enum Command: Codable, Sendable, Equatable {
         case .setScope:
             let sessionId = try container.decodeIfPresent(UUID.self, forKey: .importSessionId)
             self = .setScope(importSessionId: sessionId)
+        case .setScopeRecentlyDeleted:
+            self = .setScopeRecentlyDeleted
         case .listImportSessions:
             self = .listImportSessions
         case .selectNext:
@@ -157,6 +170,18 @@ public enum Command: Codable, Sendable, Equatable {
             let parameter = try container.decode(String.self, forKey: .parameter)
             let value = try container.decode(Double.self, forKey: .value)
             self = .setEditParameter(assetId: assetId, parameter: parameter, value: value)
+        case .selectAssets:
+            let ids = try container.decode([UUID].self, forKey: .ids)
+            self = .selectAssets(ids: ids)
+        case .deleteAssets:
+            let ids = try container.decode([UUID].self, forKey: .ids)
+            self = .deleteAssets(ids: ids)
+        case .restoreAssets:
+            let ids = try container.decode([UUID].self, forKey: .ids)
+            self = .restoreAssets(ids: ids)
+        case .permanentlyDeleteAssets:
+            let ids = try container.decode([UUID].self, forKey: .ids)
+            self = .permanentlyDeleteAssets(ids: ids)
         }
     }
 
@@ -211,6 +236,8 @@ public enum Command: Codable, Sendable, Equatable {
         case .setScope(let sessionId):
             try container.encode(CommandType.setScope, forKey: .type)
             try container.encodeIfPresent(sessionId, forKey: .importSessionId)
+        case .setScopeRecentlyDeleted:
+            try container.encode(CommandType.setScopeRecentlyDeleted, forKey: .type)
         case .listImportSessions:
             try container.encode(CommandType.listImportSessions, forKey: .type)
         case .selectNext:
@@ -238,6 +265,18 @@ public enum Command: Codable, Sendable, Equatable {
             try container.encode(assetId, forKey: .assetId)
             try container.encode(parameter, forKey: .parameter)
             try container.encode(value, forKey: .value)
+        case .selectAssets(let ids):
+            try container.encode(CommandType.selectAssets, forKey: .type)
+            try container.encode(ids, forKey: .ids)
+        case .deleteAssets(let ids):
+            try container.encode(CommandType.deleteAssets, forKey: .type)
+            try container.encode(ids, forKey: .ids)
+        case .restoreAssets(let ids):
+            try container.encode(CommandType.restoreAssets, forKey: .type)
+            try container.encode(ids, forKey: .ids)
+        case .permanentlyDeleteAssets(let ids):
+            try container.encode(CommandType.permanentlyDeleteAssets, forKey: .type)
+            try container.encode(ids, forKey: .ids)
         }
     }
 }

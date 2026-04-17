@@ -31,6 +31,11 @@ struct DimroomCLI: ParsableCommand {
             ZoomReset.self,
             Export.self,
             SetEditParameter.self,
+            SelectAssets.self,
+            DeleteAssets.self,
+            RestoreAssets.self,
+            PermanentlyDeleteAssets.self,
+            SetScopeRecentlyDeleted.self,
         ]
     )
 }
@@ -458,6 +463,112 @@ extension DimroomCLI {
                 throw ValidationError("format must be one of \(validFormats.joined(separator: ", ")), got '\(format)'.")
             }
             try runCommand(.export(destinationPath: destinationPath, format: format, applyEdits: applyEdits), socket: socket)
+        }
+    }
+
+    struct SelectAssets: ParsableCommand {
+        static let configuration = CommandConfiguration(
+            commandName: "select-assets",
+            abstract: "Replace the library multi-selection with the given UUIDs."
+        )
+
+        @Argument(help: "One or more asset UUIDs to select.")
+        var ids: [String]
+
+        @Option(name: .long, help: "Path to the harness socket.")
+        var socket: String = HarnessServer.defaultSocketPath
+
+        func run() throws {
+            let uuids = try ids.map { str -> UUID in
+                guard let u = UUID(uuidString: str) else {
+                    throw ValidationError("Invalid UUID '\(str)'.")
+                }
+                return u
+            }
+            try runCommand(.selectAssets(ids: uuids), socket: socket)
+        }
+    }
+
+    struct DeleteAssets: ParsableCommand {
+        static let configuration = CommandConfiguration(
+            commandName: "delete-assets",
+            abstract: "Soft-delete one or more assets (move to Recently Deleted)."
+        )
+
+        @Argument(help: "One or more asset UUIDs to soft-delete.")
+        var ids: [String]
+
+        @Option(name: .long, help: "Path to the harness socket.")
+        var socket: String = HarnessServer.defaultSocketPath
+
+        func run() throws {
+            let uuids = try ids.map { str -> UUID in
+                guard let u = UUID(uuidString: str) else {
+                    throw ValidationError("Invalid UUID '\(str)'.")
+                }
+                return u
+            }
+            try runCommand(.deleteAssets(ids: uuids), socket: socket)
+        }
+    }
+
+    struct RestoreAssets: ParsableCommand {
+        static let configuration = CommandConfiguration(
+            commandName: "restore-assets",
+            abstract: "Restore previously soft-deleted assets back into the library."
+        )
+
+        @Argument(help: "One or more asset UUIDs to restore.")
+        var ids: [String]
+
+        @Option(name: .long, help: "Path to the harness socket.")
+        var socket: String = HarnessServer.defaultSocketPath
+
+        func run() throws {
+            let uuids = try ids.map { str -> UUID in
+                guard let u = UUID(uuidString: str) else {
+                    throw ValidationError("Invalid UUID '\(str)'.")
+                }
+                return u
+            }
+            try runCommand(.restoreAssets(ids: uuids), socket: socket)
+        }
+    }
+
+    struct PermanentlyDeleteAssets: ParsableCommand {
+        static let configuration = CommandConfiguration(
+            commandName: "permanently-delete-assets",
+            abstract: "Permanently remove soft-deleted assets, including cached files."
+        )
+
+        @Argument(help: "One or more asset UUIDs to permanently delete.")
+        var ids: [String]
+
+        @Option(name: .long, help: "Path to the harness socket.")
+        var socket: String = HarnessServer.defaultSocketPath
+
+        func run() throws {
+            let uuids = try ids.map { str -> UUID in
+                guard let u = UUID(uuidString: str) else {
+                    throw ValidationError("Invalid UUID '\(str)'.")
+                }
+                return u
+            }
+            try runCommand(.permanentlyDeleteAssets(ids: uuids), socket: socket)
+        }
+    }
+
+    struct SetScopeRecentlyDeleted: ParsableCommand {
+        static let configuration = CommandConfiguration(
+            commandName: "set-scope-recently-deleted",
+            abstract: "Scope the library to the Recently Deleted trash."
+        )
+
+        @Option(name: .long, help: "Path to the harness socket.")
+        var socket: String = HarnessServer.defaultSocketPath
+
+        func run() throws {
+            try runCommand(.setScopeRecentlyDeleted, socket: socket)
         }
     }
 }

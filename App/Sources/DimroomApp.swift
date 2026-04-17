@@ -1,3 +1,4 @@
+import AppIcon
 import AppKit
 import Catalog
 import DriveClient
@@ -86,6 +87,13 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         // bare SPM executables run as accessory processes.
         NSApplication.shared.setActivationPolicy(.regular)
         NSApplication.shared.activate(ignoringOtherApps: true)
+
+        if let iconURL = Bundle.module.url(forResource: "AppIcon", withExtension: "icns"),
+           let icon = NSImage(contentsOf: iconURL) {
+            NSApplication.shared.applicationIconImage = icon
+        } else {
+            print("[Dimroom] AppIcon.icns not found in bundle resources")
+        }
 
         let resolvedOriginalsDirectory = resolveOriginalsDirectory()
         let previewCacheDirectory = resolvePreviewCacheDirectory(from: args)

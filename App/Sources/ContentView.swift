@@ -12,6 +12,9 @@ struct ContentView: View {
     @ObservedObject var exportCoordinator: ExportCoordinator
     let catalog: CatalogDatabase?
     @State private var showExportSheet = false
+    /// Non-nil while the delete-confirmation dialog is presented.
+    /// Carries the count so the dialog title reads e.g. "Delete 3 photos?".
+    @State private var pendingDeleteCount: Int?
 
     private var currentMode: NavigationMode {
         switch router.route {
@@ -38,7 +41,10 @@ struct ContentView: View {
             Group {
                 switch router.route {
                 case .library:
-                    LibraryView(viewModel: libraryViewModel)
+                    LibraryView(
+                        viewModel: libraryViewModel,
+                        pendingDeleteCount: $pendingDeleteCount
+                    )
                 case .loupe:
                     LoupeView(viewModel: libraryViewModel)
                 case .develop:
@@ -183,6 +189,29 @@ struct ContentView: View {
             libraryViewModel.pendingZoomCommand = .toggleFitTo100
             return .handled
         }
+        // Cmd+A — select every visible row. Library only, matches Finder.
+        .onKeyPress(keys: ["a"], phases: .down) { keyPress in
+            guard keyPress.modifiers == .command else { return .ignored }
+            guard router.route == .library else { return .ignored }
+            libraryViewModel.selectAllVisible()
+            return .handled
+        }
+        // Delete / Backspace — open the delete-confirmation dialog.
+        // Library only so Loupe rating keys aren't disturbed.
+        .onKeyPress(.delete) {
+            guard router.route == .library else { return .ignored }
+            let count = libraryViewModel.selectedAssetIds.count
+            guard count > 0 else { return .ignored }
+            pendingDeleteCount = count
+            return .handled
+        }
+        .onKeyPress(.deleteForward) {
+            guard router.route == .library else { return .ignored }
+            let count = libraryViewModel.selectedAssetIds.count
+            guard count > 0 else { return .ignored }
+            pendingDeleteCount = count
+            return .handled
+        }
         .onChange(of: router.route) { oldRoute, newRoute in
             if newRoute == .develop {
                 Task {
@@ -199,18 +228,5 @@ struct ContentView: View {
     /// a notification from the menu command in DimroomApp.
     private var exportSheetPublisher: NotificationCenter.Publisher {
         NotificationCenter.default.publisher(for: .showExportSheet)
-    }
-
-    private func placeholder(_ label: String) -> some View {
-        VStack {
-            Text(label)
-                .font(.largeTitle)
-                .foregroundStyle(Color(white: 0.75))
-            Text("coming soon")
-                .font(.subheadline)
-                .foregroundStyle(Color(white: 0.5))
-        }
-        .frame(maxWidth: .infinity, maxHeight: .infinity)
-        .background(Color(white: 0.08))
     }
 }

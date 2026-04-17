@@ -9,17 +9,33 @@ import Previews
 @MainActor
 public final class LibraryViewModel: ObservableObject {
     @Published public private(set) var rows: [LibraryRow] = []
-    @Published public var selectedAssetId: UUID?
+    /// Full multi-selection. Plain click collapses to a single id; Cmd-click
+    /// toggles individual ids; Shift-click extends from `selectionAnchorId`.
+    /// All write paths go through `selectSingle` / `toggleSelect` /
+    /// `extendSelect` / `selectAllVisible` so the anchor and primary stay
+    /// consistent.
+    @Published public private(set) var selectedAssetIds: Set<UUID> = []
+    /// Last-clicked id, used by Loupe/Develop to pick which asset to show
+    /// when the grid has multiple cells selected. Always a member of
+    /// `selectedAssetIds` when non-nil.
+    @Published public private(set) var primarySelectedAssetId: UUID?
+    /// Anchor for Shift-click range selection. Set by plain-click and
+    /// Cmd-click; reused by subsequent Shift-click to compute the range.
+    public private(set) var selectionAnchorId: UUID?
     /// Minimum rating currently required for a row to appear in `rows`.
     /// `0` (the default) means "show everything". Any other value in
     /// `1...5` hides rows whose asset has a lower rating. Mutating this
     /// directly does **not** trigger a reload — callers should go through
     /// `setMinRating(_:)` so the grid is re-queried.
     @Published public private(set) var minRating: Int = 0
-    /// Currently active import-session scope. `nil` means "All Photos".
-    @Published public private(set) var scopeSessionId: UUID?
+    /// Currently active scope: All Photos, a specific import session, or
+    /// the Recently Deleted trash.
+    @Published public private(set) var scope: Scope = .all
     /// Recent import sessions for the scope picker.
     @Published public private(set) var recentSessions: [ImportSessionSummary] = []
+    /// Transient toast shown for 10 seconds after a soft-delete; clicking
+    /// Undo from the toast restores the assets in the toast's `deletedIds`.
+    @Published public var undoToast: UndoToast?
     /// Monotonic counter bumped on every successful rotate. Views that
     /// cache decoded NSImages keyed on the file path (Loupe, Cell) apply
     /// `.id(rowVersion)` to their image subtree so SwiftUI forces a
@@ -62,6 +78,33 @@ public final class LibraryViewModel: ObservableObject {
         public let rating: Int
     }
 
+    /// Active library scope. `.session(id)` narrows the grid to one
+    /// import session; `.recentlyDeleted` shows the trash (soft-deleted
+    /// rows only).
+    public enum Scope: Equatable, Sendable {
+        case all
+        case session(UUID)
+        case recentlyDeleted
+    }
+
+    /// Value attached to `undoToast` after a soft-delete. Carries the
+    /// deleted ids so `undoLastDelete` can restore exactly what the user
+    /// just removed, even if the grid has reloaded in the meantime.
+    public struct UndoToast: Equatable, Sendable {
+        public let deletedIds: [UUID]
+        public let deletedAt: Date
+
+        public init(deletedIds: [UUID], deletedAt: Date = Date()) {
+            self.deletedIds = deletedIds
+            self.deletedAt = deletedAt
+        }
+    }
+
+    /// How long the undo toast stays on screen before auto-dismissing.
+    /// After this window, `undoLastDelete` is a no-op from the toast's
+    /// perspective — the trash scope remains the path to restore.
+    public static let undoToastDuration: Duration = .seconds(10)
+
     /// Zoom actions that ContentView can request LoupeView to perform.
     public enum ZoomCommand: Equatable {
         case toggleFitTo100
@@ -75,6 +118,24 @@ public final class LibraryViewModel: ObservableObject {
     private var catalog: CatalogDatabase
     private var previewStore: PreviewStore
     private var reloadTask: Task<Void, Never>?
+    private var undoDismissTask: Task<Void, Never>?
+
+    /// Backwards-compatible alias for the primary (last-clicked) selection.
+    /// External callers that still think of selection as a single id — the
+    /// Loupe view, the harness `AppState`, existing tests — read this.
+    /// Assigning through `select(_:)` continues to work: the setter
+    /// collapses the multi-selection down to the given single id.
+    public var selectedAssetId: UUID? {
+        primarySelectedAssetId
+    }
+
+    /// Backwards-compatible alias for the legacy import-session scope
+    /// field. Returns the `session(id)` payload or `nil` when the scope
+    /// is `.all` / `.recentlyDeleted`.
+    public var scopeSessionId: UUID? {
+        if case .session(let id) = scope { return id }
+        return nil
+    }
 
     public init(catalog: CatalogDatabase, previewStore: PreviewStore) {
         self.catalog = catalog
@@ -92,11 +153,12 @@ public final class LibraryViewModel: ObservableObject {
         reload()
     }
 
-    /// Reload non-deleted assets from the catalog, sort them newest-first,
-    /// and resolve their thumbnail URLs. The catalog read happens on a
-    /// background task so the main thread never blocks on SQLite; the
-    /// result is published on `MainActor`. If the selected asset
-    /// disappears on reload, selection is cleared.
+    /// Reload the current-scope assets from the catalog, sort them
+    /// newest-first, and resolve their thumbnail URLs. The catalog read
+    /// happens on a background task so the main thread never blocks on
+    /// SQLite; the result is published on `MainActor`. If the primary
+    /// selection disappears on reload, selection is cleared. If anything
+    /// in the multi-selection disappears, those ids are dropped too.
     ///
     /// Synchronous for test ergonomics: tests can call `reload()` and
     /// inspect `rows` on the next `await` without an expectation dance.
@@ -106,23 +168,30 @@ public final class LibraryViewModel: ObservableObject {
         let catalog = self.catalog
         let previewStore = self.previewStore
         let minRating = self.minRating
-        let scopeSessionId = self.scopeSessionId
+        let scope = self.scope
         reloadTask = Task { [weak self] in
             let sessions = await Self.loadSessions(catalog: catalog)
             let resolved = await Self.loadRows(
                 catalog: catalog,
                 previewStore: previewStore,
                 minRating: minRating,
-                scopeSessionId: scopeSessionId
+                scope: scope
             )
             guard !Task.isCancelled else { return }
             await MainActor.run { [weak self] in
                 guard let self else { return }
                 self.rows = resolved
                 self.recentSessions = sessions
-                if let currentSelection = self.selectedAssetId,
-                   !resolved.contains(where: { $0.id == currentSelection }) {
-                    self.selectedAssetId = nil
+                let visible = Set(resolved.map(\.id))
+                let retained = self.selectedAssetIds.intersection(visible)
+                if retained != self.selectedAssetIds {
+                    self.selectedAssetIds = retained
+                }
+                if let primary = self.primarySelectedAssetId, !visible.contains(primary) {
+                    self.primarySelectedAssetId = retained.first
+                }
+                if let anchor = self.selectionAnchorId, !visible.contains(anchor) {
+                    self.selectionAnchorId = retained.first
                 }
             }
         }
@@ -136,9 +205,66 @@ public final class LibraryViewModel: ObservableObject {
         await reloadTask?.value
     }
 
-    /// Set the current single-selection. Passing `nil` clears it.
+    /// Set the current single-selection (plain click / selectAsset
+    /// command). Collapses any existing multi-selection down to this one
+    /// id and resets the shift-click anchor. Passing `nil` clears
+    /// selection entirely.
     public func select(_ assetId: UUID?) {
-        selectedAssetId = assetId
+        if let assetId {
+            selectedAssetIds = [assetId]
+            primarySelectedAssetId = assetId
+            selectionAnchorId = assetId
+        } else {
+            selectedAssetIds = []
+            primarySelectedAssetId = nil
+            selectionAnchorId = nil
+        }
+    }
+
+    /// Cmd-click: add or remove `assetId` from the multi-selection. The
+    /// anchor and primary move to `assetId` when adding; when removing,
+    /// the primary falls back to any remaining selected id so the Loupe
+    /// still has something to show.
+    public func toggleSelect(_ assetId: UUID) {
+        if selectedAssetIds.contains(assetId) {
+            selectedAssetIds.remove(assetId)
+            if primarySelectedAssetId == assetId {
+                primarySelectedAssetId = selectedAssetIds.first
+            }
+            if selectionAnchorId == assetId {
+                selectionAnchorId = primarySelectedAssetId
+            }
+        } else {
+            selectedAssetIds.insert(assetId)
+            primarySelectedAssetId = assetId
+            selectionAnchorId = assetId
+        }
+    }
+
+    /// Shift-click: extend the selection to cover every row between the
+    /// current anchor and `assetId` (inclusive). If there is no anchor
+    /// yet, behaves like a plain single-select. The anchor itself does
+    /// not move so subsequent shift-clicks keep extending from the same
+    /// origin. Clears non-range ids to match Finder behaviour.
+    public func extendSelect(to assetId: UUID) {
+        guard let anchor = selectionAnchorId,
+              let anchorIndex = rows.firstIndex(where: { $0.id == anchor }),
+              let targetIndex = rows.firstIndex(where: { $0.id == assetId }) else {
+            select(assetId)
+            return
+        }
+        let range = anchorIndex <= targetIndex ? anchorIndex...targetIndex : targetIndex...anchorIndex
+        selectedAssetIds = Set(rows[range].map(\.id))
+        primarySelectedAssetId = assetId
+    }
+
+    /// Cmd+A: select every row currently in `rows`. Primary lands on the
+    /// first visible row so the Loupe has a deterministic pick.
+    public func selectAllVisible() {
+        guard !rows.isEmpty else { return }
+        selectedAssetIds = Set(rows.map(\.id))
+        primarySelectedAssetId = rows.first?.id
+        selectionAnchorId = rows.first?.id
     }
 
     /// Request the full-resolution original for `assetId` via the
@@ -159,10 +285,10 @@ public final class LibraryViewModel: ObservableObject {
     /// is already the last row, this is a no-op.
     public func selectNext() {
         let ids = rows.map(\.id)
-        guard let next = Self.neighbor(in: ids, from: selectedAssetId, offset: 1) else {
+        guard let next = Self.neighbor(in: ids, from: primarySelectedAssetId, offset: 1) else {
             return
         }
-        selectedAssetId = next
+        select(next)
     }
 
     /// Move selection to the previous row before the current selection.
@@ -170,30 +296,114 @@ public final class LibraryViewModel: ObservableObject {
     /// selection is already the first row.
     public func selectPrevious() {
         let ids = rows.map(\.id)
-        guard let prev = Self.neighbor(in: ids, from: selectedAssetId, offset: -1) else {
+        guard let prev = Self.neighbor(in: ids, from: primarySelectedAssetId, offset: -1) else {
             return
         }
-        selectedAssetId = prev
+        select(prev)
     }
 
     /// Move selection up by one row in the grid (skip back by `columnCount`).
     /// No-op if nothing is selected or the target would be out of bounds.
     public func selectUp() {
         let ids = rows.map(\.id)
-        guard let target = Self.neighbor(in: ids, from: selectedAssetId, offset: -Self.columnCount) else {
+        guard let target = Self.neighbor(in: ids, from: primarySelectedAssetId, offset: -Self.columnCount) else {
             return
         }
-        selectedAssetId = target
+        select(target)
     }
 
     /// Move selection down by one row in the grid (skip forward by `columnCount`).
     /// No-op if nothing is selected or the target would be out of bounds.
     public func selectDown() {
         let ids = rows.map(\.id)
-        guard let target = Self.neighbor(in: ids, from: selectedAssetId, offset: Self.columnCount) else {
+        guard let target = Self.neighbor(in: ids, from: primarySelectedAssetId, offset: Self.columnCount) else {
             return
         }
-        selectedAssetId = target
+        select(target)
+    }
+
+    /// Soft-delete every currently-selected asset, clear the selection,
+    /// reload, and show the undo toast for `undoToastDuration`. Used by
+    /// the UI's Delete/Backspace path and the harness' `deleteAssets`
+    /// command.
+    public func deleteSelected() async {
+        let ids = Array(selectedAssetIds)
+        guard !ids.isEmpty else { return }
+        await deleteAssets(ids: ids)
+    }
+
+    /// Soft-delete `ids` explicitly (used by the harness). Mirrors
+    /// `deleteSelected` but doesn't require the ids to be in
+    /// `selectedAssetIds`.
+    public func deleteAssets(ids: [UUID]) async {
+        guard !ids.isEmpty else { return }
+        let deleted: [UUID]
+        do {
+            deleted = try catalog.deleteAssets(ids: ids)
+        } catch {
+            return
+        }
+        guard !deleted.isEmpty else { return }
+        select(nil)
+        await reloadAndWait()
+        showUndoToast(for: deleted)
+    }
+
+    /// Clear `deletedAt` on the given ids and reload. Unlike
+    /// `undoLastDelete`, this works from the Recently Deleted scope at
+    /// any time — not just while the toast is visible.
+    public func restoreAssets(ids: [UUID]) async {
+        guard !ids.isEmpty else { return }
+        do {
+            try catalog.restoreAssets(ids: ids)
+        } catch {
+            return
+        }
+        await reloadAndWait()
+    }
+
+    /// Permanently remove assets from the catalog and purge their
+    /// previews (and cached originals on disk, if any). Used from the
+    /// Recently Deleted scope.
+    public func permanentlyDeleteAssets(ids: [UUID]) async {
+        guard !ids.isEmpty else { return }
+        let removed: [Asset]
+        do {
+            removed = try catalog.permanentlyDeleteAssets(ids: ids)
+        } catch {
+            return
+        }
+        for asset in removed {
+            await previewStore.invalidate(for: asset)
+            if let localPath = asset.localPath {
+                try? FileManager.default.removeItem(atPath: localPath)
+            }
+        }
+        await reloadAndWait()
+    }
+
+    /// Action attached to the toast's Undo button: restore the ids in
+    /// the most recent toast and dismiss. If the toast already timed
+    /// out, this is a no-op — the user must use the Recently Deleted
+    /// scope at that point.
+    public func undoLastDelete() async {
+        guard let toast = undoToast else { return }
+        await restoreAssets(ids: toast.deletedIds)
+        undoToast = nil
+        undoDismissTask?.cancel()
+        undoDismissTask = nil
+    }
+
+    private func showUndoToast(for deletedIds: [UUID]) {
+        undoDismissTask?.cancel()
+        undoToast = UndoToast(deletedIds: deletedIds)
+        undoDismissTask = Task { [weak self] in
+            try? await Task.sleep(for: Self.undoToastDuration)
+            guard !Task.isCancelled else { return }
+            await MainActor.run { [weak self] in
+                self?.undoToast = nil
+            }
+        }
     }
 
     /// Persist a new rating for `assetId` and reload the grid so the
@@ -227,7 +437,14 @@ public final class LibraryViewModel: ObservableObject {
 
     /// Set the import-session scope and reload. Pass `nil` for "All Photos".
     public func setScope(_ sessionId: UUID?) async {
-        scopeSessionId = sessionId
+        await setScope(sessionId.map { Scope.session($0) } ?? .all)
+    }
+
+    /// Set the library scope to an arbitrary `Scope` value (covers All
+    /// Photos, a specific import session, and Recently Deleted) and
+    /// reload.
+    public func setScope(_ newScope: Scope) async {
+        scope = newScope
         await reloadAndWait()
     }
 
@@ -306,14 +523,29 @@ public final class LibraryViewModel: ObservableObject {
         catalog: CatalogDatabase,
         previewStore: PreviewStore,
         minRating: Int,
-        scopeSessionId: UUID? = nil
+        scope: Scope
     ) async -> [LibraryRow] {
         await Task.detached(priority: .userInitiated) {
             let fetched: [Asset]
             do {
+                let sessionId: UUID?
+                let onlyDeleted: Bool
+                switch scope {
+                case .all:
+                    sessionId = nil
+                    onlyDeleted = false
+                case .session(let id):
+                    sessionId = id
+                    onlyDeleted = false
+                case .recentlyDeleted:
+                    sessionId = nil
+                    onlyDeleted = true
+                }
                 let filter = AssetFilter(
                     rating: minRating == 0 ? nil : minRating,
-                    importSessionId: scopeSessionId
+                    includeDeleted: onlyDeleted,
+                    onlyDeleted: onlyDeleted,
+                    importSessionId: sessionId
                 )
                 fetched = try catalog.fetchAssets(filter: filter)
             } catch {

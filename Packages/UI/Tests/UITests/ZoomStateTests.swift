@@ -144,6 +144,73 @@ final class ZoomStateTests: XCTestCase {
         XCTAssertEqual(state.zoomScale, fit * 1.05, accuracy: 0.01)
     }
 
+    // MARK: - applyPan
+
+    func test_applyPan_noop_at_fit() {
+        // At fit scale there is no room to pan — deltas should be ignored
+        // and panOffset should stay at zero.
+        let fit = ZoomState.fitScale(imageSize: landscape, containerSize: container)
+        var state = ZoomState(zoomScale: fit)
+        state.applyPan(dx: 50, dy: 50, imageSize: landscape, containerSize: container)
+        XCTAssertEqual(state.panOffset, .zero)
+    }
+
+    func test_applyPan_noop_when_zoomScale_is_zero_sentinel() {
+        // The zoomScale==0 sentinel also means fit; applyPan must no-op.
+        var state = ZoomState(zoomScale: 0)
+        state.applyPan(dx: 50, dy: 50, imageSize: landscape, containerSize: container)
+        XCTAssertEqual(state.zoomScale, 0)
+        XCTAssertEqual(state.panOffset, .zero)
+    }
+
+    func test_applyPan_translates_when_zoomed() {
+        // At 2× on a landscape image, there is ample room to pan in
+        // both axes (clamp in test_clampPan_at_zoom_prevents_overscroll:
+        // maxOffsetX=1536, maxOffsetY=981). A small delta should land
+        // entirely within those bounds so clamping does not interfere.
+        var state = ZoomState(zoomScale: 2.0)
+        state.applyPan(dx: 10, dy: 20, imageSize: landscape, containerSize: container)
+        XCTAssertEqual(state.panOffset.width, 10, accuracy: 0.001)
+        // Sign convention: +dy (scrollingDeltaY positive, i.e. swipe up
+        // with natural scrolling) moves the image up in the viewport,
+        // which in SwiftUI `.offset` coordinates means panOffset.height
+        // decreases. See test_applyPan_sign_matches_natural_scrolling.
+        XCTAssertEqual(state.panOffset.height, -20, accuracy: 0.001)
+    }
+
+    func test_applyPan_clamps_at_edge() {
+        // A large delta must be clamped to the same max offset as
+        // clampPan (maxOffsetX=1536, maxOffsetY=-981).
+        var state = ZoomState(zoomScale: 2.0)
+        state.applyPan(dx: 5000, dy: 5000, imageSize: landscape, containerSize: container)
+        XCTAssertEqual(state.panOffset.width, 1536, accuracy: 0.5)
+        // +dy large → panOffset.height large negative → clamped to -981.
+        XCTAssertEqual(state.panOffset.height, -981, accuracy: 0.5)
+    }
+
+    func test_applyPan_sign_matches_natural_scrolling() {
+        // Lock in the chosen sign convention so a future refactor does
+        // not silently invert direction.
+        //
+        // With macOS "natural scrolling" ON (the default), swiping two
+        // fingers up on the trackpad gives a POSITIVE scrollingDeltaY.
+        // The user expects this to move the image UP in the viewport
+        // (revealing content that was below), matching Preview/Photos.
+        //
+        // In SwiftUI `.offset(y: N)`, positive N moves the image DOWN.
+        // So a positive dy must DECREASE panOffset.height.
+        //
+        // Horizontal works the other way: positive scrollingDeltaX
+        // (swipe right with natural scrolling) moves the image RIGHT,
+        // which in SwiftUI `.offset` is an INCREASE in panOffset.width.
+        var state = ZoomState(zoomScale: 2.0)
+        state.applyPan(dx: 1, dy: 1, imageSize: landscape, containerSize: container)
+        XCTAssertGreaterThan(state.panOffset.width, 0,
+            "Positive dx should increase panOffset.width (image moves right)")
+        XCTAssertLessThan(state.panOffset.height, 0,
+            "Positive dy should decrease panOffset.height (image moves up)")
+    }
+
     // MARK: - displayLabel
 
     func test_zoomDisplayLabel() {

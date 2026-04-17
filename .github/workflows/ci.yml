@@ -107,3 +107,10 @@ jobs:
             exit 0
           fi
           bin/harness-multi-select-delete-flow.sh
+      - name: Run harness export flow
+        run: |
+          if [ ! -x bin/harness-export-flow.sh ]; then
+            echo "No harness export flow script yet — skipping."
+            exit 0
+          fi
+          bin/harness-export-flow.sh

@@ -77,11 +77,13 @@ public actor DriveClient {
     }
 
     /// Download a Drive file's media to `destinationURL`. Issues
-    /// `GET files/{id}?alt=media` through `AuthorizedSession`, writing
-    /// atomically to disk so a partial download never masquerades as a
-    /// complete file. Progress callback fires once at completion — the
-    /// buffered `HTTPClient` abstraction can't surface byte-level progress
-    /// today, but the signature lets us swap in a streaming delegate later.
+    /// `GET files/{id}?alt=media` through `AuthorizedSession` and streams
+    /// the body into a sibling `.part` file, then atomically swaps it
+    /// into place on success. The partial file is removed on any failure
+    /// so a half-downloaded RAW never masquerades as the real thing.
+    /// Progress fires per chunk as `bytesReceived / Content-Length` when
+    /// the server reports a length; otherwise it ticks `0.0` at the start
+    /// and `1.0` at completion.
     public func downloadFile(
         id: String,
         to destinationURL: URL,
@@ -90,14 +92,49 @@ public actor DriveClient {
         let url = URL(string: "https://www.googleapis.com/drive/v3/files/\(id)?alt=media")!
         let request = URLRequest(url: url)
         let session = AuthorizedSession(client: httpClient, provider: self)
-        let (data, response) = try await session.data(for: request)
+        let (stream, response) = try await session.bytes(for: request)
         guard response.statusCode == 200 else {
             throw DriveClientError.downloadFailed(status: response.statusCode)
         }
+
         let parent = destinationURL.deletingLastPathComponent()
         try FileManager.default.createDirectory(at: parent, withIntermediateDirectories: true)
-        try data.write(to: destinationURL, options: .atomic)
-        progress?(1.0)
+
+        let partURL = destinationURL.appendingPathExtension("part")
+        try? FileManager.default.removeItem(at: partURL)
+        guard FileManager.default.createFile(atPath: partURL.path, contents: nil) else {
+            throw CocoaError(.fileWriteUnknown)
+        }
+        let handle = try FileHandle(forWritingTo: partURL)
+
+        let expectedBytes = response.expectedContentLength
+        let knownLength = expectedBytes > 0
+        if !knownLength {
+            progress?(0.0)
+        }
+        var bytesReceived: Int64 = 0
+
+        do {
+            for try await chunk in stream {
+                try handle.write(contentsOf: chunk)
+                bytesReceived += Int64(chunk.count)
+                if knownLength {
+                    let value = min(Double(bytesReceived) / Double(expectedBytes), 1.0)
+                    progress?(value)
+                }
+            }
+            try handle.close()
+            if FileManager.default.fileExists(atPath: destinationURL.path) {
+                _ = try FileManager.default.replaceItemAt(destinationURL, withItemAt: partURL)
+            } else {
+                try FileManager.default.moveItem(at: partURL, to: destinationURL)
+            }
+            progress?(1.0)
+        } catch {
+            try? handle.close()
+            try? FileManager.default.removeItem(at: partURL)
+            throw error
+        }
     }
 
     public func authenticate(options: AuthenticateOptions = AuthenticateOptions()) async throws {

@@ -120,6 +120,69 @@ final class DownloadFileTests: XCTestCase {
         XCTAssertEqual(values.last, 1.0)
     }
 
+    func testProgressFiresForMultipleChunks() async throws {
+        let tokens = InMemoryTokenStore(initial: "refresh-1")
+        let payload = Data(repeating: 0xCD, count: 1024)
+        let http = StubHTTPClient(responses: [
+            .success(200, Data(#"{"access_token":"tok","expires_in":3600,"token_type":"Bearer"}"#.utf8)),
+            .success(200, payload),
+        ])
+        let client = DriveClient(
+            config: OAuthConfig(clientID: "cid"),
+            httpClient: http,
+            tokenStore: tokens
+        )
+        let tempDir = try makeTempDirectory()
+        defer { try? FileManager.default.removeItem(at: tempDir) }
+        let dest = tempDir.appendingPathComponent("file.bin")
+        let reported = Reported()
+
+        try await client.downloadFile(id: "FILE", to: dest, progress: { value in
+            reported.record(value)
+        })
+
+        let values = reported.values
+        XCTAssertGreaterThanOrEqual(values.count, 4, "expected per-chunk progress, got \(values)")
+        for index in 1..<values.count {
+            XCTAssertGreaterThanOrEqual(
+                values[index],
+                values[index - 1],
+                "progress went backwards at index \(index): \(values)"
+            )
+        }
+        XCTAssertEqual(values.last, 1.0)
+        XCTAssertEqual(try Data(contentsOf: dest), payload)
+    }
+
+    func testPartFileCleanedUpOnFailure() async throws {
+        let tokens = InMemoryTokenStore(initial: "refresh-1")
+        let http = StubHTTPClient(responses: [
+            .success(200, Data(#"{"access_token":"tok","expires_in":3600,"token_type":"Bearer"}"#.utf8)),
+            .success(404, Data()),
+        ])
+        let client = DriveClient(
+            config: OAuthConfig(clientID: "cid"),
+            httpClient: http,
+            tokenStore: tokens
+        )
+        let tempDir = try makeTempDirectory()
+        defer { try? FileManager.default.removeItem(at: tempDir) }
+        let dest = tempDir.appendingPathComponent("file.bin")
+
+        do {
+            try await client.downloadFile(id: "MISSING", to: dest)
+            XCTFail("expected downloadFailed")
+        } catch DriveClientError.downloadFailed {
+            // expected
+        } catch {
+            XCTFail("unexpected error \(error)")
+        }
+        XCTAssertFalse(FileManager.default.fileExists(atPath: dest.path))
+        XCTAssertFalse(
+            FileManager.default.fileExists(atPath: dest.appendingPathExtension("part").path)
+        )
+    }
+
     private final class Reported: @unchecked Sendable {
         private let lock = NSLock()
         private var storage: [Double] = []

@@ -32,4 +32,23 @@ public struct AuthorizedSession: Sendable {
         retry.setValue("Bearer \(refreshed)", forHTTPHeaderField: "Authorization")
         return try await client.data(for: retry)
     }
+
+    public func bytes(for request: URLRequest) async throws -> (AsyncThrowingStream<Data, Error>, HTTPURLResponse) {
+        var authed = request
+        let token = try await provider.currentAccessToken()
+        authed.setValue("Bearer \(token)", forHTTPHeaderField: "Authorization")
+        let (stream, response) = try await client.bytes(for: authed)
+        guard response.statusCode == 401 else {
+            return (stream, response)
+        }
+        let refreshed: String
+        do {
+            refreshed = try await provider.forceRefreshAccessToken()
+        } catch {
+            throw DriveClientError.refreshFailed
+        }
+        var retry = request
+        retry.setValue("Bearer \(refreshed)", forHTTPHeaderField: "Authorization")
+        return try await client.bytes(for: retry)
+    }
 }

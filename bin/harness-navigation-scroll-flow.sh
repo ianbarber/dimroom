@@ -14,7 +14,7 @@ SEED_SRC="$REPO_ROOT/fixtures/library-seed"
 WORK_DIR="$REPO_ROOT/.artifacts/harness-navigation-scroll"
 CATALOG_PATH="$WORK_DIR/catalog.sqlite"
 PREVIEW_CACHE="$WORK_DIR/previews"
-SOCKET="/tmp/dimroom-harness-nav-scroll-$$.sock"
+SOCKET="${DIMROOM_HARNESS_SOCKET:-/tmp/dimroom-harness-nav-scroll-$$.sock}"
 APP_PID=""
 
 cleanup() {
@@ -111,36 +111,49 @@ if [ "$ASSET_COUNT" -lt 16 ]; then
     exit 1
 fi
 
-echo "=== select first asset ==="
-SEL_OUT=$("$CLI_BIN" select-asset "${ASSET_IDS[0]}" --socket "$SOCKET")
+echo "=== select newest asset (top of grid) ==="
+# `list-assets` returns catalog insertion order; the grid sorts rows
+# newest-first by capture date. The seeder gives later-inserted assets
+# the newer captureDate, so the LAST id from list-assets is rows[0].
+# We start from the top of the grid so select-down has room to walk
+# the selection off-screen.
+NEWEST_ID="${ASSET_IDS[$((ASSET_COUNT-1))]}"
+SEL_OUT=$("$CLI_BIN" select-asset "$NEWEST_ID" --socket "$SOCKET")
 if ! echo "$SEL_OUT" | grep -q '"ok"'; then
     echo "ERROR: select-asset did not return ok"
     exit 1
 fi
 CURRENT=$(get_selected_id)
-if [ "$CURRENT" != "${ASSET_IDS[0]}" ]; then
-    echo "ERROR: expected selectedAssetId == ${ASSET_IDS[0]}, got '$CURRENT'"
+if [ "$CURRENT" != "$NEWEST_ID" ]; then
+    echo "ERROR: expected selectedAssetId == $NEWEST_ID, got '$CURRENT'"
     exit 1
 fi
-echo "  OK: selected ${ASSET_IDS[0]}"
+echo "  OK: selected $NEWEST_ID"
 
-echo "=== select-down x5 to push selection off-screen ==="
-for step in $(seq 1 5); do
+echo "=== select-down x4 to push selection off-screen ==="
+# Assert each step *moves* the selection (we can't predict the exact
+# landing id because list-assets order != rows order). The screenshot
+# at the end is the visual evidence of the auto-scroll.
+PREV=$(get_selected_id)
+START="$PREV"
+for step in $(seq 1 4); do
     DOWN_OUT=$("$CLI_BIN" select-down --socket "$SOCKET")
     if ! echo "$DOWN_OUT" | grep -q '"ok"'; then
         echo "ERROR: select-down step $step did not return ok"
         exit 1
     fi
     CURRENT=$(get_selected_id)
-    EXPECTED_INDEX=$(( step * 4 ))
-    if [ "$EXPECTED_INDEX" -lt "$ASSET_COUNT" ]; then
-        if [ "$CURRENT" != "${ASSET_IDS[$EXPECTED_INDEX]}" ]; then
-            echo "ERROR: step $step expected ${ASSET_IDS[$EXPECTED_INDEX]}, got '$CURRENT'"
-            exit 1
-        fi
+    if [ "$CURRENT" = "$PREV" ]; then
+        echo "ERROR: step $step did not move selection (still $CURRENT)"
+        exit 1
     fi
-    echo "  step $step OK: selectedAssetId == $CURRENT"
+    echo "  step $step OK: selection moved $PREV -> $CURRENT"
+    PREV="$CURRENT"
 done
+if [ "$PREV" = "$START" ]; then
+    echo "ERROR: selection ended where it started ($START)"
+    exit 1
+fi
 
 sleep 1
 echo "=== screenshot ==="

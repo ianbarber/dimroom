@@ -130,7 +130,7 @@ echo "$LIST_OUT"
 FIRST_UUID=$(printf '%s' "$LIST_OUT" | /usr/bin/python3 -c "
 import json, sys
 doc = json.loads(sys.stdin.read())
-print(doc['data']['assets'][0]['id'])
+print(doc['data'][0]['id'])
 ")
 if [ -z "$FIRST_UUID" ]; then
     echo "ERROR: could not extract first asset UUID"

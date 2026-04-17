@@ -297,7 +297,11 @@ final class HarnessController: @unchecked Sendable {
             return .error("catalog not loaded")
         }
         do {
-            let assets = try catalog.fetchAssets()
+            // Mirror LibraryViewModel.loadRows' sort so harness flows that
+            // enumerate "all assets" see them in the same order as the grid.
+            let assets = try catalog.fetchAssets().sorted { lhs, rhs in
+                (lhs.captureDate ?? lhs.importedDate) > (rhs.captureDate ?? rhs.importedDate)
+            }
             let array: [AnyCodableValue] = assets.map { asset in
                 let captureDate: AnyCodableValue
                 if let date = asset.captureDate {

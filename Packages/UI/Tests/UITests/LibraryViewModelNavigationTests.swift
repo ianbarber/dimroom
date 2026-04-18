@@ -261,6 +261,85 @@ final class LibraryViewModelNavigationTests: XCTestCase {
         XCTAssertNil(vm.selectedAssetId)
     }
 
+    // MARK: - pendingScrollToAssetId trigger
+
+    @MainActor
+    func testSelectNextSetsPendingScrollToNewSelection() async throws {
+        let (vm, assets) = try await makeThreeAssetViewModel()
+        vm.select(assets[0].id)
+
+        vm.selectNext()
+        XCTAssertEqual(vm.pendingScrollToAssetId, assets[1].id)
+    }
+
+    @MainActor
+    func testSelectPreviousSetsPendingScrollToNewSelection() async throws {
+        let (vm, assets) = try await makeThreeAssetViewModel()
+        vm.select(assets[1].id)
+
+        vm.selectPrevious()
+        XCTAssertEqual(vm.pendingScrollToAssetId, assets[0].id)
+    }
+
+    @MainActor
+    func testSelectUpSetsPendingScroll() async throws {
+        let (vm, assets) = try await makeEightAssetViewModel()
+        vm.select(assets[5].id)
+
+        vm.selectUp()
+        XCTAssertEqual(vm.pendingScrollToAssetId, assets[1].id)
+    }
+
+    @MainActor
+    func testSelectDownSetsPendingScroll() async throws {
+        let (vm, assets) = try await makeEightAssetViewModel()
+        vm.select(assets[1].id)
+
+        vm.selectDown()
+        XCTAssertEqual(vm.pendingScrollToAssetId, assets[5].id)
+    }
+
+    @MainActor
+    func testSelectAtEndDoesNotSetPendingScroll() async throws {
+        let (vm, assets) = try await makeThreeAssetViewModel()
+        vm.select(assets[2].id)
+
+        vm.selectNext()
+        XCTAssertNil(
+            vm.pendingScrollToAssetId,
+            "No navigation happened, so no scroll request should be set"
+        )
+    }
+
+    @MainActor
+    func testSelectMethodDoesNotSetPendingScroll() async throws {
+        let (vm, assets) = try await makeThreeAssetViewModel()
+
+        vm.select(assets[2].id)
+        XCTAssertNil(
+            vm.pendingScrollToAssetId,
+            "Tap/harness select must not trigger auto-scroll"
+        )
+    }
+
+    @MainActor
+    func testSelectWithNilSelectionDoesNotSetPendingScroll() async throws {
+        let (vm, _) = try await makeThreeAssetViewModel()
+        XCTAssertNil(vm.selectedAssetId)
+
+        vm.selectNext()
+        XCTAssertNil(vm.pendingScrollToAssetId)
+
+        vm.selectPrevious()
+        XCTAssertNil(vm.pendingScrollToAssetId)
+
+        vm.selectUp()
+        XCTAssertNil(vm.pendingScrollToAssetId)
+
+        vm.selectDown()
+        XCTAssertNil(vm.pendingScrollToAssetId)
+    }
+
     // MARK: - Helpers
 
     /// Build a UUID with a predictable trailing byte so tests can refer

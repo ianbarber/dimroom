@@ -125,8 +125,9 @@ public final class CatalogDatabase: Sendable {
         }
     }
 
-    /// Clear `deletedAt` for the given asset, returning it to the live
-    /// library.
+    /// Inverse of `deleteAsset`: clears `deletedAt` so the asset shows up
+    /// in default queries again. Used by the undo stack to reverse a
+    /// soft-delete.
     public func restoreAsset(id: UUID) throws {
         try dbQueue.write { db in
             if var asset = try Asset.fetchOne(db, key: id) {

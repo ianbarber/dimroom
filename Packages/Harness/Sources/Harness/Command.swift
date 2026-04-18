@@ -29,6 +29,7 @@ public enum Command: Codable, Sendable, Equatable {
     case zoomReset
     case export(destinationPath: String, format: String, applyEdits: Bool)
     case fetchOriginal(assetId: UUID)
+    case setEditParameter(assetId: UUID, parameter: String, value: Double)
     case undo
     case redo
     case selectAssets(ids: [UUID])
@@ -52,6 +53,8 @@ public enum Command: Codable, Sendable, Equatable {
         case destinationPath
         case format
         case applyEdits
+        case parameter
+        case value
     }
 
     private enum CommandType: String, Codable {
@@ -81,6 +84,7 @@ public enum Command: Codable, Sendable, Equatable {
         case zoomReset
         case export
         case fetchOriginal
+        case setEditParameter
         case undo
         case redo
         case selectAssets
@@ -165,6 +169,11 @@ public enum Command: Codable, Sendable, Equatable {
         case .fetchOriginal:
             let assetId = try container.decode(UUID.self, forKey: .assetId)
             self = .fetchOriginal(assetId: assetId)
+        case .setEditParameter:
+            let assetId = try container.decode(UUID.self, forKey: .assetId)
+            let parameter = try container.decode(String.self, forKey: .parameter)
+            let value = try container.decode(Double.self, forKey: .value)
+            self = .setEditParameter(assetId: assetId, parameter: parameter, value: value)
         case .undo:
             self = .undo
         case .redo:
@@ -259,6 +268,11 @@ public enum Command: Codable, Sendable, Equatable {
         case .fetchOriginal(let assetId):
             try container.encode(CommandType.fetchOriginal, forKey: .type)
             try container.encode(assetId, forKey: .assetId)
+        case .setEditParameter(let assetId, let parameter, let value):
+            try container.encode(CommandType.setEditParameter, forKey: .type)
+            try container.encode(assetId, forKey: .assetId)
+            try container.encode(parameter, forKey: .parameter)
+            try container.encode(value, forKey: .value)
         case .undo:
             try container.encode(CommandType.undo, forKey: .type)
         case .redo:

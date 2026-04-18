@@ -32,6 +32,7 @@ struct DimroomCLI: ParsableCommand {
             ZoomToggle.self,
             ZoomReset.self,
             Export.self,
+            SetEditParameter.self,
             Undo.self,
             Redo.self,
             SelectAssets.self,
@@ -441,6 +442,32 @@ extension DimroomCLI {
 
         func run() throws {
             try runCommand(.zoomReset, socket: socket)
+        }
+    }
+
+    struct SetEditParameter: ParsableCommand {
+        static let configuration = CommandConfiguration(
+            commandName: "set-edit-parameter",
+            abstract: "Set a single edit parameter on an asset (e.g. exposure, contrast)."
+        )
+
+        @Argument(help: "The UUID of the asset.")
+        var id: String
+
+        @Argument(help: "Parameter name (exposure, contrast, highlights, shadows, whites, blacks, temperature, tint, clarity, vibrance, saturation).")
+        var parameter: String
+
+        @Argument(help: "The value to set.")
+        var value: Double
+
+        @Option(name: .long, help: "Path to the harness socket.")
+        var socket: String = HarnessServer.defaultSocketPath
+
+        func run() throws {
+            guard let uuid = UUID(uuidString: id) else {
+                throw ValidationError("Invalid UUID '\(id)'.")
+            }
+            try runCommand(.setEditParameter(assetId: uuid, parameter: parameter, value: value), socket: socket)
         }
     }
 

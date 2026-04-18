@@ -14,6 +14,7 @@ final class HarnessController: @unchecked Sendable {
     private let originalsDirectory: URL
     private let previewStore: PreviewStore
     private let libraryViewModel: LibraryViewModel
+    private let developViewModel: DevelopViewModel
     private let editClipboard: EditClipboard
     private let exportCoordinator: ExportCoordinator
     private let originalsCoordinator: OriginalsCoordinator?
@@ -26,6 +27,7 @@ final class HarnessController: @unchecked Sendable {
         originalsDirectory: URL,
         previewStore: PreviewStore,
         libraryViewModel: LibraryViewModel,
+        developViewModel: DevelopViewModel,
         editClipboard: EditClipboard,
         exportCoordinator: ExportCoordinator,
         originalsCoordinator: OriginalsCoordinator? = nil,
@@ -36,6 +38,7 @@ final class HarnessController: @unchecked Sendable {
         self.originalsDirectory = originalsDirectory
         self.previewStore = previewStore
         self.libraryViewModel = libraryViewModel
+        self.developViewModel = developViewModel
         self.editClipboard = editClipboard
         self.exportCoordinator = exportCoordinator
         self.originalsCoordinator = originalsCoordinator
@@ -135,7 +138,7 @@ final class HarnessController: @unchecked Sendable {
             return await handleSetEdit(assetId: assetId, stateJSON: stateJSON)
 
         case .getEdit(let assetId):
-            return handleGetEdit(assetId: assetId)
+            return await handleGetEdit(assetId: assetId)
 
         case .setScope(let sessionId):
             await libraryViewModel.setScope(sessionId)
@@ -177,6 +180,9 @@ final class HarnessController: @unchecked Sendable {
 
         case .fetchOriginal(let assetId):
             return await handleFetchOriginal(assetId: assetId)
+
+        case .setEditParameter(let assetId, let parameter, let value):
+            return await handleSetEditParameter(assetId: assetId, parameter: parameter, value: value)
 
         case .undo:
             return await handleUndo()
@@ -437,12 +443,21 @@ final class HarnessController: @unchecked Sendable {
         }
     }
 
-    private func handleGetEdit(assetId: UUID) -> Response {
+    private func handleGetEdit(assetId: UUID) async -> Response {
         guard let catalog else {
             return .error("catalog not loaded")
         }
+        let liveState: EditState? = await MainActor.run {
+            developViewModel.currentAssetId == assetId ? developViewModel.editState : nil
+        }
         do {
-            guard let state = try catalog.latestEditState(for: assetId) else {
+            let state: EditState?
+            if let liveState {
+                state = liveState
+            } else {
+                state = try catalog.latestEditState(for: assetId)
+            }
+            guard let state else {
                 return .ok(data: .null)
             }
             let data = try JSONEncoder().encode(state)
@@ -451,6 +466,26 @@ final class HarnessController: @unchecked Sendable {
         } catch {
             return .error("getEdit failed: \(error.localizedDescription)")
         }
+    }
+
+    private func handleSetEditParameter(assetId: UUID, parameter: String, value: Double) async -> Response {
+        guard let keyPath = DevelopViewModel.keyPath(forParameter: parameter) else {
+            return .error("unknown parameter: \(parameter)")
+        }
+        let alreadyActive: Bool = await MainActor.run {
+            if developViewModel.currentAssetId != assetId {
+                router.route = .develop
+                return false
+            }
+            return true
+        }
+        if !alreadyActive {
+            await developViewModel.activate(assetId: assetId)
+        }
+        await MainActor.run {
+            developViewModel.setParameter(keyPath, value: value)
+        }
+        return .ok()
     }
 
     private static let iso8601: ISO8601DateFormatter = {

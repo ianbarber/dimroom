@@ -7,6 +7,7 @@ import UI
 struct ContentView: View {
     let router: AppRouter
     @ObservedObject var libraryViewModel: LibraryViewModel
+    @ObservedObject var developViewModel: DevelopViewModel
     @ObservedObject var importCoordinator: ImportCoordinator
     @ObservedObject var exportCoordinator: ExportCoordinator
     let catalog: CatalogDatabase?
@@ -47,7 +48,7 @@ struct ContentView: View {
                 case .loupe:
                     LoupeView(viewModel: libraryViewModel)
                 case .develop:
-                    placeholder("Develop")
+                    DevelopView(viewModel: developViewModel)
                 }
             }
             .frame(maxWidth: .infinity, maxHeight: .infinity)
@@ -211,24 +212,21 @@ struct ContentView: View {
             pendingDeleteCount = count
             return .handled
         }
+        .onChange(of: router.route) { oldRoute, newRoute in
+            if newRoute == .develop {
+                Task {
+                    await developViewModel.activate(assetId: libraryViewModel.selectedAssetId)
+                }
+            }
+            if oldRoute == .develop {
+                developViewModel.deactivate()
+            }
+        }
     }
 
     /// The export sheet is triggered by File → Export… (Cmd+Shift+E) via
     /// a notification from the menu command in DimroomApp.
     private var exportSheetPublisher: NotificationCenter.Publisher {
         NotificationCenter.default.publisher(for: .showExportSheet)
-    }
-
-    private func placeholder(_ label: String) -> some View {
-        VStack {
-            Text(label)
-                .font(.largeTitle)
-                .foregroundStyle(Color(white: 0.75))
-            Text("coming soon")
-                .font(.subheadline)
-                .foregroundStyle(Color(white: 0.5))
-        }
-        .frame(maxWidth: .infinity, maxHeight: .infinity)
-        .background(Color(white: 0.08))
     }
 }

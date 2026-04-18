@@ -120,6 +120,11 @@ public final class LibraryViewModel: ObservableObject {
     private var reloadTask: Task<Void, Never>?
     private var undoDismissTask: Task<Void, Never>?
 
+    /// Shared undo stack used to record rating/rotation mutations. Set
+    /// by `AppDelegate` after construction; `nil` in the placeholder
+    /// view model and in tests that don't exercise undo.
+    public weak var undoStack: UndoStack?
+
     /// Backwards-compatible alias for the primary (last-clicked) selection.
     /// External callers that still think of selection as a single id — the
     /// Loupe view, the harness `AppState`, existing tests — read this.
@@ -411,6 +416,7 @@ public final class LibraryViewModel: ObservableObject {
     /// that range are clamped because the UI key handlers bind 0–5 only.
     public func setRating(for assetId: UUID, to rating: Int) async {
         let clamped = max(0, min(5, rating))
+        let previous = (try? catalog.fetchAsset(id: assetId)?.rating) ?? 0
         do {
             try catalog.updateRating(assetId: assetId, rating: clamped)
         } catch {
@@ -424,6 +430,9 @@ public final class LibraryViewModel: ObservableObject {
             ratingToast = nil
         }
         await reloadAndWait()
+        if previous != clamped {
+            undoStack?.push(.rating(assetId: assetId, from: previous, to: clamped))
+        }
     }
 
     /// Update the minimum-rating filter and reload the grid to match. If
@@ -474,8 +483,33 @@ public final class LibraryViewModel: ObservableObject {
         } else {
             newRotation = (asset.rotation - 90 + 360) % 360
         }
+        let previousRotation = asset.rotation
+        await applyRotation(assetId: assetId, to: newRotation)
+        if previousRotation != newRotation {
+            undoStack?.push(.rotation(
+                assetId: assetId,
+                from: previousRotation,
+                to: newRotation
+            ))
+        }
+    }
+
+    /// Set an absolute rotation on `assetId` and regenerate its cached
+    /// previews to match. Shared between `rotate(clockwise:)` (the
+    /// forward entrypoint) and the undo stack (which needs to replay
+    /// rotations at absolute values, not deltas).
+    public func applyRotation(assetId: UUID, to rotation: Int) async {
+        let assets: [Asset]
         do {
-            try catalog.updateRotation(assetId: assetId, rotation: newRotation)
+            assets = try catalog.fetchAssets(filter: AssetFilter(includeDeleted: true))
+        } catch {
+            return
+        }
+        guard let asset = assets.first(where: { $0.id == assetId }) else {
+            return
+        }
+        do {
+            try catalog.updateRotation(assetId: assetId, rotation: rotation)
         } catch {
             return
         }
@@ -485,11 +519,8 @@ public final class LibraryViewModel: ObservableObject {
         await previewStore.invalidate(for: asset)
         if let localPath = asset.localPath {
             let sourceURL = URL(fileURLWithPath: localPath)
-            // Build a fresh Asset value with the new rotation so
-            // PreviewStore.applyRotation bakes the orientation into the
-            // regenerated JPEGs. Catalog/cache agree afterwards.
             var rotated = asset
-            rotated.rotation = newRotation
+            rotated.rotation = rotation
             _ = try? await previewStore.generate(for: rotated, sourceURL: sourceURL)
         }
 

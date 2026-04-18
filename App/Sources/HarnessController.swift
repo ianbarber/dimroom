@@ -298,8 +298,16 @@ final class HarnessController: @unchecked Sendable {
             return .error("failed to create destination directory: \(error.localizedDescription)")
         }
 
-        // Use visible assets from the library view model (respects current filter).
-        let assets = await MainActor.run { libraryViewModel.rows.map(\.asset) }
+        // Selection wins when non-empty; otherwise fall back to all
+        // visible rows (which already respect the rating filter and
+        // active scope). Same rule as the File → Export… sheet so both
+        // entry points agree.
+        let assets = await MainActor.run {
+            ExportScope.resolve(
+                selectedIds: libraryViewModel.selectedAssetIds,
+                rows: libraryViewModel.rows
+            )
+        }
 
         await exportCoordinator.run(
             assets: assets,

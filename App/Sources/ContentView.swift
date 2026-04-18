@@ -67,15 +67,18 @@ struct ContentView: View {
             RatingToastView(toast: $libraryViewModel.ratingToast)
         }
         .sheet(isPresented: $showExportSheet) {
+            let scopedAssets = ExportScope.resolve(
+                selectedIds: libraryViewModel.selectedAssetIds,
+                rows: libraryViewModel.rows
+            )
             ExportSheetView(
-                assetCount: libraryViewModel.rows.count,
+                assetCount: scopedAssets.count,
                 onExport: { [catalog] destinationURL, format, jpegQuality, applyEdits in
                     showExportSheet = false
                     guard let catalog else { return }
-                    let assets = libraryViewModel.rows.map(\.asset)
                     Task {
                         await exportCoordinator.run(
-                            assets: assets,
+                            assets: scopedAssets,
                             catalog: catalog,
                             format: format,
                             jpegQuality: jpegQuality,

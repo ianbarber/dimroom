@@ -27,6 +27,8 @@ struct DimroomCLI: ParsableCommand {
             ListImportSessions.self,
             SelectNext.self,
             SelectPrevious.self,
+            SelectUp.self,
+            SelectDown.self,
             ZoomToggle.self,
             ZoomReset.self,
             Export.self,
@@ -383,6 +385,34 @@ extension DimroomCLI {
 
         func run() throws {
             try runCommand(.selectPrevious, socket: socket)
+        }
+    }
+
+    struct SelectUp: ParsableCommand {
+        static let configuration = CommandConfiguration(
+            commandName: "select-up",
+            abstract: "Move selection up one row in the library grid."
+        )
+
+        @Option(name: .long, help: "Path to the harness socket.")
+        var socket: String = HarnessServer.defaultSocketPath
+
+        func run() throws {
+            try runCommand(.selectUp, socket: socket)
+        }
+    }
+
+    struct SelectDown: ParsableCommand {
+        static let configuration = CommandConfiguration(
+            commandName: "select-down",
+            abstract: "Move selection down one row in the library grid."
+        )
+
+        @Option(name: .long, help: "Path to the harness socket.")
+        var socket: String = HarnessServer.defaultSocketPath
+
+        func run() throws {
+            try runCommand(.selectDown, socket: socket)
         }
     }
 

@@ -42,6 +42,12 @@ extension DimroomFixture {
         )
         var seedDir: String
 
+        @Option(
+            name: .long,
+            help: "Repeat each seed JPEG N times with distinct hashes and staggered dates."
+        )
+        var duplicate: Int = 1
+
         func run() async throws {
             let fm = FileManager.default
             let catalogURL = URL(fileURLWithPath: catalog)
@@ -76,37 +82,46 @@ extension DimroomFixture {
             // stable and fixture flows can assert on ordering later.
             let baseDate = Date(timeIntervalSince1970: 1_700_000_000)
 
-            for (index, url) in jpegs.enumerated() {
-                let hash = try sha256(of: url)
-                if try db.fetchAsset(byHash: hash) != nil {
-                    skipped += 1
-                    continue
-                }
+            let copies = max(1, duplicate)
+            var assetIndex = 0
+            for url in jpegs {
+                let fileData = try Data(contentsOf: url)
                 let (width, height) = Self.pixelSize(of: url) ?? (800, 600)
                 let size = (try url.resourceValues(forKeys: [.fileSizeKey]).fileSize) ?? 0
-                let asset = Asset(
-                    contentHash: hash,
-                    originalFilename: url.lastPathComponent,
-                    captureDate: baseDate.addingTimeInterval(Double(index) * 3600),
-                    importedDate: baseDate,
-                    sourceType: .digital,
-                    width: width,
-                    height: height,
-                    bytes: Int64(size)
-                )
-                try db.insertAsset(asset)
-                try await store.generate(for: asset, sourceURL: url)
-                imported += 1
+
+                for copy in 0..<copies {
+                    let hashInput: Data
+                    if copy == 0 {
+                        hashInput = fileData
+                    } else {
+                        hashInput = fileData + Data([UInt8(copy)])
+                    }
+                    let hash = SHA256.hash(data: hashInput)
+                        .map { String(format: "%02x", $0) }.joined()
+                    if try db.fetchAsset(byHash: hash) != nil {
+                        skipped += 1
+                        assetIndex += 1
+                        continue
+                    }
+                    let asset = Asset(
+                        contentHash: hash,
+                        originalFilename: url.lastPathComponent,
+                        captureDate: baseDate.addingTimeInterval(Double(assetIndex) * 3600),
+                        importedDate: baseDate,
+                        sourceType: .digital,
+                        width: width,
+                        height: height,
+                        bytes: Int64(size)
+                    )
+                    try db.insertAsset(asset)
+                    try await store.generate(for: asset, sourceURL: url)
+                    imported += 1
+                    assetIndex += 1
+                }
             }
 
             // Emit a one-line summary so flow logs are readable.
             print("dimroom-fixture: imported=\(imported) skipped=\(skipped) from \(seedURL.path)")
-        }
-
-        private func sha256(of url: URL) throws -> String {
-            let data = try Data(contentsOf: url)
-            let digest = SHA256.hash(data: data)
-            return digest.map { String(format: "%02x", $0) }.joined()
         }
 
         private static func pixelSize(of url: URL) -> (Int, Int)? {

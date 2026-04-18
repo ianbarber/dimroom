@@ -27,9 +27,13 @@ struct DimroomCLI: ParsableCommand {
             ListImportSessions.self,
             SelectNext.self,
             SelectPrevious.self,
+            SelectUp.self,
+            SelectDown.self,
             ZoomToggle.self,
             ZoomReset.self,
             Export.self,
+            Undo.self,
+            Redo.self,
             SelectAssets.self,
             DeleteAssets.self,
             RestoreAssets.self,
@@ -384,6 +388,34 @@ extension DimroomCLI {
         }
     }
 
+    struct SelectUp: ParsableCommand {
+        static let configuration = CommandConfiguration(
+            commandName: "select-up",
+            abstract: "Move selection up one row in the library grid."
+        )
+
+        @Option(name: .long, help: "Path to the harness socket.")
+        var socket: String = HarnessServer.defaultSocketPath
+
+        func run() throws {
+            try runCommand(.selectUp, socket: socket)
+        }
+    }
+
+    struct SelectDown: ParsableCommand {
+        static let configuration = CommandConfiguration(
+            commandName: "select-down",
+            abstract: "Move selection down one row in the library grid."
+        )
+
+        @Option(name: .long, help: "Path to the harness socket.")
+        var socket: String = HarnessServer.defaultSocketPath
+
+        func run() throws {
+            try runCommand(.selectDown, socket: socket)
+        }
+    }
+
     struct ZoomToggle: ParsableCommand {
         static let configuration = CommandConfiguration(
             commandName: "zoom-toggle",
@@ -436,6 +468,34 @@ extension DimroomCLI {
                 throw ValidationError("format must be one of \(validFormats.joined(separator: ", ")), got '\(format)'.")
             }
             try runCommand(.export(destinationPath: destinationPath, format: format, applyEdits: applyEdits), socket: socket)
+        }
+    }
+
+    struct Undo: ParsableCommand {
+        static let configuration = CommandConfiguration(
+            commandName: "undo",
+            abstract: "Undo the most recent undoable action (rating, rotation, edit, delete)."
+        )
+
+        @Option(name: .long, help: "Path to the harness socket.")
+        var socket: String = HarnessServer.defaultSocketPath
+
+        func run() throws {
+            try runCommand(.undo, socket: socket)
+        }
+    }
+
+    struct Redo: ParsableCommand {
+        static let configuration = CommandConfiguration(
+            commandName: "redo",
+            abstract: "Redo the most recently undone action."
+        )
+
+        @Option(name: .long, help: "Path to the harness socket.")
+        var socket: String = HarnessServer.defaultSocketPath
+
+        func run() throws {
+            try runCommand(.redo, socket: socket)
         }
     }
 

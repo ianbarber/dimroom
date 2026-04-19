@@ -46,11 +46,11 @@ public enum Renderer {
         guard highlights != 0 || shadows != 0 else { return image }
         let filter = CIFilter(name: "CIHighlightShadowAdjust")!
         filter.setValue(image, forKey: kCIInputImageKey)
-        // CIHighlightShadowAdjust: highlightAmount default is 1.0 (no change);
-        // values < 1 recover highlights, > 1 brightens them.
-        // shadowAmount default is 0.0 (no change); positive lifts shadows.
-        filter.setValue(1.0 + highlights / 100.0, forKey: "inputHighlightAmount")
-        filter.setValue(shadows / 100.0, forKey: "inputShadowAmount")
+        // CIHighlightShadowAdjust: highlightAmount default 1.0, shadowAmount default 0.
+        // Halve the slider-to-input scale so ±100 lands at 1.0±0.5 / ±0.5 rather than
+        // the filter's raw 0…2 / -1…1 range, where the extremes clip hard.
+        filter.setValue(1.0 + highlights / 200.0, forKey: "inputHighlightAmount")
+        filter.setValue(shadows / 200.0, forKey: "inputShadowAmount")
         return filter.outputImage!
     }
 
@@ -60,8 +60,11 @@ public enum Renderer {
         filter.setValue(image, forKey: kCIInputImageKey)
         // Five-point tone curve. Identity is a straight line from (0,0) to (1,1).
         // Whites adjust the top endpoint, blacks adjust the bottom endpoint.
-        let blacksY = max(0.0, min(1.0, blacks / 200.0))
-        let whitesY = max(0.0, min(1.0, 1.0 + whites / 200.0))
+        // Scale so ±100 moves each endpoint ~±0.25 (not ±0.5) — the curve still
+        // pivots through the 0.25/0.5/0.75 interior points but endpoints don't
+        // collapse onto the midline.
+        let blacksY = max(0.0, min(1.0, blacks / 400.0))
+        let whitesY = max(0.0, min(1.0, 1.0 + whites / 400.0))
         filter.setValue(CIVector(x: 0.0, y: CGFloat(blacksY)), forKey: "inputPoint0")
         filter.setValue(CIVector(x: 0.25, y: 0.25), forKey: "inputPoint1")
         filter.setValue(CIVector(x: 0.5, y: 0.5), forKey: "inputPoint2")
@@ -74,7 +77,9 @@ public enum Renderer {
         guard contrast != 0 else { return image }
         let filter = CIFilter(name: "CIColorControls")!
         filter.setValue(image, forKey: kCIInputImageKey)
-        filter.setValue(1.0 + contrast / 100.0, forKey: "inputContrast")
+        // Map ±100 to 0.5…1.5 instead of 0…2. At 2.0 CIColorControls crushes blacks
+        // / blows highlights so hard most of the upper slider travel is unusable.
+        filter.setValue(1.0 + contrast / 200.0, forKey: "inputContrast")
         filter.setValue(1.0, forKey: "inputSaturation")
         filter.setValue(0.0, forKey: "inputBrightness")
         return filter.outputImage!
@@ -83,16 +88,19 @@ public enum Renderer {
     private static func applyClarity(_ image: CIImage, clarity: Double) -> CIImage {
         guard clarity != 0 else { return image }
 
+        // Cap both sides at 0.5 of the underlying filter range — full intensity
+        // produced ringing (positive) or excessive blur (negative) long before
+        // the slider reached ±100.
         if clarity > 0 {
             // Positive: large-radius unsharp mask for local contrast enhancement.
             let filter = CIFilter(name: "CIUnsharpMask")!
             filter.setValue(image, forKey: kCIInputImageKey)
             filter.setValue(20.0, forKey: "inputRadius")
-            filter.setValue(clarity / 100.0, forKey: "inputIntensity")
+            filter.setValue(clarity / 200.0, forKey: "inputIntensity")
             return filter.outputImage!
         } else {
             // Negative: blend toward a Gaussian blur for softening/diffusion.
-            let blendFraction = Swift.abs(clarity) / 100.0
+            let blendFraction = Swift.abs(clarity) / 200.0
 
             let blur = CIFilter(name: "CIGaussianBlur")!
             blur.setValue(image, forKey: kCIInputImageKey)
@@ -135,7 +143,10 @@ public enum Renderer {
         guard saturation != 0 else { return image }
         let filter = CIFilter(name: "CIColorControls")!
         filter.setValue(image, forKey: kCIInputImageKey)
-        filter.setValue(1.0 + saturation / 100.0, forKey: "inputSaturation")
+        // Asymmetric: -100 → 0 (fully desaturated, a useful endpoint), +100 → 1.5
+        // (a strong boost well short of the filter's 2× limit, which wraps hue).
+        let input = saturation >= 0 ? 1.0 + saturation / 200.0 : 1.0 + saturation / 100.0
+        filter.setValue(input, forKey: "inputSaturation")
         filter.setValue(1.0, forKey: "inputContrast")
         filter.setValue(0.0, forKey: "inputBrightness")
         return filter.outputImage!

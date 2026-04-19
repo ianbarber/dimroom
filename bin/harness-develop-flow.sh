@@ -138,6 +138,33 @@ echo "  OK: exposure == $EXPOSURE"
 echo "=== screenshot: develop with exposure +2 ==="
 "$CLI_BIN" screenshot "$SCREENSHOT_DIR/develop-exposure-plus2.png" --socket "$SOCKET" >/dev/null
 
+echo "=== reset-edit-parameter $ASSET_ID exposure ==="
+RESET_OUT=$("$CLI_BIN" reset-edit-parameter "$ASSET_ID" exposure --socket "$SOCKET")
+echo "$RESET_OUT"
+if ! echo "$RESET_OUT" | grep -q '"ok"'; then
+    echo "ERROR: reset-edit-parameter did not return ok"
+    exit 1
+fi
+# Wait for debounced render + auto-save (render ~50ms, save ~500ms).
+sleep 1
+
+echo "=== get-edit $ASSET_ID — assert exposure == 0.0 ==="
+GET_OUT=$("$CLI_BIN" get-edit "$ASSET_ID" --socket "$SOCKET")
+echo "$GET_OUT"
+EXPOSURE=$(printf '%s' "$GET_OUT" | /usr/bin/python3 -c "
+import json, sys
+doc = json.loads(sys.stdin.read())
+print(float(doc['data']['exposure']))
+")
+if [ "$EXPOSURE" != "0.0" ]; then
+    echo "ERROR: expected exposure == 0.0 after reset, got '$EXPOSURE'"
+    exit 1
+fi
+echo "  OK: exposure == $EXPOSURE"
+
+echo "=== screenshot: develop after reset ==="
+"$CLI_BIN" screenshot "$SCREENSHOT_DIR/develop-after-reset.png" --socket "$SOCKET" >/dev/null
+
 echo "=== navigate library (back out of develop) ==="
 "$CLI_BIN" navigate library --socket "$SOCKET" >/dev/null
 sleep 1

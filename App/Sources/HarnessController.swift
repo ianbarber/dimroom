@@ -201,6 +201,9 @@ final class HarnessController: @unchecked Sendable {
         case .setEditParameter(let assetId, let parameter, let value):
             return await handleSetEditParameter(assetId: assetId, parameter: parameter, value: value)
 
+        case .resetEditParameter(let assetId, let parameter):
+            return await handleResetEditParameter(assetId: assetId, parameter: parameter)
+
         case .undo:
             return await handleUndo()
 
@@ -594,6 +597,26 @@ final class HarnessController: @unchecked Sendable {
         }
         await MainActor.run {
             developViewModel.setParameter(keyPath, value: value)
+        }
+        return .ok()
+    }
+
+    private func handleResetEditParameter(assetId: UUID, parameter: String) async -> Response {
+        guard let keyPath = DevelopViewModel.keyPath(forParameter: parameter) else {
+            return .error("unknown parameter: \(parameter)")
+        }
+        let alreadyActive: Bool = await MainActor.run {
+            if developViewModel.currentAssetId != assetId {
+                router.route = .develop
+                return false
+            }
+            return true
+        }
+        if !alreadyActive {
+            await developViewModel.activate(assetId: assetId)
+        }
+        await MainActor.run {
+            developViewModel.resetParameter(keyPath)
         }
         return .ok()
     }

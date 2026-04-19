@@ -204,6 +204,23 @@ final class CommandCodingTests: XCTestCase {
         XCTAssertEqual(command, .setEditParameter(assetId: expected, parameter: "contrast", value: -0.25))
     }
 
+    func testResetEditParameterRoundTrip() throws {
+        let id = UUID(uuidString: "12345678-1234-1234-1234-123456789012")!
+        for parameter in ["exposure", "contrast", "temperature", "saturation"] {
+            let command = Command.resetEditParameter(assetId: id, parameter: parameter)
+            let data = try encoder.encode(command)
+            let decoded = try decoder.decode(Command.self, from: data)
+            XCTAssertEqual(command, decoded)
+        }
+    }
+
+    func testDecodeResetEditParameterFromJSON() throws {
+        let json = #"{"type":"resetEditParameter","assetId":"12345678-1234-1234-1234-123456789012","parameter":"exposure"}"#
+        let command = try decoder.decode(Command.self, from: Data(json.utf8))
+        let expected = UUID(uuidString: "12345678-1234-1234-1234-123456789012")!
+        XCTAssertEqual(command, .resetEditParameter(assetId: expected, parameter: "exposure"))
+    }
+
     // MARK: - Command JSON shape
 
     func testNavigateJSON() throws {

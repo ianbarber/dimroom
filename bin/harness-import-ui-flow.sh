@@ -33,14 +33,7 @@ trap cleanup EXIT
 assert_json_field() {
     local label="$1" json="$2" field="$3" expected="$4"
     local actual
-    actual=$(printf '%s' "$json" | /usr/bin/python3 -c "
-import json, sys
-doc = json.loads(sys.stdin.read())
-node = doc
-for key in '$field'.split('.'):
-    node = node[key]
-print(node)
-")
+    actual=$(printf '%s' "$json" | "$REPO_ROOT/bin/harness-json-extract" "$field")
     if [ "$actual" != "$expected" ]; then
         echo "ERROR: $label — expected $field == $expected, got $actual"
         echo "Response: $json"
@@ -52,14 +45,7 @@ print(node)
 assert_gt() {
     local label="$1" json="$2" field="$3" threshold="$4"
     local actual
-    actual=$(printf '%s' "$json" | /usr/bin/python3 -c "
-import json, sys
-doc = json.loads(sys.stdin.read())
-node = doc
-for key in '$field'.split('.'):
-    node = node[key]
-print(node)
-")
+    actual=$(printf '%s' "$json" | "$REPO_ROOT/bin/harness-json-extract" "$field")
     if [ "$actual" -le "$threshold" ]; then
         echo "ERROR: $label — expected $field > $threshold, got $actual"
         echo "Response: $json"

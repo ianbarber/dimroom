@@ -3,9 +3,11 @@ import SwiftUI
 
 public struct DevelopView: View {
     @ObservedObject private var viewModel: DevelopViewModel
+    @ObservedObject private var cropViewModel: CropViewModel
 
     public init(viewModel: DevelopViewModel) {
         self.viewModel = viewModel
+        self.cropViewModel = viewModel.cropViewModel
     }
 
     public var body: some View {
@@ -21,6 +23,21 @@ public struct DevelopView: View {
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity)
         .background(Color(white: 0.05))
+        .focusable()
+        .onKeyPress(.return) {
+            if cropViewModel.isActive {
+                viewModel.commitCropFromViewModel()
+                return .handled
+            }
+            return .ignored
+        }
+        .onKeyPress(.escape) {
+            if cropViewModel.isActive {
+                viewModel.cancelCrop()
+                return .handled
+            }
+            return .ignored
+        }
     }
 
     // MARK: - Sidebar
@@ -28,6 +45,12 @@ public struct DevelopView: View {
     private var sliderSidebar: some View {
         ScrollView {
             VStack(alignment: .leading, spacing: 12) {
+                cropToggle
+
+                if cropViewModel.isActive {
+                    cropSection
+                }
+
                 sliderSection("Tone") {
                     slider("Exposure", keyPath: \.exposure, range: -5.0...5.0, step: 0.01, identity: 0)
                     slider("Contrast", keyPath: \.contrast, range: -100...100, step: 1, identity: 0)
@@ -52,6 +75,69 @@ public struct DevelopView: View {
         }
         .frame(width: 280)
         .background(Color(white: 0.1))
+    }
+
+    private var cropToggle: some View {
+        Button {
+            if cropViewModel.isActive {
+                viewModel.commitCropFromViewModel()
+            } else {
+                viewModel.enterCropMode()
+            }
+        } label: {
+            HStack(spacing: 6) {
+                Image(systemName: "crop.rotate")
+                Text(cropViewModel.isActive ? "Done" : "Crop")
+                    .font(.system(size: 12, weight: .medium))
+            }
+            .frame(maxWidth: .infinity)
+            .padding(.vertical, 6)
+        }
+        .buttonStyle(.bordered)
+        .tint(cropViewModel.isActive ? .accentColor : Color(white: 0.3))
+    }
+
+    private var cropSection: some View {
+        VStack(alignment: .leading, spacing: 10) {
+            Text("Crop")
+                .font(.system(size: 11, weight: .semibold))
+                .foregroundStyle(Color(white: 0.5))
+                .textCase(.uppercase)
+
+            Picker(
+                "Aspect",
+                selection: Binding(
+                    get: { cropViewModel.selectedPreset },
+                    set: { cropViewModel.applyPreset($0) }
+                )
+            ) {
+                ForEach(AspectRatioPreset.allCases) { preset in
+                    Text(preset.displayName).tag(preset)
+                }
+            }
+            .pickerStyle(.menu)
+            .labelsHidden()
+
+            VStack(alignment: .leading, spacing: 4) {
+                HStack {
+                    Text("Straighten")
+                        .font(.system(size: 11))
+                        .foregroundStyle(Color(white: 0.7))
+                    Spacer()
+                    Text(String(format: "%+.1f°", cropViewModel.cropAngle))
+                        .font(.system(size: 11, design: .monospaced))
+                        .foregroundStyle(Color(white: 0.5))
+                }
+                Slider(
+                    value: Binding(
+                        get: { cropViewModel.cropAngle },
+                        set: { cropViewModel.setAngle($0) }
+                    ),
+                    in: -45...45,
+                    step: 0.1
+                )
+            }
+        }
     }
 
     private func sliderSection<Content: View>(_ title: String, @ViewBuilder content: () -> Content) -> some View {
@@ -95,6 +181,14 @@ public struct DevelopView: View {
                 Image(nsImage: image)
                     .resizable()
                     .aspectRatio(contentMode: .fit)
+                    .overlay(alignment: .center) {
+                        if cropViewModel.isActive {
+                            GeometryReader { geo in
+                                CropOverlayView(viewModel: cropViewModel)
+                                    .frame(width: geo.size.width, height: geo.size.height)
+                            }
+                        }
+                    }
             }
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity)

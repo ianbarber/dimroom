@@ -26,14 +26,7 @@ trap cleanup EXIT
 assert_json_field() {
     local label="$1" json="$2" field="$3" expected="$4"
     local actual
-    actual=$(printf '%s' "$json" | /usr/bin/python3 -c "
-import json, sys
-doc = json.loads(sys.stdin.read())
-node = doc
-for key in '$field'.split('.'):
-    node = node[key]
-print(node)
-")
+    actual=$(printf '%s' "$json" | "$REPO_ROOT/bin/harness-json-extract" "$field")
     if [ "$actual" != "$expected" ]; then
         echo "ERROR: $label — expected $field == $expected, got $actual"
         echo "Response: $json"
@@ -74,21 +67,7 @@ print('yes' if abs(a - b) < 1e-9 else 'no')
 assert_json_field_absent() {
     local label="$1" json="$2" field="$3"
     local present
-    present=$(printf '%s' "$json" | /usr/bin/python3 -c "
-import json, sys
-doc = json.loads(sys.stdin.read())
-node = doc
-keys = '$field'.split('.')
-try:
-    for key in keys:
-        node = node[key]
-    if node is None:
-        print('absent')
-    else:
-        print('present')
-except (KeyError, TypeError):
-    print('absent')
-")
+    present=$(printf '%s' "$json" | "$REPO_ROOT/bin/harness-json-extract" "$field" --absent)
     if [ "$present" != "absent" ]; then
         echo "ERROR: $label — expected $field to be absent or null"
         echo "Response: $json"
@@ -152,16 +131,8 @@ echo "=== List assets to get UUIDs ==="
 LIST_OUT=$("$CLI_BIN" list-assets --socket "$SOCKET")
 echo "$LIST_OUT"
 
-ASSET_A=$(printf '%s' "$LIST_OUT" | /usr/bin/python3 -c "
-import json, sys
-doc = json.loads(sys.stdin.read())
-print(doc['data'][0]['id'])
-")
-ASSET_B=$(printf '%s' "$LIST_OUT" | /usr/bin/python3 -c "
-import json, sys
-doc = json.loads(sys.stdin.read())
-print(doc['data'][1]['id'])
-")
+ASSET_A=$(printf '%s' "$LIST_OUT" | "$REPO_ROOT/bin/harness-json-extract" 'data[0].id')
+ASSET_B=$(printf '%s' "$LIST_OUT" | "$REPO_ROOT/bin/harness-json-extract" 'data[1].id')
 echo "  Asset A: $ASSET_A"
 echo "  Asset B: $ASSET_B"
 
@@ -179,7 +150,7 @@ echo "=== Paste edit onto asset B (without crop) ==="
 PASTE_OUT=$("$CLI_BIN" paste-edit "$ASSET_B" --socket "$SOCKET")
 echo "$PASTE_OUT"
 assert_json_field "pasteEdit status" "$PASTE_OUT" "status" "ok"
-assert_json_field "pasteEdit pasted" "$PASTE_OUT" "data.pasted" "True"
+assert_json_field "pasteEdit pasted" "$PASTE_OUT" "data.pasted" "true"
 
 echo "=== Get edit for asset B ==="
 GET_OUT=$("$CLI_BIN" get-edit "$ASSET_B" --socket "$SOCKET")

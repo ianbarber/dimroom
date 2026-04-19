@@ -90,11 +90,7 @@ fi
 echo "=== list-assets — pick first asset id ==="
 LIST_OUT=$("$CLI_BIN" list-assets --socket "$SOCKET")
 echo "$LIST_OUT"
-ASSET_ID=$(printf '%s' "$LIST_OUT" | /usr/bin/python3 -c "
-import json, sys
-doc = json.loads(sys.stdin.read())
-print(doc['data'][0]['id'])
-")
+ASSET_ID=$(printf '%s' "$LIST_OUT" | "$REPO_ROOT/bin/harness-json-extract" 'data[0].id')
 if [ -z "$ASSET_ID" ]; then
     echo "ERROR: failed to extract asset id from list-assets response"
     exit 1
@@ -144,11 +140,7 @@ echo "Screenshot verified: $FILE_TYPE"
 echo "=== state — assert route == loupe && selectedAssetId matches ==="
 STATE_OUT=$("$CLI_BIN" state --socket "$SOCKET")
 echo "$STATE_OUT"
-ROUTE=$(printf '%s' "$STATE_OUT" | /usr/bin/python3 -c "
-import json, sys
-doc = json.loads(sys.stdin.read())
-print(doc['data']['route'])
-")
+ROUTE=$(printf '%s' "$STATE_OUT" | "$REPO_ROOT/bin/harness-json-extract" 'data.route')
 if [ "$ROUTE" != "loupe" ]; then
     echo "ERROR: expected route == loupe, got '$ROUTE'"
     exit 1
@@ -159,11 +151,7 @@ echo "  OK: route == loupe"
 # and `dimroom-cli list-assets` returns them via Asset.id.uuidString which
 # is also uppercase. Both sides of the comparison share a canonical form,
 # so a direct string compare is safe.
-STATE_SELECTED=$(printf '%s' "$STATE_OUT" | /usr/bin/python3 -c "
-import json, sys
-doc = json.loads(sys.stdin.read())
-print(doc['data'].get('selectedAssetId', ''))
-")
+STATE_SELECTED=$(printf '%s' "$STATE_OUT" | "$REPO_ROOT/bin/harness-json-extract" 'data.selectedAssetId' --default '')
 if [ "$STATE_SELECTED" != "$ASSET_ID" ]; then
     echo "ERROR: expected selectedAssetId == $ASSET_ID, got '$STATE_SELECTED'"
     exit 1

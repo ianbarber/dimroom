@@ -81,11 +81,7 @@ fi
 get_selected_id() {
     local state_out
     state_out=$("$CLI_BIN" state --socket "$SOCKET")
-    printf '%s' "$state_out" | /usr/bin/python3 -c "
-import json, sys
-doc = json.loads(sys.stdin.read())
-print(doc['data'].get('selectedAssetId', ''))
-"
+    printf '%s' "$state_out" | "$REPO_ROOT/bin/harness-json-extract" 'data.selectedAssetId' --default ''
 }
 
 echo "=== navigate library ==="
@@ -102,12 +98,7 @@ echo "$LIST_OUT"
 ASSET_IDS=()
 while IFS= read -r line; do
     ASSET_IDS+=("$line")
-done < <(printf '%s' "$LIST_OUT" | /usr/bin/python3 -c "
-import json, sys
-doc = json.loads(sys.stdin.read())
-for a in doc['data']:
-    print(a['id'])
-")
+done < <(printf '%s' "$LIST_OUT" | "$REPO_ROOT/bin/harness-json-extract" 'data[*].id')
 ASSET_COUNT=${#ASSET_IDS[@]}
 echo "  Found $ASSET_COUNT assets"
 if [ "$ASSET_COUNT" -lt 3 ]; then
@@ -119,11 +110,7 @@ fi
 # (captureDate desc). The seed fixture assigns the newest capture date to
 # 03.jpg, so it must come first. Catches accidental reverts of the sort
 # that would silently re-break selectNext navigation (see #118).
-FIRST_FILENAME=$(printf '%s' "$LIST_OUT" | /usr/bin/python3 -c "
-import json, sys
-doc = json.loads(sys.stdin.read())
-print(doc['data'][0]['originalFilename'])
-")
+FIRST_FILENAME=$(printf '%s' "$LIST_OUT" | "$REPO_ROOT/bin/harness-json-extract" 'data[0].originalFilename')
 if [ "$FIRST_FILENAME" != "03.jpg" ]; then
     echo "ERROR: expected first list-assets row to be 03.jpg (newest captureDate), got '$FIRST_FILENAME'"
     exit 1

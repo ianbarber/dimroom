@@ -1,0 +1,129 @@
+import AppKit
+import CoreGraphics
+import Foundation
+import SnapshotTesting
+import SwiftUI
+@testable import UI
+import XCTest
+
+final class CropOverlaySnapshotTests: XCTestCase {
+    private static let snapshotRecordMode: SnapshotTestingConfiguration.Record? = {
+        if ProcessInfo.processInfo.environment["DIMROOM_RECORD_SNAPSHOTS"] == "1" {
+            return .all
+        }
+        return nil
+    }()
+
+    private func runAssertSnapshot(_ body: () -> Void) {
+        if let recordMode = Self.snapshotRecordMode {
+            withSnapshotTesting(record: recordMode) {
+                body()
+            }
+        } else {
+            body()
+        }
+    }
+
+    private static let frameSize = CGSize(width: 640, height: 480)
+    private static let snapshotPrecision: Float = 0.99
+    private static let snapshotPerceptualPrecision: Float = 0.98
+
+    @MainActor
+    private func renderFixedPixelImage(
+        for view: some View,
+        size: CGSize = CropOverlaySnapshotTests.frameSize
+    ) -> NSImage {
+        let host = NSHostingView(rootView: AnyView(view))
+        host.frame = CGRect(origin: .zero, size: size)
+        host.layoutSubtreeIfNeeded()
+
+        guard let rep = NSBitmapImageRep(
+            bitmapDataPlanes: nil,
+            pixelsWide: Int(size.width),
+            pixelsHigh: Int(size.height),
+            bitsPerSample: 8,
+            samplesPerPixel: 4,
+            hasAlpha: true,
+            isPlanar: false,
+            colorSpaceName: .deviceRGB,
+            bytesPerRow: 0,
+            bitsPerPixel: 32
+        ) else {
+            fatalError("Failed to allocate NSBitmapImageRep for snapshot")
+        }
+        host.cacheDisplay(in: host.bounds, to: rep)
+
+        let image = NSImage(size: size)
+        image.addRepresentation(rep)
+        return image
+    }
+
+    /// Render the overlay on top of a flat coloured background so the
+    /// darkened exterior, handles, and rule-of-thirds grid are all
+    /// clearly visible in the snapshot.
+    @MainActor
+    private func overlayOnBackdrop(viewModel: CropViewModel) -> some View {
+        ZStack {
+            Color(red: 0.3, green: 0.45, blue: 0.6)
+            CropOverlayView(viewModel: viewModel)
+        }
+        .frame(
+            width: CropOverlaySnapshotTests.frameSize.width,
+            height: CropOverlaySnapshotTests.frameSize.height
+        )
+    }
+
+    // MARK: - Snapshots
+
+    /// Centre 3:2 crop — verifies handles, rule-of-thirds grid, and
+    /// darkened exterior all render in expected positions.
+    @MainActor
+    func test_crop_overlay_centre_3to2() {
+        let vm = CropViewModel()
+        vm.activate(
+            cropRect: CGRect(x: 0.125, y: 0.0, width: 0.75, height: 1.0),
+            angle: 0,
+            imageAspect: 4.0 / 3.0
+        )
+        vm.selectedPreset = .threeToTwo
+
+        let image = renderFixedPixelImage(for: overlayOnBackdrop(viewModel: vm))
+
+        runAssertSnapshot {
+            assertSnapshot(
+                of: image,
+                as: .image(
+                    precision: Self.snapshotPrecision,
+                    perceptualPrecision: Self.snapshotPerceptualPrecision
+                )
+            )
+        }
+    }
+
+    /// 1:1 crop centred with a +10° straighten angle. This snapshot
+    /// doesn't rotate the overlay itself (rotation happens in the
+    /// renderer) — it exists to ensure the overlay stays axis-aligned
+    /// regardless of `cropAngle`.
+    @MainActor
+    func test_crop_overlay_square_with_angle() {
+        let vm = CropViewModel()
+        vm.activate(
+            cropRect: CGRect(x: 0.25, y: 0.16, width: 0.5, height: 0.68),
+            angle: 10,
+            imageAspect: 1.0
+        )
+        vm.selectedPreset = .oneToOne
+
+        let image = renderFixedPixelImage(for: overlayOnBackdrop(viewModel: vm))
+
+        runAssertSnapshot {
+            assertSnapshot(
+                of: image,
+                as: .image(
+                    precision: Self.snapshotPrecision,
+                    perceptualPrecision: Self.snapshotPerceptualPrecision
+                )
+            )
+        }
+    }
+}

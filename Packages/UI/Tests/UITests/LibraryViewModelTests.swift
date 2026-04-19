@@ -749,6 +749,125 @@ final class LibraryViewModelTests: XCTestCase {
         XCTAssertEqual(vm.ratingToast?.rating, 5)
     }
 
+    // MARK: - Original fetch progress
+
+    /// Drive the stub through three increasing ticks and snapshot the
+    /// view-model dictionary at each one. The stub waits on `onTick`
+    /// before issuing the next progress value, so each snapshot reflects
+    /// the *exact* value just published.
+    @MainActor
+    func testFetchOriginalIfNeededPublishesProgress() async throws {
+        let catalog = try CatalogDatabase.inMemory()
+        let store = PreviewStore(cacheDirectory: tempCacheDir)
+        let vm = LibraryViewModel(catalog: catalog, previewStore: store)
+
+        let resultURL = tempCacheDir.appendingPathComponent("orig.jpg")
+        let assetId = UUID()
+        let snapshots = ProgressSnapshots()
+        let fetcher = StubProgressFetcher(
+            resultURL: resultURL,
+            ticks: [0.25, 0.6, 1.0],
+            onTick: { @Sendable in
+                await MainActor.run {
+                    snapshots.append(vm.downloadProgressByAssetId[assetId])
+                }
+            }
+        )
+        vm.originalFetcher = fetcher
+
+        let returned = await vm.fetchOriginalIfNeeded(assetId: assetId)
+        XCTAssertEqual(returned, resultURL)
+        XCTAssertEqual(snapshots.values, [0.25, 0.6, 1.0])
+    }
+
+    /// Feed `[0.5, 0.3]` and confirm the second (lower) tick does not
+    /// move the published value backwards.
+    @MainActor
+    func testFetchOriginalIfNeededClampsMonotonic() async throws {
+        let catalog = try CatalogDatabase.inMemory()
+        let store = PreviewStore(cacheDirectory: tempCacheDir)
+        let vm = LibraryViewModel(catalog: catalog, previewStore: store)
+
+        let resultURL = tempCacheDir.appendingPathComponent("orig.jpg")
+        let assetId = UUID()
+        let snapshots = ProgressSnapshots()
+        let fetcher = StubProgressFetcher(
+            resultURL: resultURL,
+            ticks: [0.5, 0.3],
+            onTick: { @Sendable in
+                await MainActor.run {
+                    snapshots.append(vm.downloadProgressByAssetId[assetId])
+                }
+            }
+        )
+        vm.originalFetcher = fetcher
+
+        _ = await vm.fetchOriginalIfNeeded(assetId: assetId)
+        XCTAssertEqual(snapshots.values, [0.5, 0.5],
+                       "second (lower) tick must not move the value backwards")
+    }
+
+    @MainActor
+    func testFetchOriginalIfNeededClearsProgressOnSuccess() async throws {
+        let catalog = try CatalogDatabase.inMemory()
+        let store = PreviewStore(cacheDirectory: tempCacheDir)
+        let vm = LibraryViewModel(catalog: catalog, previewStore: store)
+
+        let resultURL = tempCacheDir.appendingPathComponent("orig.jpg")
+        let fetcher = StubProgressFetcher(
+            resultURL: resultURL,
+            ticks: [0.9]
+        )
+        vm.originalFetcher = fetcher
+
+        let assetId = UUID()
+        _ = await vm.fetchOriginalIfNeeded(assetId: assetId)
+        // Drain any trailing main-actor work so the cleanup defer's
+        // synchronous removal isn't racing a queued progress write.
+        await MainActor.run { }
+        XCTAssertNil(
+            vm.downloadProgressByAssetId[assetId],
+            "progress entry must be cleared once the fetch resolves"
+        )
+        XCTAssertFalse(vm.downloadingAssetIds.contains(assetId))
+    }
+
+    @MainActor
+    func testFetchOriginalIfNeededClearsProgressOnFailure() async throws {
+        let catalog = try CatalogDatabase.inMemory()
+        let store = PreviewStore(cacheDirectory: tempCacheDir)
+        let vm = LibraryViewModel(catalog: catalog, previewStore: store)
+
+        let fetcher = StubProgressFetcher(
+            resultURL: nil,
+            ticks: [0.4]
+        )
+        vm.originalFetcher = fetcher
+
+        let assetId = UUID()
+        let url = await vm.fetchOriginalIfNeeded(assetId: assetId)
+        XCTAssertNil(url)
+        await MainActor.run { }
+        XCTAssertNil(
+            vm.downloadProgressByAssetId[assetId],
+            "failed fetch must still clear the progress entry"
+        )
+    }
+
+    @MainActor
+    func testFetchOriginalIfNeededWithoutFetcherLeavesDictionaryEmpty() async throws {
+        let catalog = try CatalogDatabase.inMemory()
+        let store = PreviewStore(cacheDirectory: tempCacheDir)
+        let vm = LibraryViewModel(catalog: catalog, previewStore: store)
+        XCTAssertNil(vm.originalFetcher)
+
+        let assetId = UUID()
+        let url = await vm.fetchOriginalIfNeeded(assetId: assetId)
+        XCTAssertNil(url)
+        XCTAssertTrue(vm.downloadProgressByAssetId.isEmpty)
+        XCTAssertFalse(vm.downloadingAssetIds.contains(assetId))
+    }
+
     // MARK: - Helpers
 
     /// Produce a minimal 64×48 solid-red JPEG on disk and return its
@@ -763,5 +882,52 @@ final class LibraryViewModelTests: XCTestCase {
             to: url
         )
         return url
+    }
+}
+
+/// Minimal `OriginalFetcher` stub: walks a fixed sequence of progress
+/// values and waits for each one to be observed (via `onTick`) before
+/// emitting the next. Returning the URL — or `nil` for failure — happens
+/// after the final tick has been observed, so the view-model `defer`
+/// only runs after the test has captured every snapshot it cares about.
+private actor StubProgressFetcher: OriginalFetcher {
+    private let resultURL: URL?
+    private let ticks: [Double]
+    private let onTick: (@Sendable () async -> Void)?
+
+    init(
+        resultURL: URL?,
+        ticks: [Double],
+        onTick: (@Sendable () async -> Void)? = nil
+    ) {
+        self.resultURL = resultURL
+        self.ticks = ticks
+        self.onTick = onTick
+    }
+
+    func fetchOriginal(
+        assetId: UUID,
+        progress: (@Sendable (Double) -> Void)?
+    ) async -> URL? {
+        for tick in ticks {
+            progress?(tick)
+            // Force pending main-actor progress writes to flush before
+            // the snapshot hook runs.
+            await MainActor.run { }
+            if let onTick {
+                await onTick()
+            }
+        }
+        return resultURL
+    }
+}
+
+/// Tiny @unchecked-Sendable bag for capturing observed progress values
+/// from inside @Sendable closures. Reads/writes are confined to the
+/// main actor by callers, so the lack of internal locking is fine.
+private final class ProgressSnapshots: @unchecked Sendable {
+    private(set) var values: [Double] = []
+    func append(_ value: Double?) {
+        if let value { values.append(value) }
     }
 }

@@ -25,7 +25,15 @@
 set -euo pipefail
 
 REPO_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
-cd "$REPO_ROOT"
+
+# When sourced (e.g. from bin/tests/run.sh), only expose helpers and skip
+# the top-level dispatch at the bottom of this file.
+if [ "${BASH_SOURCE[0]}" != "$0" ]; then
+  DIMROOM_AGENT_LOOP_SOURCED=1
+else
+  DIMROOM_AGENT_LOOP_SOURCED=0
+  cd "$REPO_ROOT"
+fi
 
 DRY_RUN=0
 WATCH=0
@@ -36,40 +44,46 @@ PLANNER_ONLY=0
 REVIEWER_ONLY=0
 IMPLEMENTER_ONLY=0
 
-while [ $# -gt 0 ]; do
-  case "$1" in
-    --watch) WATCH=1; shift ;;
-    --dry-run) DRY_RUN=1; shift ;;
-    --issue) FORCE_ISSUE="$2"; shift 2 ;;
-    --post-merge) POST_MERGE_PR="$2"; shift 2 ;;
-    --sleep) SLEEP_SECONDS="$2"; shift 2 ;;
-    --planner-only) PLANNER_ONLY=1; shift ;;
-    --reviewer-only) REVIEWER_ONLY=1; shift ;;
-    --implementer-only) IMPLEMENTER_ONLY=1; shift ;;
-    -h|--help)
-      sed -n '2,18p' "$0"
-      exit 0
-      ;;
-    *) echo "Unknown arg: $1" >&2; exit 2 ;;
-  esac
-done
-
-# Enforce mutual exclusivity of the role-specific modes.
-MODE_COUNT=$((PLANNER_ONLY + REVIEWER_ONLY + IMPLEMENTER_ONLY))
-if [ "$MODE_COUNT" -gt 1 ]; then
-  echo "--planner-only, --reviewer-only, and --implementer-only are mutually exclusive" >&2
-  exit 2
+if [ "$DIMROOM_AGENT_LOOP_SOURCED" -eq 0 ]; then
+  while [ $# -gt 0 ]; do
+    case "$1" in
+      --watch) WATCH=1; shift ;;
+      --dry-run) DRY_RUN=1; shift ;;
+      --issue) FORCE_ISSUE="$2"; shift 2 ;;
+      --post-merge) POST_MERGE_PR="$2"; shift 2 ;;
+      --sleep) SLEEP_SECONDS="$2"; shift 2 ;;
+      --planner-only) PLANNER_ONLY=1; shift ;;
+      --reviewer-only) REVIEWER_ONLY=1; shift ;;
+      --implementer-only) IMPLEMENTER_ONLY=1; shift ;;
+      -h|--help)
+        sed -n '2,18p' "$0"
+        exit 0
+        ;;
+      *) echo "Unknown arg: $1" >&2; exit 2 ;;
+    esac
+  done
 fi
 
-LOG_DIR="$REPO_ROOT/.artifacts/logs"
-mkdir -p "$LOG_DIR"
-LOG_FILE="$LOG_DIR/agent-loop-$(date +%Y%m%d-%H%M%S).log"
+if [ "$DIMROOM_AGENT_LOOP_SOURCED" -eq 0 ]; then
+  # Enforce mutual exclusivity of the role-specific modes.
+  MODE_COUNT=$((PLANNER_ONLY + REVIEWER_ONLY + IMPLEMENTER_ONLY))
+  if [ "$MODE_COUNT" -gt 1 ]; then
+    echo "--planner-only, --reviewer-only, and --implementer-only are mutually exclusive" >&2
+    exit 2
+  fi
+
+  LOG_DIR="$REPO_ROOT/.artifacts/logs"
+  mkdir -p "$LOG_DIR"
+  LOG_FILE="$LOG_DIR/agent-loop-$(date +%Y%m%d-%H%M%S).log"
+fi
 
 log() {
   local msg
   msg="[agent-loop $(date +%H:%M:%S)] $*"
   printf '%s\n' "$msg" >&2
-  printf '%s\n' "$msg" >> "$LOG_FILE"
+  if [ -n "${LOG_FILE:-}" ]; then
+    printf '%s\n' "$msg" >> "$LOG_FILE"
+  fi
 }
 run() {
   if [ "$DRY_RUN" -eq 1 ]; then
@@ -79,48 +93,52 @@ run() {
   fi
 }
 
-log "log file: $LOG_FILE"
-
 require() {
   command -v "$1" >/dev/null 2>&1 || { echo "missing dependency: $1" >&2; exit 1; }
 }
 
-require gh
-require jq
-if [ "$DRY_RUN" -eq 0 ]; then
-  require claude
+if [ "$DIMROOM_AGENT_LOOP_SOURCED" -eq 0 ]; then
+  log "log file: $LOG_FILE"
+
+  require gh
+  require jq
+  if [ "$DRY_RUN" -eq 0 ]; then
+    require claude
+  fi
 fi
 
-# State precedence: highest priority first.
-#
-# Role-specific modes restrict the precedence list so multiple loops
-# can run in parallel without racing on the same issue. Each mode owns
-# a disjoint set of state labels.
-if [ "$PLANNER_ONLY" -eq 1 ]; then
-  STATE_PRECEDENCE=(
-    "state:needs-plan"
-  )
-  log "planner-only mode: only processing state:needs-plan"
-elif [ "$REVIEWER_ONLY" -eq 1 ]; then
-  STATE_PRECEDENCE=(
-    "state:in-review"
-  )
-  log "reviewer-only mode: only processing state:in-review"
-elif [ "$IMPLEMENTER_ONLY" -eq 1 ]; then
-  STATE_PRECEDENCE=(
-    "state:changes-requested"
-    "state:in-progress"
-    "state:planned"
-  )
-  log "implementer-only mode: processing changes-requested / in-progress / planned"
-else
-  STATE_PRECEDENCE=(
-    "state:changes-requested"
-    "state:in-review"
-    "state:in-progress"
-    "state:planned"
-    "state:needs-plan"
-  )
+if [ "$DIMROOM_AGENT_LOOP_SOURCED" -eq 0 ]; then
+  # State precedence: highest priority first.
+  #
+  # Role-specific modes restrict the precedence list so multiple loops
+  # can run in parallel without racing on the same issue. Each mode owns
+  # a disjoint set of state labels.
+  if [ "$PLANNER_ONLY" -eq 1 ]; then
+    STATE_PRECEDENCE=(
+      "state:needs-plan"
+    )
+    log "planner-only mode: only processing state:needs-plan"
+  elif [ "$REVIEWER_ONLY" -eq 1 ]; then
+    STATE_PRECEDENCE=(
+      "state:in-review"
+    )
+    log "reviewer-only mode: only processing state:in-review"
+  elif [ "$IMPLEMENTER_ONLY" -eq 1 ]; then
+    STATE_PRECEDENCE=(
+      "state:changes-requested"
+      "state:in-progress"
+      "state:planned"
+    )
+    log "implementer-only mode: processing changes-requested / in-progress / planned"
+  else
+    STATE_PRECEDENCE=(
+      "state:changes-requested"
+      "state:in-review"
+      "state:in-progress"
+      "state:planned"
+      "state:needs-plan"
+    )
+  fi
 fi
 
 # Map state label to prompt file.
@@ -179,9 +197,31 @@ pr_for_issue() {
     2>/dev/null | head -n1
 }
 
-# Check ready-to-merge PRs for merge conflicts or new human comments.
-# If found, flip the issue back to state:changes-requested so the
-# responder picks it up and fixes the problem.
+# Extract the `submittedAt` timestamp of the most recent approving review
+# from `gh pr view --json reviews` JSON read on stdin. Prints the empty
+# string when no approval is found. An approval is either a review with
+# state `APPROVED` or a review whose body matches an LGTM/ready-to-merge
+# phrase. Used by check_ready_to_merge; factored out so bin/tests/run.sh
+# can drive it with fixture payloads.
+extract_approval_timestamp() {
+  jq -r '
+    [.reviews[] | select(.state == "APPROVED"
+                         or ((.body // "") | test("ready.to.merge|ready for human merge|LGTM"; "i")))]
+    | last
+    | .submittedAt // ""
+  ' 2>/dev/null | sed 's/^null$//'
+}
+
+# Check ready-to-merge PRs for merge conflicts. If found, flip the issue
+# back to state:changes-requested so the responder picks it up and fixes
+# the problem.
+#
+# Note: we used to also flip back when a new human comment appeared after
+# an approval comment. That heuristic was removed because it inspected
+# PR comments (which do not include reviews, so LGTMs were invisible)
+# and because on this repo the human and the bot share a GitHub account,
+# making "new human comment" unrecoverable from author metadata. See
+# issue #124.
 check_ready_to_merge() {
   local issues
   issues=$(gh issue list --state open --label "state:ready-to-merge" \
@@ -200,21 +240,6 @@ check_ready_to_merge() {
       log "PR #$pr (issue #$issue) has merge conflicts — moving to changes-requested"
       gh issue edit "$issue" --remove-label "state:ready-to-merge" --add-label "state:changes-requested" 2>/dev/null
       gh pr comment "$pr" --body "Merge conflicts detected. Moving to \`state:changes-requested\` for the responder to rebase." 2>/dev/null || true
-      continue
-    fi
-
-    # Check for new human comments after the last bot comment.
-    # If the human left feedback, the responder should address it.
-    local human_comment
-    human_comment=$(gh pr view "$pr" --json comments \
-      -q '[.comments[] | select(.author.login != "github-actions" and .author.login != "claude")] | last | .createdAt' 2>/dev/null || true)
-    local bot_comment
-    bot_comment=$(gh pr view "$pr" --json comments \
-      -q '[.comments[] | select(.body | test("ready.to.merge|ready for human merge|LGTM|approved"; "i"))] | last | .createdAt' 2>/dev/null || true)
-
-    if [ -n "$human_comment" ] && [ -n "$bot_comment" ] && [[ "$human_comment" > "$bot_comment" ]]; then
-      log "PR #$pr (issue #$issue) has new human comment after approval — moving to changes-requested"
-      gh issue edit "$issue" --remove-label "state:ready-to-merge" --add-label "state:changes-requested" 2>/dev/null
       continue
     fi
   done
@@ -321,11 +346,6 @@ EOF
   rm -f "$prompt_file"
 }
 
-if [ -n "$POST_MERGE_PR" ]; then
-  do_post_merge "$POST_MERGE_PR"
-  exit 0
-fi
-
 sync_main() {
   log "pulling latest main..."
   # Serialize pulls across parallel loops with a mkdir-based lock
@@ -350,25 +370,32 @@ sync_main() {
   trap - EXIT RETURN
 }
 
-if [ "$WATCH" -eq 1 ]; then
-  log "watching every ${SLEEP_SECONDS}s; ctrl-c to stop"
-  while true; do
-    # Wrap each pass's prelude in || true so a network blip (overnight
-    # sleep, flaky connection, github SSH hiccup) doesn't kill the loop.
-    # The loop stays alive and tries again next pass.
+if [ "$DIMROOM_AGENT_LOOP_SOURCED" -eq 0 ]; then
+  if [ -n "$POST_MERGE_PR" ]; then
+    do_post_merge "$POST_MERGE_PR"
+    exit 0
+  fi
+
+  if [ "$WATCH" -eq 1 ]; then
+    log "watching every ${SLEEP_SECONDS}s; ctrl-c to stop"
+    while true; do
+      # Wrap each pass's prelude in || true so a network blip (overnight
+      # sleep, flaky connection, github SSH hiccup) doesn't kill the loop.
+      # The loop stays alive and tries again next pass.
+      sync_main || log "sync_main failed, continuing"
+      check_ready_to_merge || log "check_ready_to_merge failed, continuing"
+      do_pass || true
+      sleep "$SLEEP_SECONDS"
+    done
+  else
     sync_main || log "sync_main failed, continuing"
     check_ready_to_merge || log "check_ready_to_merge failed, continuing"
-    do_pass || true
-    sleep "$SLEEP_SECONDS"
-  done
-else
-  sync_main || log "sync_main failed, continuing"
-  check_ready_to_merge || log "check_ready_to_merge failed, continuing"
-  # Keep making passes until there's nothing actionable.
-  while do_pass; do
-    log "pass complete, checking for next action..."
-    sync_main || log "sync_main failed, continuing"
-    check_ready_to_merge || log "check_ready_to_merge failed, continuing"
-  done
-  log "no more actionable issues — done"
+    # Keep making passes until there's nothing actionable.
+    while do_pass; do
+      log "pass complete, checking for next action..."
+      sync_main || log "sync_main failed, continuing"
+      check_ready_to_merge || log "check_ready_to_merge failed, continuing"
+    done
+    log "no more actionable issues — done"
+  fi
 fi

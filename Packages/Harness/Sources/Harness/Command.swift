@@ -18,6 +18,7 @@ public enum Command: Codable, Sendable, Equatable {
     case pasteEdit(assetId: UUID, includeCrop: Bool)
     case setEdit(assetId: UUID, stateJSON: String)
     case getEdit(assetId: UUID)
+    case setCrop(assetId: UUID, x: Double, y: Double, width: Double, height: Double, angle: Double)
     case setScope(importSessionId: UUID?)
     case setScopeRecentlyDeleted
     case listImportSessions
@@ -55,6 +56,11 @@ public enum Command: Codable, Sendable, Equatable {
         case applyEdits
         case parameter
         case value
+        case x
+        case y
+        case width
+        case height
+        case angle
     }
 
     private enum CommandType: String, Codable {
@@ -73,6 +79,7 @@ public enum Command: Codable, Sendable, Equatable {
         case pasteEdit
         case setEdit
         case getEdit
+        case setCrop
         case setScope
         case setScopeRecentlyDeleted
         case listImportSessions
@@ -142,6 +149,21 @@ public enum Command: Codable, Sendable, Equatable {
         case .getEdit:
             let assetId = try container.decode(UUID.self, forKey: .assetId)
             self = .getEdit(assetId: assetId)
+        case .setCrop:
+            let assetId = try container.decode(UUID.self, forKey: .assetId)
+            let x = try container.decode(Double.self, forKey: .x)
+            let y = try container.decode(Double.self, forKey: .y)
+            let width = try container.decode(Double.self, forKey: .width)
+            let height = try container.decode(Double.self, forKey: .height)
+            let angle = try container.decode(Double.self, forKey: .angle)
+            self = .setCrop(
+                assetId: assetId,
+                x: x,
+                y: y,
+                width: width,
+                height: height,
+                angle: angle
+            )
         case .setScope:
             let sessionId = try container.decodeIfPresent(UUID.self, forKey: .importSessionId)
             self = .setScope(importSessionId: sessionId)
@@ -241,6 +263,14 @@ public enum Command: Codable, Sendable, Equatable {
         case .getEdit(let assetId):
             try container.encode(CommandType.getEdit, forKey: .type)
             try container.encode(assetId, forKey: .assetId)
+        case .setCrop(let assetId, let x, let y, let width, let height, let angle):
+            try container.encode(CommandType.setCrop, forKey: .type)
+            try container.encode(assetId, forKey: .assetId)
+            try container.encode(x, forKey: .x)
+            try container.encode(y, forKey: .y)
+            try container.encode(width, forKey: .width)
+            try container.encode(height, forKey: .height)
+            try container.encode(angle, forKey: .angle)
         case .setScope(let sessionId):
             try container.encode(CommandType.setScope, forKey: .type)
             try container.encodeIfPresent(sessionId, forKey: .importSessionId)

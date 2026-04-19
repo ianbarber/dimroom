@@ -33,8 +33,13 @@ final class OriginalsCoordinator: OriginalFetcher, Sendable {
 
     /// Return a local URL for `assetId`, downloading from Drive if
     /// needed. Returns `nil` on any failure so the UI degrades to the
-    /// preview-resolution image.
-    func fetchOriginal(assetId: UUID) async -> URL? {
+    /// preview-resolution image. `progress` is forwarded straight to
+    /// `OriginalsCache.fetch`; the cached-hit path is silent so callers
+    /// know not to expect ticks.
+    func fetchOriginal(
+        assetId: UUID,
+        progress: (@Sendable (Double) -> Void)?
+    ) async -> URL? {
         guard let cache = cacheBox.get() else { return nil }
         guard let asset = try? catalog.fetchAsset(id: assetId) else { return nil }
         if let existing = asset.localPath {
@@ -50,7 +55,7 @@ final class OriginalsCoordinator: OriginalFetcher, Sendable {
                 assetId: assetId,
                 driveFileId: driveFileId,
                 suggestedFilename: asset.originalFilename,
-                progress: nil
+                progress: progress
             )
             try? catalog.updateLocalPath(assetId: assetId, path: url.path)
             return url

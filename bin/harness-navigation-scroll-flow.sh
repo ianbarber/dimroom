@@ -76,13 +76,8 @@ if [ ! -e "$SOCKET" ]; then
 fi
 
 get_selected_id() {
-    local state_out
-    state_out=$("$CLI_BIN" state --socket "$SOCKET")
-    printf '%s' "$state_out" | /usr/bin/python3 -c "
-import json, sys
-doc = json.loads(sys.stdin.read())
-print(doc['data'].get('selectedAssetId', ''))
-"
+    "$CLI_BIN" state --socket "$SOCKET" \
+        | "$REPO_ROOT/bin/harness-json-extract" 'data.selectedAssetId' --default ''
 }
 
 echo "=== navigate library ==="
@@ -98,12 +93,7 @@ LIST_OUT=$("$CLI_BIN" list-assets --socket "$SOCKET")
 ASSET_IDS=()
 while IFS= read -r line; do
     ASSET_IDS+=("$line")
-done < <(printf '%s' "$LIST_OUT" | /usr/bin/python3 -c "
-import json, sys
-doc = json.loads(sys.stdin.read())
-for a in doc['data']:
-    print(a['id'])
-")
+done < <(printf '%s' "$LIST_OUT" | "$REPO_ROOT/bin/harness-json-extract" 'data[*].id')
 ASSET_COUNT=${#ASSET_IDS[@]}
 echo "  Found $ASSET_COUNT assets"
 if [ "$ASSET_COUNT" -lt 16 ]; then

@@ -138,6 +138,42 @@ echo "  OK: exposure == $EXPOSURE"
 echo "=== screenshot: develop with exposure +2 ==="
 "$CLI_BIN" screenshot "$SCREENSHOT_DIR/develop-exposure-plus2.png" --socket "$SOCKET" >/dev/null
 
+# Regression guard for #100: deactivate() must flush pending edits.
+# Pick a distinct value (1.5) so a pass cannot be residue of the earlier
+# 2.0 check, then leave develop immediately — no sleep — so the 500ms
+# debounce cannot have fired. Re-entering develop must show 1.5 from disk.
+echo "=== set-edit-parameter $ASSET_ID exposure 1.5 (flush-on-navigate test) ==="
+FLUSH_SET_OUT=$("$CLI_BIN" set-edit-parameter "$ASSET_ID" exposure 1.5 --socket "$SOCKET")
+echo "$FLUSH_SET_OUT"
+if ! echo "$FLUSH_SET_OUT" | grep -q '"ok"'; then
+    echo "ERROR: set-edit-parameter (1.5) did not return ok"
+    exit 1
+fi
+
+echo "=== navigate library immediately (inside the 500ms debounce window) ==="
+"$CLI_BIN" navigate library --socket "$SOCKET" >/dev/null
+
+echo "=== navigate develop (re-entering, should load flushed value from catalog) ==="
+"$CLI_BIN" navigate develop --socket "$SOCKET" >/dev/null
+sleep 1
+
+echo "=== get-edit $ASSET_ID — assert exposure == 1.5 ==="
+FLUSH_GET_OUT=$("$CLI_BIN" get-edit "$ASSET_ID" --socket "$SOCKET")
+echo "$FLUSH_GET_OUT"
+FLUSH_EXPOSURE=$(printf '%s' "$FLUSH_GET_OUT" | /usr/bin/python3 -c "
+import json, sys
+doc = json.loads(sys.stdin.read())
+print(float(doc['data']['exposure']))
+")
+if [ "$FLUSH_EXPOSURE" != "1.5" ]; then
+    echo "ERROR: expected flushed exposure == 1.5, got '$FLUSH_EXPOSURE' — deactivate() dropped the edit"
+    exit 1
+fi
+echo "  OK: flushed exposure == $FLUSH_EXPOSURE"
+
+echo "=== screenshot: develop after flush ==="
+"$CLI_BIN" screenshot "$SCREENSHOT_DIR/develop-after-flush.png" --socket "$SOCKET" >/dev/null
+
 echo "=== navigate library (back out of develop) ==="
 "$CLI_BIN" navigate library --socket "$SOCKET" >/dev/null
 sleep 1

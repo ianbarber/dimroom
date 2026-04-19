@@ -140,6 +140,16 @@ final class HarnessController: @unchecked Sendable {
         case .getEdit(let assetId):
             return await handleGetEdit(assetId: assetId)
 
+        case .setCrop(let assetId, let x, let y, let width, let height, let angle):
+            return await handleSetCrop(
+                assetId: assetId,
+                x: x,
+                y: y,
+                width: width,
+                height: height,
+                angle: angle
+            )
+
         case .setScope(let sessionId):
             await libraryViewModel.setScope(sessionId)
             return .ok()
@@ -478,6 +488,45 @@ final class HarnessController: @unchecked Sendable {
         } catch {
             return .error("getEdit failed: \(error.localizedDescription)")
         }
+    }
+
+    private func handleSetCrop(
+        assetId: UUID,
+        x: Double,
+        y: Double,
+        width: Double,
+        height: Double,
+        angle: Double
+    ) async -> Response {
+        guard let catalog else {
+            return .error("catalog not loaded")
+        }
+
+        // Activate develop mode for this asset if it isn't already, so the
+        // commit routes through DevelopViewModel's debounced render +
+        // auto-save. Falling back to a direct catalog write would skip
+        // those paths and diverge from live state.
+        let alreadyActive: Bool = await MainActor.run {
+            if developViewModel.currentAssetId != assetId {
+                router.route = .develop
+                return false
+            }
+            return true
+        }
+        if !alreadyActive {
+            await developViewModel.activate(assetId: assetId)
+        }
+
+        let previous: EditState? = try? catalog.latestEditState(for: assetId)
+        let normalisedRect = CGRect(x: x, y: y, width: width, height: height)
+        let clampedAngle = CropGeometry.clampAngle(angle)
+
+        let nextState: EditState = await MainActor.run {
+            developViewModel.commitCrop(normalisedRect: normalisedRect, angle: clampedAngle)
+            return developViewModel.editState
+        }
+        await recordEditUndo(assetId: assetId, previous: previous, next: nextState)
+        return .ok()
     }
 
     private func handleSetEditParameter(assetId: UUID, parameter: String, value: Double) async -> Response {

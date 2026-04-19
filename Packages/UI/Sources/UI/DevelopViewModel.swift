@@ -12,6 +12,11 @@ public final class DevelopViewModel: ObservableObject {
     @Published public private(set) var isRendering: Bool = false
     public private(set) var currentAssetId: UUID?
 
+    /// Child view model driving the interactive crop overlay. Owned
+    /// here so DevelopView can bind to it and so `commitCrop` has a
+    /// direct write path when the harness fires `setCrop`.
+    public let cropViewModel = CropViewModel()
+
     private var catalog: CatalogDatabase
     private var previewStore: PreviewStore
     private var sourceImage: CIImage?
@@ -22,6 +27,14 @@ public final class DevelopViewModel: ObservableObject {
     public init(catalog: CatalogDatabase, previewStore: PreviewStore) {
         self.catalog = catalog
         self.previewStore = previewStore
+    }
+
+    /// Size of the preview image currently driving the Develop pipeline,
+    /// if any. Used to convert normalised crop coordinates to pixel
+    /// coordinates for the renderer.
+    public var sourceImageSize: CGSize? {
+        guard let source = sourceImage else { return nil }
+        return source.extent.size
     }
 
     public func configure(catalog: CatalogDatabase, previewStore: PreviewStore) {
@@ -60,6 +73,82 @@ public final class DevelopViewModel: ObservableObject {
 
     public func setParameter(_ keyPath: WritableKeyPath<EditState, Double>, value: Double) {
         editState[keyPath: keyPath] = value
+        scheduleRender()
+        scheduleSave()
+    }
+
+    // MARK: - Crop
+
+    /// Enter the interactive crop mode, seeding `cropViewModel` from
+    /// the current `editState` (or identity if no crop has been
+    /// applied yet).
+    public func enterCropMode() {
+        let normalised: CGRect
+        if let existing = editState.cropRect, let size = sourceImageSize,
+           size.width > 0, size.height > 0 {
+            normalised = CropGeometry.pixelToNormalized(
+                rect: existing,
+                imageSize: size
+            )
+        } else {
+            normalised = CGRect(x: 0, y: 0, width: 1, height: 1)
+        }
+        let aspect: Double
+        if let size = sourceImageSize, size.height > 0 {
+            aspect = Double(size.width / size.height)
+        } else {
+            aspect = 1.0
+        }
+        cropViewModel.activate(
+            cropRect: normalised,
+            angle: editState.cropAngle ?? 0,
+            imageAspect: aspect
+        )
+    }
+
+    /// Commit the CropViewModel's current rect + angle to `editState`
+    /// and exit crop mode, triggering the debounced render + save.
+    public func commitCropFromViewModel() {
+        let (rect, angle) = cropViewModel.commit()
+        commitCrop(normalisedRect: rect, angle: angle)
+    }
+
+    /// Exit crop mode discarding any in-progress edits.
+    public func cancelCrop() {
+        cropViewModel.cancel()
+    }
+
+    /// Write a normalised crop rect and straighten angle into
+    /// `editState`, converting to pixel coordinates using the current
+    /// preview size. Schedules a re-render + auto-save.
+    ///
+    /// Full-image identity crop (rect ≈ (0,0,1,1), angle == 0) is
+    /// written as `nil` for both fields so EditState stays canonical.
+    public func commitCrop(normalisedRect: CGRect, angle: Double) {
+        let clampedAngle = CropGeometry.clampAngle(angle)
+        let isIdentity = abs(normalisedRect.minX) < 1e-9 &&
+            abs(normalisedRect.minY) < 1e-9 &&
+            abs(normalisedRect.width - 1) < 1e-9 &&
+            abs(normalisedRect.height - 1) < 1e-9 &&
+            clampedAngle == 0
+
+        if isIdentity {
+            editState.cropRect = nil
+            editState.cropAngle = nil
+        } else {
+            if let size = sourceImageSize, size.width > 0, size.height > 0 {
+                editState.cropRect = CropGeometry.normalizedToPixel(
+                    rect: normalisedRect,
+                    imageSize: size
+                )
+            } else {
+                // No preview loaded yet — store the normalised rect
+                // directly. The renderer won't see this until a preview
+                // is attached and commitCrop fires again.
+                editState.cropRect = normalisedRect
+            }
+            editState.cropAngle = clampedAngle == 0 ? nil : clampedAngle
+        }
         scheduleRender()
         scheduleSave()
     }

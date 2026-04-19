@@ -23,6 +23,7 @@ struct DimroomCLI: ParsableCommand {
             PasteEdit.self,
             SetEdit.self,
             GetEdit.self,
+            SetCrop.self,
             SetScope.self,
             ListImportSessions.self,
             SelectNext.self,
@@ -318,6 +319,51 @@ extension DimroomCLI {
                 throw ValidationError("Invalid UUID '\(id)'.")
             }
             try runCommand(.getEdit(assetId: uuid), socket: socket)
+        }
+    }
+
+    struct SetCrop: ParsableCommand {
+        static let configuration = CommandConfiguration(
+            commandName: "set-crop",
+            abstract: "Set the crop rect (normalised 0…1) and straighten angle on an asset."
+        )
+
+        @Argument(help: "The UUID of the asset.")
+        var id: String
+
+        @Option(name: .long, help: "Left edge of the crop rect in 0…1 normalised space.")
+        var x: Double
+
+        @Option(name: .long, help: "Top edge of the crop rect in 0…1 normalised space.")
+        var y: Double
+
+        @Option(name: .long, help: "Width of the crop rect in 0…1 normalised space.")
+        var width: Double
+
+        @Option(name: .long, help: "Height of the crop rect in 0…1 normalised space.")
+        var height: Double
+
+        @Option(name: .long, help: "Straighten angle in degrees (-45…+45).")
+        var angle: Double = 0
+
+        @Option(name: .long, help: "Path to the harness socket.")
+        var socket: String = HarnessServer.defaultSocketPath
+
+        func run() throws {
+            guard let uuid = UUID(uuidString: id) else {
+                throw ValidationError("Invalid UUID '\(id)'.")
+            }
+            try runCommand(
+                .setCrop(
+                    assetId: uuid,
+                    x: x,
+                    y: y,
+                    width: width,
+                    height: height,
+                    angle: angle
+                ),
+                socket: socket
+            )
         }
     }
 

@@ -133,6 +133,49 @@ final class CommandCodingTests: XCTestCase {
         XCTAssertEqual(command, decoded)
     }
 
+    func testSetCropRoundTrip() throws {
+        let id = UUID(uuidString: "12345678-1234-1234-1234-123456789012")!
+        let command = Command.setCrop(
+            assetId: id,
+            x: 0.125,
+            y: 0.0,
+            width: 0.75,
+            height: 1.0,
+            angle: 5.5
+        )
+        let data = try encoder.encode(command)
+        let decoded = try decoder.decode(Command.self, from: data)
+        XCTAssertEqual(command, decoded)
+    }
+
+    func testSetCropJSON() throws {
+        let id = UUID(uuidString: "12345678-1234-1234-1234-123456789012")!
+        let command = Command.setCrop(
+            assetId: id,
+            x: 0.125,
+            y: 0.0,
+            width: 0.75,
+            height: 1.0,
+            angle: 0.0
+        )
+        let data = try encoder.encode(command)
+        let json = String(data: data, encoding: .utf8)!
+        XCTAssertEqual(
+            json,
+            #"{"angle":0,"assetId":"12345678-1234-1234-1234-123456789012","height":1,"type":"setCrop","width":0.75,"x":0.125,"y":0}"#
+        )
+    }
+
+    func testDecodeSetCropFromJSON() throws {
+        let json = #"{"type":"setCrop","assetId":"12345678-1234-1234-1234-123456789012","x":0.1,"y":0.2,"width":0.5,"height":0.6,"angle":-10.0}"#
+        let command = try decoder.decode(Command.self, from: Data(json.utf8))
+        let expected = UUID(uuidString: "12345678-1234-1234-1234-123456789012")!
+        XCTAssertEqual(
+            command,
+            .setCrop(assetId: expected, x: 0.1, y: 0.2, width: 0.5, height: 0.6, angle: -10.0)
+        )
+    }
+
     func testSetEditParameterRoundTrip() throws {
         let id = UUID(uuidString: "12345678-1234-1234-1234-123456789012")!
         for (parameter, value) in [("exposure", 2.0), ("contrast", -0.5), ("temperature", 5500.0)] {

@@ -9,6 +9,10 @@ set -euo pipefail
 
 REPO_ROOT="$(cd "$(dirname "$0")/.." && pwd)"
 ARTIFACT_DIR="$REPO_ROOT/.artifacts/harness-crop"
+# Honour SCREENSHOT_DIR when the capture-screenshots skill sets it so each
+# flow's output lands under .artifacts/issue-<N>/<flow>/; otherwise fall
+# back to the legacy per-flow artifact directory.
+SCREENSHOT_DIR="${SCREENSHOT_DIR:-$ARTIFACT_DIR}"
 CATALOG_COPY="$ARTIFACT_DIR/catalog.sqlite"
 ORIGINALS_DIR="$ARTIFACT_DIR/originals"
 IMPORT_SOURCE="$REPO_ROOT/fixtures/import"
@@ -150,7 +154,8 @@ fi
 echo "  OK: cropAngle == $CROP_ANGLE"
 
 echo "=== Screenshot ==="
-"$CLI_BIN" screenshot "$ARTIFACT_DIR/crop-result.png" --socket "$SOCKET" || true
+mkdir -p "$SCREENSHOT_DIR"
+"$CLI_BIN" screenshot "$SCREENSHOT_DIR/crop-result.png" --socket "$SOCKET" || true
 
 echo "=== Quit ==="
 "$CLI_BIN" quit --socket "$SOCKET" 2>&1 || true

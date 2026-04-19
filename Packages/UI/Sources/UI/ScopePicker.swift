@@ -50,11 +50,12 @@ struct ScopePicker: View {
         } label: {
             HStack(spacing: 4) {
                 Image(systemName: iconName)
+                    .foregroundStyle(Color(white: 0.7))
                 Text(currentLabel)
                     .lineLimit(1)
+                    .foregroundStyle(Color(white: 0.7))
             }
             .font(.caption)
-            .foregroundStyle(Color(white: 0.7))
         }
         .menuStyle(.borderlessButton)
         .fixedSize()

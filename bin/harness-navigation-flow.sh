@@ -106,6 +106,21 @@ if [ "$ASSET_COUNT" -lt 3 ]; then
     exit 1
 fi
 
+# Regression guard: list-assets must return rows in grid order
+# (captureDate desc). The seed fixture assigns the newest capture date to
+# 03.jpg, so it must come first. Catches accidental reverts of the sort
+# that would silently re-break selectNext navigation (see #118).
+FIRST_FILENAME=$(printf '%s' "$LIST_OUT" | /usr/bin/python3 -c "
+import json, sys
+doc = json.loads(sys.stdin.read())
+print(doc['data'][0]['originalFilename'])
+")
+if [ "$FIRST_FILENAME" != "03.jpg" ]; then
+    echo "ERROR: expected first list-assets row to be 03.jpg (newest captureDate), got '$FIRST_FILENAME'"
+    exit 1
+fi
+echo "  OK: first row is 03.jpg (grid order preserved)"
+
 echo "=== select first asset ==="
 SEL_OUT=$("$CLI_BIN" select-asset "${ASSET_IDS[0]}" --socket "$SOCKET")
 echo "$SEL_OUT"

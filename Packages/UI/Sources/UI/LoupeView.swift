@@ -152,9 +152,14 @@ public struct LoupeView: View {
             .clipped()
             .frame(width: containerSize.width, height: containerSize.height)
             .overlay {
-                ScrollWheelZoomView { delta in
-                    scrollZoom(delta: delta, imageSize: imageSize, containerSize: containerSize)
-                }
+                ScrollWheelZoomView(
+                    onZoom: { delta in
+                        scrollZoom(delta: delta, imageSize: imageSize, containerSize: containerSize)
+                    },
+                    onPan: { dx, dy in
+                        scrollPan(dx: dx, dy: dy, imageSize: imageSize, containerSize: containerSize)
+                    }
+                )
             }
     }
 
@@ -229,6 +234,29 @@ public struct LoupeView: View {
         panStartOffset = zoomState.panOffset
         flashIndicator()
         syncIsZoomed()
+    }
+
+    /// Handle a two-finger trackpad scroll as a pan. Returns `true` if the
+    /// event was applied, `false` at fit scale (so the caller can let the
+    /// event pass through to any underlying scroll consumer).
+    private func scrollPan(
+        dx: CGFloat,
+        dy: CGFloat,
+        imageSize: CGSize,
+        containerSize: CGSize
+    ) -> Bool {
+        let fit = ZoomState.fitScale(imageSize: imageSize, containerSize: containerSize)
+        guard zoomState.zoomScale > fit + 0.001 else { return false }
+        zoomState.applyPan(
+            dx: dx,
+            dy: dy,
+            imageSize: imageSize,
+            containerSize: containerSize
+        )
+        // Keep click-drag's start offset in sync so a follow-up drag
+        // doesn't jump back to the pre-scroll position.
+        panStartOffset = zoomState.panOffset
+        return true
     }
 
     // MARK: - Keyboard actions

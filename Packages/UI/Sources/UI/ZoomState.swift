@@ -168,6 +168,34 @@ public struct ZoomState: Equatable {
         clampPan(imageSize: imageSize, containerSize: containerSize)
     }
 
+    /// Apply a two-finger trackpad scroll delta as a pan translation.
+    ///
+    /// Sign convention matches macOS "natural scrolling" (the default):
+    /// swiping fingers up pans the image up (reveals content below),
+    /// mirroring Preview and Photos. `dx` from `NSEvent.scrollingDeltaX`
+    /// adds directly to `panOffset.width`, `dy` from `scrollingDeltaY`
+    /// is subtracted to account for Cocoa's Y-up vs SwiftUI's Y-down
+    /// offset convention.
+    ///
+    /// No-ops at or below fit scale (including the `zoomScale == 0`
+    /// sentinel), since there is no room to pan.
+    public mutating func applyPan(
+        dx: CGFloat,
+        dy: CGFloat,
+        imageSize: CGSize,
+        containerSize: CGSize
+    ) {
+        let fit = Self.fitScale(imageSize: imageSize, containerSize: containerSize)
+        if zoomScale == 0 || zoomScale <= fit + 0.001 {
+            return
+        }
+        panOffset = CGSize(
+            width: panOffset.width + dx,
+            height: panOffset.height - dy
+        )
+        clampPan(imageSize: imageSize, containerSize: containerSize)
+    }
+
     /// Toggle fit ↔ 100% centred on a specific point in the container.
     /// Used for double-click: zooms in centred on the click location.
     public mutating func toggleFitTo100Centred(

@@ -1,0 +1,115 @@
+import Catalog
+import SwiftUI
+
+public struct DevelopView: View {
+    @ObservedObject private var viewModel: DevelopViewModel
+
+    public init(viewModel: DevelopViewModel) {
+        self.viewModel = viewModel
+    }
+
+    public var body: some View {
+        Group {
+            if viewModel.currentAssetId != nil {
+                HStack(spacing: 0) {
+                    sliderSidebar
+                    preview
+                }
+            } else {
+                placeholder
+            }
+        }
+        .frame(maxWidth: .infinity, maxHeight: .infinity)
+        .background(Color(white: 0.05))
+    }
+
+    // MARK: - Sidebar
+
+    private var sliderSidebar: some View {
+        ScrollView {
+            VStack(alignment: .leading, spacing: 12) {
+                sliderSection("Tone") {
+                    slider("Exposure", keyPath: \.exposure, range: -5.0...5.0, step: 0.01, identity: 0)
+                    slider("Contrast", keyPath: \.contrast, range: -100...100, step: 1, identity: 0)
+                    slider("Highlights", keyPath: \.highlights, range: -100...100, step: 1, identity: 0)
+                    slider("Shadows", keyPath: \.shadows, range: -100...100, step: 1, identity: 0)
+                    slider("Whites", keyPath: \.whites, range: -100...100, step: 1, identity: 0)
+                    slider("Blacks", keyPath: \.blacks, range: -100...100, step: 1, identity: 0)
+                }
+
+                sliderSection("White Balance") {
+                    slider("Temperature", keyPath: \.temperature, range: 2000...12000, step: 50, identity: 6500)
+                    slider("Tint", keyPath: \.tint, range: -150...150, step: 1, identity: 0)
+                }
+
+                sliderSection("Presence") {
+                    slider("Clarity", keyPath: \.clarity, range: -100...100, step: 1, identity: 0)
+                    slider("Vibrance", keyPath: \.vibrance, range: -100...100, step: 1, identity: 0)
+                    slider("Saturation", keyPath: \.saturation, range: -100...100, step: 1, identity: 0)
+                }
+            }
+            .padding(12)
+        }
+        .frame(width: 280)
+        .background(Color(white: 0.1))
+    }
+
+    private func sliderSection<Content: View>(_ title: String, @ViewBuilder content: () -> Content) -> some View {
+        VStack(alignment: .leading, spacing: 6) {
+            Text(title)
+                .font(.system(size: 11, weight: .semibold))
+                .foregroundStyle(Color(white: 0.5))
+                .textCase(.uppercase)
+            content()
+        }
+    }
+
+    private func slider(
+        _ label: String,
+        keyPath: WritableKeyPath<EditState, Double>,
+        range: ClosedRange<Double>,
+        step: Double,
+        identity: Double
+    ) -> some View {
+        ParameterSlider(
+            label: label,
+            range: range,
+            step: step,
+            identity: identity,
+            value: Binding(
+                get: { viewModel.editState[keyPath: keyPath] },
+                set: { viewModel.setParameter(keyPath, value: $0) }
+            ),
+            onReset: { viewModel.resetParameter(keyPath) }
+        )
+    }
+
+    // MARK: - Preview
+
+    private var preview: some View {
+        ZStack {
+            Color(white: 0.05)
+                .ignoresSafeArea()
+
+            if let image = viewModel.renderedImage {
+                Image(nsImage: image)
+                    .resizable()
+                    .aspectRatio(contentMode: .fit)
+            }
+        }
+        .frame(maxWidth: .infinity, maxHeight: .infinity)
+    }
+
+    // MARK: - Placeholder
+
+    private var placeholder: some View {
+        VStack(spacing: 8) {
+            Image(systemName: "slider.horizontal.3")
+                .font(.system(size: 48, weight: .light))
+                .foregroundStyle(Color(white: 0.35))
+            Text("Select a photo first")
+                .font(.headline)
+                .foregroundStyle(Color(white: 0.55))
+        }
+    }
+}

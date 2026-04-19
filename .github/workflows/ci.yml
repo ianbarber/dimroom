@@ -100,6 +100,20 @@ jobs:
             exit 0
           fi
           bin/harness-copypaste-flow.sh
+      - name: Run harness develop flow
+        run: |
+          if [ ! -x bin/harness-develop-flow.sh ]; then
+            echo "No harness develop flow script yet — skipping."
+            exit 0
+          fi
+          bin/harness-develop-flow.sh
+      - name: Run harness navigation flow
+        run: |
+          if [ ! -x bin/harness-navigation-flow.sh ]; then
+            echo "No harness navigation flow script yet — skipping."
+            exit 0
+          fi
+          bin/harness-navigation-flow.sh
       - name: Run harness multi-select delete flow
         run: |
           if [ ! -x bin/harness-multi-select-delete-flow.sh ]; then
@@ -107,3 +121,17 @@ jobs:
             exit 0
           fi
           bin/harness-multi-select-delete-flow.sh
+      - name: Run harness zoom flow
+        run: |
+          if [ ! -x bin/harness-zoom-flow.sh ]; then
+            echo "No harness zoom flow script yet — skipping."
+            exit 0
+          fi
+          bin/harness-zoom-flow.sh
+      - name: Run harness export flow
+        run: |
+          if [ ! -x bin/harness-export-flow.sh ]; then
+            echo "No harness export flow script yet — skipping."
+            exit 0
+          fi
+          bin/harness-export-flow.sh

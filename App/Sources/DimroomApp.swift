@@ -18,6 +18,7 @@ struct DimroomApp: App {
             ContentView(
                 router: appDelegate.router,
                 libraryViewModel: appDelegate.libraryViewModel,
+                developViewModel: appDelegate.developViewModel,
                 importCoordinator: appDelegate.importCoordinator,
                 exportCoordinator: appDelegate.exportCoordinator,
                 catalog: appDelegate.catalog
@@ -53,7 +54,46 @@ struct DimroomApp: App {
                 .keyboardShortcut("v", modifiers: [.command, .shift])
                 .disabled(appDelegate.editClipboard.isEmpty)
             }
+            CommandGroup(replacing: .undoRedo) {
+                UndoRedoMenuItems(undoStack: appDelegate.undoStack)
+            }
         }
+    }
+}
+
+/// Lives as a separate SwiftUI view so it can observe the
+/// `UndoStack`'s `@Published` flags and refresh the menu titles /
+/// disabled states reactively. Injecting the stack directly into
+/// `commands` doesn't pick up `ObservableObject` changes the same way.
+private struct UndoRedoMenuItems: View {
+    @ObservedObject var undoStack: UndoStack
+
+    var body: some View {
+        Button(undoTitle) {
+            Task { @MainActor in await undoStack.undo() }
+        }
+        .keyboardShortcut("z", modifiers: .command)
+        .disabled(!undoStack.canUndo)
+
+        Button(redoTitle) {
+            Task { @MainActor in await undoStack.redo() }
+        }
+        .keyboardShortcut("z", modifiers: [.command, .shift])
+        .disabled(!undoStack.canRedo)
+    }
+
+    private var undoTitle: String {
+        if let desc = undoStack.undoDescription {
+            return "Undo \(desc)"
+        }
+        return "Undo"
+    }
+
+    private var redoTitle: String {
+        if let desc = undoStack.redoDescription {
+            return "Redo \(desc)"
+        }
+        return "Redo"
     }
 }
 
@@ -70,6 +110,11 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     /// CLI flags are parsed and the real catalog + preview store are
     /// available.
     private(set) var libraryViewModel: LibraryViewModel = LibraryViewModel.empty()
+    private(set) var developViewModel: DevelopViewModel = DevelopViewModel.empty()
+    /// Shared in-memory undo stack. Rebuilt in
+    /// `applicationDidFinishLaunching` once the real catalog is known so
+    /// undo writes go against the same backing store the UI reads from.
+    private(set) var undoStack: UndoStack = UndoStack.empty()
     private(set) var catalog: CatalogDatabase?
     private var previewStore: PreviewStore?
     private var originalsDirectory: URL?
@@ -111,6 +156,15 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
                 catalog: resolvedCatalog,
                 previewStore: resolvedPreviewStore
             )
+            developViewModel.configure(
+                catalog: resolvedCatalog,
+                previewStore: resolvedPreviewStore
+            )
+            undoStack.configure(
+                catalog: resolvedCatalog,
+                libraryViewModel: libraryViewModel
+            )
+            libraryViewModel.undoStack = undoStack
         }
 
         if let resolvedCatalog {
@@ -147,6 +201,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
                 rootView: ContentView(
                     router: router,
                     libraryViewModel: libraryViewModel,
+                    developViewModel: developViewModel,
                     importCoordinator: importCoordinator,
                     exportCoordinator: exportCoordinator,
                     catalog: resolvedCatalog
@@ -167,9 +222,11 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             originalsDirectory: resolvedOriginalsDirectory,
             previewStore: resolvedPreviewStore,
             libraryViewModel: libraryViewModel,
+            developViewModel: developViewModel,
             editClipboard: editClipboard,
             exportCoordinator: exportCoordinator,
-            originalsCoordinator: originalsCoordinator
+            originalsCoordinator: originalsCoordinator,
+            undoStack: undoStack
         )
         do {
             try controller.start(socketPath: socketPath)
@@ -258,8 +315,14 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             state = editClipboard.pasteExcludingCrop()
         }
         guard let state else { return }
+        let previous = try? catalog.latestEditState(for: assetId)
         do {
             _ = try catalog.saveEditState(state, for: assetId)
+            undoStack.push(.editSave(
+                assetId: assetId,
+                previous: previous,
+                next: state
+            ))
             libraryViewModel.reload()
         } catch {
             print("[Dimroom] pasteEditSettings failed: \(error)")
@@ -333,9 +396,10 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     }
 
     /// Directory used by the LRU originals cache. Defaults to the same
-    /// location as the import-staging directory so pinned originals and
-    /// downloaded originals share storage. `--originals-cache <path>`
-    /// overrides for harness/test runs.
+    /// location as the import-staging directory so a freshly copied
+    /// original is immediately available to the cache layer without an
+    /// extra move. `--originals-cache <path>` overrides for harness/test
+    /// runs.
     private func resolveOriginalsCacheDirectory(from args: [String]) -> URL {
         if let index = args.firstIndex(of: "--originals-cache"),
            index + 1 < args.count {
@@ -364,9 +428,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     }
 }
 
-/// Downloader used when Drive credentials aren't configured. Keeps the
-/// cache layer functional for already-resident (pinned) files while
-/// making the degraded state explicit for Drive-backed assets.
+/// Downloader used when Drive credentials aren't configured. Always
+/// throws `OriginalsCacheError.unreachable`, making the degraded state
+/// explicit for Drive-backed assets.
 private struct UnavailableOriginalsDownloader: OriginalsDownloader {
     func download(
         driveFileId: String,
@@ -386,6 +450,19 @@ extension Notification.Name {
     static let showExportSheet = Notification.Name("dimroom.showExportSheet")
 }
 
+private extension DevelopViewModel {
+    static func empty() -> DevelopViewModel {
+        let catalog: CatalogDatabase
+        do {
+            catalog = try CatalogDatabase.inMemory()
+        } catch {
+            fatalError("in-memory catalog init failed: \(error)")
+        }
+        let store = PreviewStore(cacheDirectory: FileManager.default.temporaryDirectory)
+        return DevelopViewModel(catalog: catalog, previewStore: store)
+    }
+}
+
 private extension LibraryViewModel {
     static func empty() -> LibraryViewModel {
         let catalog: CatalogDatabase
@@ -396,5 +473,17 @@ private extension LibraryViewModel {
         }
         let store = PreviewStore(cacheDirectory: FileManager.default.temporaryDirectory)
         return LibraryViewModel(catalog: catalog, previewStore: store)
+    }
+}
+
+private extension UndoStack {
+    static func empty() -> UndoStack {
+        let catalog: CatalogDatabase
+        do {
+            catalog = try CatalogDatabase.inMemory()
+        } catch {
+            fatalError("in-memory catalog init failed: \(error)")
+        }
+        return UndoStack(catalog: catalog)
     }
 }

@@ -79,6 +79,33 @@ final class ExportSheetSnapshotTests: XCTestCase {
         }
     }
 
+    // MARK: - Export sheet JPEG format (quality slider visible)
+
+    @MainActor
+    func test_export_sheet_jpeg_format() async throws {
+        let view = ExportSheetView(
+            assetCount: 12,
+            initialFormat: .jpeg,
+            onExport: { _, _, _, _ in },
+            onCancel: {}
+        )
+
+        let image = renderFixedPixelImage(
+            for: view,
+            size: CGSize(width: 500, height: 340)
+        )
+
+        runAssertSnapshot {
+            assertSnapshot(
+                of: image,
+                as: .image(
+                    precision: Self.snapshotPrecision,
+                    perceptualPrecision: Self.snapshotPerceptualPrecision
+                )
+            )
+        }
+    }
+
     // MARK: - Export progress view
 
     @MainActor

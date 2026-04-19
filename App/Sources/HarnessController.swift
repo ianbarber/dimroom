@@ -14,9 +14,11 @@ final class HarnessController: @unchecked Sendable {
     private let originalsDirectory: URL
     private let previewStore: PreviewStore
     private let libraryViewModel: LibraryViewModel
+    private let developViewModel: DevelopViewModel
     private let editClipboard: EditClipboard
     private let exportCoordinator: ExportCoordinator
     private let originalsCoordinator: OriginalsCoordinator?
+    private let undoStack: UndoStack?
     private var server: HarnessServer?
 
     init(
@@ -25,18 +27,22 @@ final class HarnessController: @unchecked Sendable {
         originalsDirectory: URL,
         previewStore: PreviewStore,
         libraryViewModel: LibraryViewModel,
+        developViewModel: DevelopViewModel,
         editClipboard: EditClipboard,
         exportCoordinator: ExportCoordinator,
-        originalsCoordinator: OriginalsCoordinator? = nil
+        originalsCoordinator: OriginalsCoordinator? = nil,
+        undoStack: UndoStack? = nil
     ) {
         self.router = router
         self.catalog = catalog
         self.originalsDirectory = originalsDirectory
         self.previewStore = previewStore
         self.libraryViewModel = libraryViewModel
+        self.developViewModel = developViewModel
         self.editClipboard = editClipboard
         self.exportCoordinator = exportCoordinator
         self.originalsCoordinator = originalsCoordinator
+        self.undoStack = undoStack
     }
 
     func start(socketPath: String = HarnessServer.defaultSocketPath) throws {
@@ -126,13 +132,13 @@ final class HarnessController: @unchecked Sendable {
             return handleCopyEdit(assetId: assetId)
 
         case .pasteEdit(let assetId, let includeCrop):
-            return handlePasteEdit(assetId: assetId, includeCrop: includeCrop)
+            return await handlePasteEdit(assetId: assetId, includeCrop: includeCrop)
 
         case .setEdit(let assetId, let stateJSON):
-            return handleSetEdit(assetId: assetId, stateJSON: stateJSON)
+            return await handleSetEdit(assetId: assetId, stateJSON: stateJSON)
 
         case .getEdit(let assetId):
-            return handleGetEdit(assetId: assetId)
+            return await handleGetEdit(assetId: assetId)
 
         case .setScope(let sessionId):
             await libraryViewModel.setScope(sessionId)
@@ -175,6 +181,15 @@ final class HarnessController: @unchecked Sendable {
         case .fetchOriginal(let assetId):
             return await handleFetchOriginal(assetId: assetId)
 
+        case .setEditParameter(let assetId, let parameter, let value):
+            return await handleSetEditParameter(assetId: assetId, parameter: parameter, value: value)
+
+        case .undo:
+            return await handleUndo()
+
+        case .redo:
+            return await handleRedo()
+
         case .selectAssets(let ids):
             await MainActor.run {
                 libraryViewModel.select(nil)
@@ -200,6 +215,24 @@ final class HarnessController: @unchecked Sendable {
             await libraryViewModel.permanentlyDeleteAssets(ids: ids)
             return .ok()
         }
+    }
+
+    // MARK: - Undo / Redo
+
+    private func handleUndo() async -> Response {
+        guard let undoStack else {
+            return .error("undo stack not configured")
+        }
+        await undoStack.undo()
+        return .ok()
+    }
+
+    private func handleRedo() async -> Response {
+        guard let undoStack else {
+            return .error("undo stack not configured")
+        }
+        await undoStack.redo()
+        return .ok()
     }
 
     // MARK: - Fetch original
@@ -265,8 +298,16 @@ final class HarnessController: @unchecked Sendable {
             return .error("failed to create destination directory: \(error.localizedDescription)")
         }
 
-        // Use visible assets from the library view model (respects current filter).
-        let assets = await MainActor.run { libraryViewModel.rows.map(\.asset) }
+        // Selection wins when non-empty; otherwise fall back to all
+        // visible rows (which already respect the rating filter and
+        // active scope). Same rule as the File → Export… sheet so both
+        // entry points agree.
+        let assets = await MainActor.run {
+            ExportScope.resolve(
+                selectedIds: libraryViewModel.selectedAssetIds,
+                rows: libraryViewModel.rows
+            )
+        }
 
         await exportCoordinator.run(
             assets: assets,
@@ -297,7 +338,11 @@ final class HarnessController: @unchecked Sendable {
             return .error("catalog not loaded")
         }
         do {
-            let assets = try catalog.fetchAssets()
+            // Mirror LibraryViewModel.loadRows' sort so harness flows that
+            // enumerate "all assets" see them in the same order as the grid.
+            let assets = try catalog.fetchAssets().sorted { lhs, rhs in
+                (lhs.captureDate ?? lhs.importedDate) > (rhs.captureDate ?? rhs.importedDate)
+            }
             let array: [AnyCodableValue] = assets.map { asset in
                 let captureDate: AnyCodableValue
                 if let date = asset.captureDate {
@@ -310,6 +355,7 @@ final class HarnessController: @unchecked Sendable {
                     "originalFilename": .string(asset.originalFilename),
                     "captureDate": captureDate,
                     "rating": .int(asset.rating),
+                    "rotation": .int(asset.rotation),
                     "sourceType": .string(asset.sourceType.rawValue),
                 ])
             }
@@ -356,7 +402,7 @@ final class HarnessController: @unchecked Sendable {
         }
     }
 
-    private func handlePasteEdit(assetId: UUID, includeCrop: Bool) -> Response {
+    private func handlePasteEdit(assetId: UUID, includeCrop: Bool) async -> Response {
         guard let catalog else {
             return .error("catalog not loaded")
         }
@@ -369,33 +415,61 @@ final class HarnessController: @unchecked Sendable {
         guard let state else {
             return .ok(data: .dictionary(["pasted": .bool(false)]))
         }
+        let previous = try? catalog.latestEditState(for: assetId)
         do {
             _ = try catalog.saveEditState(state, for: assetId)
+            await recordEditUndo(assetId: assetId, previous: previous, next: state)
             return .ok(data: .dictionary(["pasted": .bool(true)]))
         } catch {
             return .error("pasteEdit failed: \(error.localizedDescription)")
         }
     }
 
-    private func handleSetEdit(assetId: UUID, stateJSON: String) -> Response {
+    private func handleSetEdit(assetId: UUID, stateJSON: String) async -> Response {
         guard let catalog else {
             return .error("catalog not loaded")
         }
         do {
             let state = try JSONDecoder().decode(EditState.self, from: Data(stateJSON.utf8))
+            let previous = try? catalog.latestEditState(for: assetId)
             _ = try catalog.saveEditState(state, for: assetId)
+            await recordEditUndo(assetId: assetId, previous: previous, next: state)
             return .ok()
         } catch {
             return .error("setEdit failed: \(error.localizedDescription)")
         }
     }
 
-    private func handleGetEdit(assetId: UUID) -> Response {
+    private func recordEditUndo(
+        assetId: UUID,
+        previous: EditState?,
+        next: EditState
+    ) async {
+        guard let undoStack else { return }
+        await MainActor.run {
+            undoStack.push(.editSave(
+                assetId: assetId,
+                previous: previous,
+                next: next
+            ))
+        }
+    }
+
+    private func handleGetEdit(assetId: UUID) async -> Response {
         guard let catalog else {
             return .error("catalog not loaded")
         }
+        let liveState: EditState? = await MainActor.run {
+            developViewModel.currentAssetId == assetId ? developViewModel.editState : nil
+        }
         do {
-            guard let state = try catalog.latestEditState(for: assetId) else {
+            let state: EditState?
+            if let liveState {
+                state = liveState
+            } else {
+                state = try catalog.latestEditState(for: assetId)
+            }
+            guard let state else {
                 return .ok(data: .null)
             }
             let data = try JSONEncoder().encode(state)
@@ -404,6 +478,26 @@ final class HarnessController: @unchecked Sendable {
         } catch {
             return .error("getEdit failed: \(error.localizedDescription)")
         }
+    }
+
+    private func handleSetEditParameter(assetId: UUID, parameter: String, value: Double) async -> Response {
+        guard let keyPath = DevelopViewModel.keyPath(forParameter: parameter) else {
+            return .error("unknown parameter: \(parameter)")
+        }
+        let alreadyActive: Bool = await MainActor.run {
+            if developViewModel.currentAssetId != assetId {
+                router.route = .develop
+                return false
+            }
+            return true
+        }
+        if !alreadyActive {
+            await developViewModel.activate(assetId: assetId)
+        }
+        await MainActor.run {
+            developViewModel.setParameter(keyPath, value: value)
+        }
+        return .ok()
     }
 
     private static let iso8601: ISO8601DateFormatter = {

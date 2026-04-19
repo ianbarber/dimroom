@@ -71,6 +71,15 @@ public final class LibraryViewModel: ObservableObject {
     /// off and are removed when the task resolves.
     @Published public private(set) var downloadingAssetIds: Set<UUID> = []
 
+    /// Latest per-chunk download fraction reported by the fetcher, keyed
+    /// by asset id. The Loupe overlay reads this to render a determinate
+    /// progress bar; absence of a value means the spinner stays
+    /// indeterminate (e.g. the `Content-Length` was unknown so no ticks
+    /// fired, or the fetch hit the cache and skipped the network). Values
+    /// are clamped monotonically non-decreasing so a late, lower tick
+    /// cannot move the bar backwards.
+    @Published public private(set) var downloadProgressByAssetId: [UUID: Double] = [:]
+
     /// App-level coordinator that returns a local URL for an original,
     /// downloading it from Drive if needed. `nil` in tests and the
     /// empty placeholder view model so the view degrades to preview-only.
@@ -280,14 +289,29 @@ public final class LibraryViewModel: ObservableObject {
     /// Request the full-resolution original for `assetId` via the
     /// injected `OriginalFetcher`. Tracks in-flight state on
     /// `downloadingAssetIds` so the Loupe overlay can show a spinner
-    /// without callers having to orchestrate the UI side-effects. Returns
-    /// `nil` when no fetcher is wired or the fetcher reports failure —
-    /// callers must fall back to the preview in that case.
+    /// without callers having to orchestrate the UI side-effects.
+    /// Streams per-chunk progress into `downloadProgressByAssetId` so
+    /// the overlay can render a determinate bar. Returns `nil` when no
+    /// fetcher is wired or the fetcher reports failure — callers must
+    /// fall back to the preview in that case.
     public func fetchOriginalIfNeeded(assetId: UUID) async -> URL? {
         guard let fetcher = originalFetcher else { return nil }
         downloadingAssetIds.insert(assetId)
-        defer { downloadingAssetIds.remove(assetId) }
-        return await fetcher.fetchOriginal(assetId: assetId)
+        defer {
+            downloadingAssetIds.remove(assetId)
+            downloadProgressByAssetId.removeValue(forKey: assetId)
+        }
+        let progress: @Sendable (Double) -> Void = { [weak self] fraction in
+            Task { @MainActor [weak self] in
+                guard let self else { return }
+                let clamped = min(max(fraction, 0), 1)
+                let existing = self.downloadProgressByAssetId[assetId] ?? 0
+                if clamped >= existing {
+                    self.downloadProgressByAssetId[assetId] = clamped
+                }
+            }
+        }
+        return await fetcher.fetchOriginal(assetId: assetId, progress: progress)
     }
 
     /// Move selection to the next row after the current selection. Wraps

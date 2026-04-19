@@ -1,17 +1,30 @@
 import SwiftUI
 
 /// Small overlay shown while the originals cache is pulling bytes from
-/// Drive. Indeterminate on purpose — the buffered HTTPClient does not
-/// expose per-byte progress, and a spinner is what the user cares about
-/// at 100% zoom anyway.
+/// Drive. Renders determinate progress when the caller has a fraction to
+/// report; falls back to an indeterminate spinner otherwise (e.g. when
+/// `Content-Length` is unknown and the streaming delegate is suppressing
+/// ticks).
 public struct DownloadIndicatorView: View {
-    public init() {}
+    private let progress: Double?
+
+    public init(progress: Double? = nil) {
+        self.progress = progress
+    }
 
     public var body: some View {
         HStack(spacing: 8) {
-            ProgressView()
-                .controlSize(.small)
-                .tint(.white)
+            if let progress {
+                ProgressView(value: min(max(progress, 0), 1))
+                    .progressViewStyle(.linear)
+                    .controlSize(.small)
+                    .tint(.white)
+                    .frame(width: 100)
+            } else {
+                ProgressView()
+                    .controlSize(.small)
+                    .tint(.white)
+            }
             Text("Downloading original…")
                 .font(.caption)
                 .foregroundStyle(.white)

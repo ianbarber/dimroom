@@ -226,15 +226,6 @@ final class LoupeSnapshotTests: XCTestCase {
         }
     }
 
-    // MARK: - Rotated asset
-
-    /// Fixture with `rotation = 90` persisted in the catalog. The
-    /// `PreviewStore.applyRotation` math already bakes orientation into
-    /// the encoded JPEG when `generate` runs, but this test doesn't
-    /// call generate — it hand-places a *portrait-shaped* preview JPEG
-    /// to stand in for the rotated output. This keeps the snapshot
-    /// deterministic regardless of Core Image's rotation matrix in the
-    /// test environment.
     // MARK: - Download overlay (determinate)
 
     /// Stage a fetch via a stub that emits a single `0.42` tick and

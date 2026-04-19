@@ -13,7 +13,7 @@ public enum UndoAction: Equatable, Sendable {
     case rating(assetId: UUID, from: Int, to: Int)
     case rotation(assetId: UUID, from: Int, to: Int)
     case editSave(assetId: UUID, previous: EditState?, next: EditState)
-    case softDelete(assetId: UUID)
+    case softDelete(assetIds: [UUID])
 
     /// Short human label used in the Edit menu ("Undo Set Rating 4",
     /// "Redo Rotate", etc.) and asserted verbatim by tests.
@@ -150,11 +150,11 @@ public final class UndoStack: ObservableObject {
             let state = direction == .forward ? next : (previous ?? EditState())
             _ = try? catalog.saveEditState(state, for: assetId)
             await libraryViewModel?.reloadAndWait()
-        case .softDelete(let assetId):
+        case .softDelete(let assetIds):
             if direction == .forward {
-                try? catalog.deleteAsset(id: assetId)
+                _ = try? catalog.deleteAssets(ids: assetIds)
             } else {
-                try? catalog.restoreAsset(id: assetId)
+                _ = try? catalog.restoreAssets(ids: assetIds)
             }
             await libraryViewModel?.reloadAndWait()
         }

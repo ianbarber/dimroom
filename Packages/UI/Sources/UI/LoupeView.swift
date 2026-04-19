@@ -75,8 +75,10 @@ public struct LoupeView: View {
                     VStack {
                         HStack {
                             Spacer()
-                            DownloadIndicatorView()
-                                .padding(12)
+                            DownloadIndicatorView(
+                                progress: viewModel.downloadProgressByAssetId[row.id]
+                            )
+                            .padding(12)
                         }
                         Spacer()
                     }

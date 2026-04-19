@@ -226,6 +226,71 @@ final class LoupeSnapshotTests: XCTestCase {
         }
     }
 
+    // MARK: - Download overlay (determinate)
+
+    /// Stage a fetch via a stub that emits a single `0.42` tick and
+    /// pauses indefinitely. While the fetch is in-flight, snapshot the
+    /// Loupe so the determinate progress bar renders. The fetch is
+    /// released after the snapshot so the test exits cleanly.
+    @MainActor
+    func test_loupe_with_download_overlay() async throws {
+        let catalog = try CatalogDatabase.inMemory()
+
+        let asset = TestFixtures.makeAsset(
+            hash: "loupeDownload",
+            filename: "loupe_download.jpg",
+            captureDate: Date(timeIntervalSince1970: 2_500_000)
+        )
+        try catalog.insertAsset(asset)
+        try TestFixtures.placePreview(
+            for: asset,
+            cacheDirectory: tempCacheDir,
+            color: (r: 60, g: 140, b: 200),
+            width: 1600,
+            height: 1000
+        )
+
+        let store = PreviewStore(cacheDirectory: tempCacheDir)
+        let vm = LibraryViewModel(catalog: catalog, previewStore: store)
+        await vm.reloadAndWait()
+        vm.select(asset.id)
+
+        let release = AsyncBarrier()
+        let started = AsyncBarrier()
+        let fetcher = HoldingProgressFetcher(
+            tick: 0.42,
+            started: started,
+            release: release
+        )
+        vm.originalFetcher = fetcher
+
+        let task = Task { @MainActor in
+            await vm.fetchOriginalIfNeeded(assetId: asset.id)
+        }
+        // Wait until the fetcher has both fired its progress tick and
+        // suspended on the release barrier — at this point the view
+        // model's downloadingAssetIds + downloadProgressByAssetId entry
+        // are both populated for `asset.id`.
+        await started.wait()
+        // Drain any remaining queued main-actor progress writes.
+        await MainActor.run { }
+
+        let image = renderFixedPixelImage(for: LoupeView(viewModel: vm))
+
+        runAssertSnapshot {
+            assertSnapshot(
+                of: image,
+                as: .image(
+                    precision: Self.snapshotPrecision,
+                    perceptualPrecision: Self.snapshotPerceptualPrecision
+                )
+            )
+        }
+
+        await release.signal()
+        _ = await task.value
+    }
+
     // MARK: - Rotated asset
 
     /// Fixture with `rotation = 90` persisted in the catalog. The
@@ -273,5 +338,58 @@ final class LoupeSnapshotTests: XCTestCase {
                 )
             )
         }
+    }
+}
+
+/// Stub `OriginalFetcher` that fires a single progress tick, signals
+/// `started` once the view-model has had a chance to record it, and
+/// then suspends until `release` is signalled. Lets snapshot tests
+/// freeze the Loupe in the "download in flight" state.
+private actor HoldingProgressFetcher: OriginalFetcher {
+    private let tick: Double
+    private let started: AsyncBarrier
+    private let release: AsyncBarrier
+
+    init(tick: Double, started: AsyncBarrier, release: AsyncBarrier) {
+        self.tick = tick
+        self.started = started
+        self.release = release
+    }
+
+    func fetchOriginal(
+        assetId: UUID,
+        progress: (@Sendable (Double) -> Void)?
+    ) async -> URL? {
+        progress?(tick)
+        // Allow the Task { @MainActor in … } scheduled by progress() to
+        // run before the test inspects the view model.
+        await MainActor.run { }
+        await started.signal()
+        await release.wait()
+        return nil
+    }
+}
+
+/// Tiny one-shot async barrier — `wait()` blocks until `signal()` is
+/// called once. Multiple `signal()` calls are no-ops; multiple waiters
+/// all resume on signal.
+private actor AsyncBarrier {
+    private var hasSignalled = false
+    private var continuations: [CheckedContinuation<Void, Never>] = []
+
+    func wait() async {
+        if hasSignalled { return }
+        await withCheckedContinuation { continuation in
+            continuations.append(continuation)
+        }
+    }
+
+    func signal() {
+        guard !hasSignalled else { return }
+        hasSignalled = true
+        for continuation in continuations {
+            continuation.resume()
+        }
+        continuations.removeAll()
     }
 }

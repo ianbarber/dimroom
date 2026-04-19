@@ -48,6 +48,13 @@ struct ScopePicker: View {
                 }
             }
         } label: {
+            // Why: `.foregroundStyle` must be applied per-child here — not on
+            // the enclosing HStack — because `Menu` with
+            // `.menuStyle(.borderlessButton)` does not propagate foreground
+            // style to its label subtree in live rendering (it renders as
+            // black on dark gray). `ImageRenderer` *does* propagate it, so
+            // offline snapshots can't catch a regression here; see
+            // ScopePickerStructureTests for the structural guard.
             HStack(spacing: 4) {
                 Image(systemName: iconName)
                     .foregroundStyle(Color(white: 0.7))

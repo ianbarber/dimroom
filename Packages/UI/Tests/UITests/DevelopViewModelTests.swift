@@ -167,23 +167,38 @@ final class DevelopViewModelTests: XCTestCase {
     }
 
     @MainActor
-    func testDeactivateCancelsPendingSave() async throws {
+    func testDeactivateFlushesPendingSave() async throws {
         let (vm, asset, catalog) = try await makeViewModelWithAsset(hash: "deact-save")
         await vm.activate(assetId: asset.id)
 
         vm.setParameter(\.exposure, value: 3.0)
 
-        // Deactivate before the 500ms debounce fires.
+        // Deactivate before the 500ms debounce fires — the pending edit
+        // must be flushed, not dropped.
         try await Task.sleep(nanoseconds: 100_000_000)
         vm.deactivate()
 
-        // Wait long enough that a stray save would have gone through.
-        try await Task.sleep(nanoseconds: 800_000_000)
-
         let latest = try catalog.latestEditState(for: asset.id)
-        XCTAssertNil(
-            latest,
-            "deactivate must cancel the pending save so nothing is persisted"
+        XCTAssertEqual(
+            latest?.exposure,
+            3.0,
+            "deactivate must flush the pending edit to the catalog"
+        )
+    }
+
+    @MainActor
+    func testDeactivateWithNoPendingChangesDoesNotWrite() async throws {
+        let (vm, asset, catalog) = try await makeViewModelWithAsset(hash: "deact-clean")
+        await vm.activate(assetId: asset.id)
+
+        // No setParameter calls — viewmodel is clean.
+        vm.deactivate()
+
+        let history = try catalog.editHistory(for: asset.id)
+        XCTAssertEqual(
+            history.count,
+            0,
+            "Clean deactivate must not create a catalog version"
         )
     }
 

@@ -61,6 +61,24 @@ final class ZoomStateTests: XCTestCase {
         XCTAssertEqual(state.panOffset, .zero)
     }
 
+    func test_toggleFitTo100_from_fit_clamps_when_image_smaller_than_container() {
+        // When the image is smaller than the container in both axes, fit >
+        // 1.0, so "go to 100%" is below the minimum zoom and clampZoom
+        // snaps back to fit — the toggle is a visible no-op. This invariant
+        // is what bin/harness-zoom-flow.sh's fixture sizing relies on: the
+        // library-seed JPEGs are chosen large enough (≥ container in at
+        // least one axis) that fit ≤ 1.0 and toggling actually changes
+        // isZoomed. A 256×256 image in the 1024×768 container reproduces
+        // the original failure mode.
+        let smallImage = CGSize(width: 256, height: 256)
+        let fit = ZoomState.fitScale(imageSize: smallImage, containerSize: container)
+        XCTAssertGreaterThan(fit, 1.0, "precondition: fit must exceed 1.0")
+        var state = ZoomState(zoomScale: fit)
+        state.toggleFitTo100(imageSize: smallImage, containerSize: container)
+        XCTAssertEqual(state.zoomScale, fit, accuracy: 0.001)
+        XCTAssertTrue(state.isAtFit(imageSize: smallImage, containerSize: container))
+    }
+
     // MARK: - resetToFit
 
     func test_resetToFit() {

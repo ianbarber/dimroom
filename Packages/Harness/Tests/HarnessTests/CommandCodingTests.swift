@@ -815,6 +815,34 @@ final class CommandCodingTests: XCTestCase {
         )
     }
 
+    // MARK: - uploadToDrive
+
+    func testUploadToDriveRoundTrip() throws {
+        let id = UUID(uuidString: "12345678-1234-1234-1234-123456789012")!
+        let command = Command.uploadToDrive(assetId: id)
+        let data = try encoder.encode(command)
+        let decoded = try decoder.decode(Command.self, from: data)
+        XCTAssertEqual(command, decoded)
+    }
+
+    func testUploadToDriveJSON() throws {
+        let id = UUID(uuidString: "12345678-1234-1234-1234-123456789012")!
+        let command = Command.uploadToDrive(assetId: id)
+        let data = try encoder.encode(command)
+        let json = String(data: data, encoding: .utf8)!
+        XCTAssertEqual(
+            json,
+            #"{"assetId":"12345678-1234-1234-1234-123456789012","type":"uploadToDrive"}"#
+        )
+    }
+
+    func testDecodeUploadToDriveFromJSON() throws {
+        let json = #"{"type":"uploadToDrive","assetId":"12345678-1234-1234-1234-123456789012"}"#
+        let command = try decoder.decode(Command.self, from: Data(json.utf8))
+        let expected = UUID(uuidString: "12345678-1234-1234-1234-123456789012")!
+        XCTAssertEqual(command, .uploadToDrive(assetId: expected))
+    }
+
     // MARK: - Route
 
     func testRouteAllCases() {

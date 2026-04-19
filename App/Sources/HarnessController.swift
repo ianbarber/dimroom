@@ -1,5 +1,6 @@
 import AppKit
 import Catalog
+import DriveClient
 import EditEngine
 import Foundation
 import Harness
@@ -17,6 +18,8 @@ final class HarnessController: @unchecked Sendable {
     private let developViewModel: DevelopViewModel
     private let editClipboard: EditClipboard
     private let exportCoordinator: ExportCoordinator
+    private let uploadCoordinator: UploadCoordinator
+    private let driveUploader: (any DriveUploading)?
     private let originalsCoordinator: OriginalsCoordinator?
     private let undoStack: UndoStack?
     private var server: HarnessServer?
@@ -30,6 +33,8 @@ final class HarnessController: @unchecked Sendable {
         developViewModel: DevelopViewModel,
         editClipboard: EditClipboard,
         exportCoordinator: ExportCoordinator,
+        uploadCoordinator: UploadCoordinator,
+        driveUploader: (any DriveUploading)? = nil,
         originalsCoordinator: OriginalsCoordinator? = nil,
         undoStack: UndoStack? = nil
     ) {
@@ -41,6 +46,8 @@ final class HarnessController: @unchecked Sendable {
         self.developViewModel = developViewModel
         self.editClipboard = editClipboard
         self.exportCoordinator = exportCoordinator
+        self.uploadCoordinator = uploadCoordinator
+        self.driveUploader = driveUploader
         self.originalsCoordinator = originalsCoordinator
         self.undoStack = undoStack
     }
@@ -224,6 +231,48 @@ final class HarnessController: @unchecked Sendable {
         case .permanentlyDeleteAssets(let ids):
             await libraryViewModel.permanentlyDeleteAssets(ids: ids)
             return .ok()
+
+        case .uploadToDrive(let assetId):
+            return await handleUploadToDrive(assetId: assetId)
+        }
+    }
+
+    // MARK: - Upload to Drive
+
+    private func handleUploadToDrive(assetId: UUID) async -> Response {
+        guard let catalog else {
+            return .error("catalog not loaded")
+        }
+        guard let driveUploader else {
+            return .error("drive uploader not configured (authenticate first)")
+        }
+        let asset: Asset?
+        do {
+            asset = try catalog.fetchAsset(id: assetId)
+        } catch {
+            return .error("fetchAsset failed: \(error.localizedDescription)")
+        }
+        guard let asset else {
+            return .error("asset not found: \(assetId)")
+        }
+        await uploadCoordinator.run(
+            assets: [asset],
+            catalog: catalog,
+            uploader: driveUploader
+        )
+        let phase = await uploadCoordinator.phase
+        switch phase {
+        case .done(let uploaded, let skipped):
+            let refreshed = (try? catalog.fetchAsset(id: assetId))?.driveFileId ?? ""
+            return .ok(data: .dictionary([
+                "driveFileId": .string(refreshed),
+                "uploaded": .int(uploaded),
+                "skipped": .int(skipped),
+            ]))
+        case .failed(let message):
+            return .error("upload failed: \(message)")
+        default:
+            return .error("upload ended in unexpected phase")
         }
     }
 

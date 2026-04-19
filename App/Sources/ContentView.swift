@@ -10,6 +10,7 @@ struct ContentView: View {
     @ObservedObject var developViewModel: DevelopViewModel
     @ObservedObject var importCoordinator: ImportCoordinator
     @ObservedObject var exportCoordinator: ExportCoordinator
+    @ObservedObject var uploadCoordinator: UploadCoordinator
     let catalog: CatalogDatabase?
     @State private var showExportSheet = false
     /// Non-nil while the delete-confirmation dialog is presented.
@@ -61,6 +62,11 @@ struct ContentView: View {
         .overlay {
             if exportCoordinator.isActive {
                 ExportProgressView(coordinator: exportCoordinator)
+            }
+        }
+        .overlay {
+            if uploadCoordinator.isActive {
+                UploadProgressView(coordinator: uploadCoordinator)
             }
         }
         .overlay {

@@ -97,6 +97,18 @@ public final class CatalogDatabase: Sendable {
         }
     }
 
+    /// Set `Asset.driveFileId` for the given asset. Passing `nil` clears
+    /// it — callers can use that path if an upload is rolled back or a
+    /// Drive file is later removed and we want the asset to re-upload.
+    public func updateDriveFileId(assetId: UUID, driveFileId: String?) throws {
+        try dbQueue.write { db in
+            if var asset = try Asset.fetchOne(db, key: assetId) {
+                asset.driveFileId = driveFileId
+                try asset.update(db)
+            }
+        }
+    }
+
     public func deleteAsset(id: UUID) throws {
         try dbQueue.write { db in
             if var asset = try Asset.fetchOne(db, key: id) {

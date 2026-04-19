@@ -105,6 +105,25 @@ final class CatalogDatabaseTests: XCTestCase {
         XCTAssertEqual(try db.fetchAsset(byHash: asset.contentHash)?.rotation, 0)
     }
 
+    // MARK: - Drive File Id Update
+
+    func testUpdateDriveFileIdSetAndClear() throws {
+        let db = try makeDatabase()
+        let asset = makeSampleAsset()
+        try db.insertAsset(asset)
+
+        try db.updateDriveFileId(assetId: asset.id, driveFileId: "drive-abc")
+        XCTAssertEqual(try db.fetchAsset(byHash: asset.contentHash)?.driveFileId, "drive-abc")
+
+        try db.updateDriveFileId(assetId: asset.id, driveFileId: nil)
+        XCTAssertNil(try db.fetchAsset(byHash: asset.contentHash)?.driveFileId)
+    }
+
+    func testUpdateDriveFileIdForUnknownIdIsNoOp() throws {
+        let db = try makeDatabase()
+        XCTAssertNoThrow(try db.updateDriveFileId(assetId: UUID(), driveFileId: "ignored"))
+    }
+
     // MARK: - Soft Delete
 
     func testSoftDelete() throws {

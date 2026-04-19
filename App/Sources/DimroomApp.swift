@@ -21,6 +21,7 @@ struct DimroomApp: App {
                 developViewModel: appDelegate.developViewModel,
                 importCoordinator: appDelegate.importCoordinator,
                 exportCoordinator: appDelegate.exportCoordinator,
+                uploadCoordinator: appDelegate.uploadCoordinator,
                 catalog: appDelegate.catalog
             )
         }
@@ -35,6 +36,17 @@ struct DimroomApp: App {
                     NotificationCenter.default.post(name: .showExportSheet, object: nil)
                 }
                 .keyboardShortcut("e", modifiers: [.command, .shift])
+
+                Divider()
+
+                Button("Connect Google Drive...") {
+                    appDelegate.connectGoogleDriveFromMenu()
+                }
+
+                Button("Upload Selected to Drive") {
+                    appDelegate.uploadSelectedToDriveFromMenu()
+                }
+                .keyboardShortcut("u", modifiers: [.command, .shift])
             }
             CommandGroup(replacing: .pasteboard) {
                 Button("Copy Edit Settings") {
@@ -102,6 +114,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     let router = AppRouter()
     let importCoordinator = ImportCoordinator()
     let exportCoordinator = ExportCoordinator()
+    let uploadCoordinator = UploadCoordinator()
     let editClipboard = EditClipboard()
     /// View model shared between the SwiftUI tree and the harness
     /// controller. Initialised eagerly with an in-memory empty catalog so
@@ -121,6 +134,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     private var harnessController: HarnessController?
     private var harnessWindow: NSWindow?
     private var originalsCoordinator: OriginalsCoordinator?
+    private var driveClient: DriveClient?
+    private var driveUploader: DriveUploader?
 
     func applicationDidFinishLaunching(_ notification: Notification) {
         let args = ProcessInfo.processInfo.arguments
@@ -167,10 +182,13 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             libraryViewModel.undoStack = undoStack
         }
 
+        let resolvedDriveClient = resolveDriveClient()
+        self.driveClient = resolvedDriveClient
+
         if let resolvedCatalog {
             let cacheDir = resolveOriginalsCacheDirectory(from: args)
             let budget = resolveOriginalsCacheBudget()
-            let downloader: OriginalsDownloader = resolveDriveClient() ?? UnavailableOriginalsDownloader()
+            let downloader: OriginalsDownloader = resolvedDriveClient ?? UnavailableOriginalsDownloader()
             let coordinator = OriginalsCoordinator(catalog: resolvedCatalog)
             if let cache = try? OriginalsCache(
                 directory: cacheDir,
@@ -184,6 +202,13 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
                 libraryViewModel.originalFetcher = coordinator
                 originalsCoordinator = coordinator
             }
+        }
+
+        if let resolvedDriveClient {
+            let httpClient = URLSessionHTTPClient()
+            let session = AuthorizedSession(client: httpClient, provider: resolvedDriveClient)
+            let resolver = DriveFolderResolver(session: session)
+            self.driveUploader = DriveUploader(session: session, folderResolver: resolver)
         }
 
         guard args.contains("--harness") else { return }
@@ -204,6 +229,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
                     developViewModel: developViewModel,
                     importCoordinator: importCoordinator,
                     exportCoordinator: exportCoordinator,
+                    uploadCoordinator: uploadCoordinator,
                     catalog: resolvedCatalog
                 )
             )
@@ -225,6 +251,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             developViewModel: developViewModel,
             editClipboard: editClipboard,
             exportCoordinator: exportCoordinator,
+            uploadCoordinator: uploadCoordinator,
+            driveUploader: driveUploader,
             originalsCoordinator: originalsCoordinator,
             undoStack: undoStack
         )
@@ -288,6 +316,70 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
                 }
             default:
                 break
+            }
+        }
+    }
+
+    // MARK: - Drive menu actions
+
+    func connectGoogleDriveFromMenu() {
+        guard let driveClient else {
+            let alert = NSAlert()
+            alert.messageText = "Drive Not Configured"
+            alert.informativeText = "Set DIMROOM_GOOGLE_CLIENT_ID or create ~/Library/Application Support/dimroom/oauth.json."
+            alert.alertStyle = .warning
+            alert.runModal()
+            return
+        }
+        Task { @MainActor in
+            do {
+                try await driveClient.authenticate()
+            } catch {
+                let alert = NSAlert()
+                alert.messageText = "Drive Authentication Failed"
+                alert.informativeText = error.localizedDescription
+                alert.alertStyle = .critical
+                alert.runModal()
+            }
+        }
+    }
+
+    func uploadSelectedToDriveFromMenu() {
+        guard let catalog else {
+            let alert = NSAlert()
+            alert.messageText = "Upload Failed"
+            alert.informativeText = "No catalog is loaded."
+            alert.alertStyle = .warning
+            alert.runModal()
+            return
+        }
+        guard let driveUploader else {
+            let alert = NSAlert()
+            alert.messageText = "Drive Not Configured"
+            alert.informativeText = "Set DIMROOM_GOOGLE_CLIENT_ID or create ~/Library/Application Support/dimroom/oauth.json, then Connect Google Drive…"
+            alert.alertStyle = .warning
+            alert.runModal()
+            return
+        }
+
+        let scoped = ExportScope.resolve(
+            selectedIds: libraryViewModel.selectedAssetIds,
+            rows: libraryViewModel.rows
+        )
+        guard !scoped.isEmpty else { return }
+
+        Task { @MainActor in
+            await uploadCoordinator.run(
+                assets: scoped,
+                catalog: catalog,
+                uploader: driveUploader
+            )
+            if case .failed(let message) = uploadCoordinator.phase {
+                let alert = NSAlert()
+                alert.messageText = "Upload Failed"
+                alert.informativeText = message
+                alert.alertStyle = .critical
+                alert.runModal()
             }
         }
     }

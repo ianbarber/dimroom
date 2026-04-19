@@ -10,6 +10,7 @@ let package = Package(
     ],
     dependencies: [
         .package(path: "../Catalog"),
+        .package(path: "../DriveClient"),
         .package(path: "../EditEngine"),
         .package(path: "../ImportKit"),
         .package(path: "../Previews"),
@@ -20,6 +21,7 @@ let package = Package(
             name: "UI",
             dependencies: [
                 .product(name: "Catalog", package: "Catalog"),
+                .product(name: "DriveClient", package: "DriveClient"),
                 .product(name: "EditEngine", package: "EditEngine"),
                 .product(name: "ImportKit", package: "ImportKit"),
                 .product(name: "Previews", package: "Previews"),
@@ -30,6 +32,7 @@ let package = Package(
             dependencies: [
                 "UI",
                 .product(name: "Catalog", package: "Catalog"),
+                .product(name: "DriveClient", package: "DriveClient"),
                 .product(name: "EditEngine", package: "EditEngine"),
                 .product(name: "ImportKit", package: "ImportKit"),
                 .product(name: "Previews", package: "Previews"),

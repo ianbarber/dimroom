@@ -37,6 +37,21 @@ final class RendererSnapshotTests: XCTestCase {
         assertSnapshot(of: image, as: .image(precision: 0.99, perceptualPrecision: 0.98))
     }
 
+    func testContrastMaxSnapshot() {
+        // Locks the +100 ceiling introduced by the range remap. Regressing to
+        // the old 0…2 mapping would visibly crush/blow this gradient and fail
+        // the snapshot.
+        let source = makeGradientImage()
+        let image = renderToNSImage(source: source, editState: EditState(contrast: 100))
+        assertSnapshot(of: image, as: .image(precision: 0.99, perceptualPrecision: 0.98))
+    }
+
+    func testSaturationMaxSnapshot() {
+        let source = makeColorImage()
+        let image = renderToNSImage(source: source, editState: EditState(saturation: 100))
+        assertSnapshot(of: image, as: .image(precision: 0.99, perceptualPrecision: 0.98))
+    }
+
     func testCroppedSnapshot() {
         let source = makeGradientImage()
         let cropRect = CGRect(x: 16, y: 16, width: 32, height: 32)

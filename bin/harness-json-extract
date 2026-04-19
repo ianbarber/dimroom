@@ -10,7 +10,7 @@ Path DSL:
     - keys separated by '.'          e.g. data.assetCount
     - numeric indices in brackets    e.g. data[0].id
     - '[*]' wildcard to iterate      e.g. data[*].id  (one line per element)
-    - keys may not contain '.', '[', ']', quotes, or whitespace
+    - keys may contain any character except '.', '[', ']'
 
 Flags:
     --default VAL   If path is missing or resolves to null, print VAL and exit 0.

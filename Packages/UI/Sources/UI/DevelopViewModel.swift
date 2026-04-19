@@ -18,6 +18,7 @@ public final class DevelopViewModel: ObservableObject {
     private let ciContext = CIContext()
     private var renderTask: Task<Void, Never>?
     private var saveTask: Task<Void, Never>?
+    private var hasUnsavedChanges: Bool = false
 
     public init(catalog: CatalogDatabase, previewStore: PreviewStore) {
         self.catalog = catalog
@@ -38,12 +39,14 @@ public final class DevelopViewModel: ObservableObject {
               let source = CIImage(contentsOf: url) else {
             currentAssetId = assetId
             editState = (try? catalog.latestEditState(for: assetId)) ?? EditState()
+            hasUnsavedChanges = false
             return
         }
 
         sourceImage = source
         currentAssetId = assetId
         editState = (try? catalog.latestEditState(for: assetId)) ?? EditState()
+        hasUnsavedChanges = false
         triggerRender()
     }
 
@@ -52,6 +55,12 @@ public final class DevelopViewModel: ObservableObject {
         saveTask?.cancel()
         renderTask = nil
         saveTask = nil
+
+        if hasUnsavedChanges, let assetId = currentAssetId {
+            _ = try? catalog.saveEditState(editState, for: assetId)
+        }
+        hasUnsavedChanges = false
+
         sourceImage = nil
         renderedImage = nil
         currentAssetId = nil
@@ -60,6 +69,7 @@ public final class DevelopViewModel: ObservableObject {
 
     public func setParameter(_ keyPath: WritableKeyPath<EditState, Double>, value: Double) {
         editState[keyPath: keyPath] = value
+        hasUnsavedChanges = true
         scheduleRender()
         scheduleSave()
     }
@@ -135,6 +145,7 @@ public final class DevelopViewModel: ObservableObject {
             guard !Task.isCancelled else { return }
             guard let assetId = currentAssetId else { return }
             _ = try? catalog.saveEditState(editState, for: assetId)
+            hasUnsavedChanges = false
         }
     }
 }

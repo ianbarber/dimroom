@@ -19,6 +19,22 @@ Flags:
     --iter          Path must resolve to a list; print one element per line.
                     Redundant with '[*]' in the path (either form works).
     --absent        Print 'absent' if the path is missing or null, else 'present'.
+    --float         Parse the resolved scalar as float() before printing
+                    (so "2" and 2.0 both print as "2.0"). Rejects booleans.
+                    JSON numbers don't round-trip through string comparison:
+                    Swift's JSONEncoder writes Double(2.0) as `2`, Python parses
+                    it as int, and str(2) != "2.0" — hence the float coercion.
+    --equals VAL    Epsilon-compare the resolved float against VAL. Exit 0 on
+                    hit, exit 1 on miss. Requires --float. Nothing is printed
+                    on a successful compare (use shell exit code).
+    --epsilon N     Tolerance for --equals. Default 1e-9.
+
+Exit codes:
+    0  success (value printed, or --equals hit)
+    1  --equals miss (clean compare, no error)
+    2  argparse / invalid JSON / usage error
+    3  path not found (no --default / --absent to rescue)
+    4  type mismatch (e.g. --length on non-list, --float on non-numeric)
 
 Booleans are emitted lowercase ('true' / 'false') to match JSON — callers
 that compare against 'True' / 'False' must be updated at the same time.
@@ -100,6 +116,31 @@ def has_wildcard(tokens):
     return any(t[0] == 'wildcard' for t in tokens)
 
 
+def _emit_float(node, args):
+    """Coerce node to float, then either print it or epsilon-compare against
+    args.equals. Booleans are rejected (float(True) == 1.0 would silently
+    compare against 1.0)."""
+    if isinstance(node, bool):
+        print(f"harness-json-extract: path {args.path!r} resolved to a boolean, not a number", file=sys.stderr)
+        sys.exit(4)
+    try:
+        actual = float(node)
+    except (TypeError, ValueError):
+        print(f"harness-json-extract: path {args.path!r} value {node!r} is not numeric", file=sys.stderr)
+        sys.exit(4)
+    if args.equals is None:
+        print(actual)
+        return
+    try:
+        expected = float(args.equals)
+    except ValueError:
+        print(f"harness-json-extract: --equals value {args.equals!r} is not numeric", file=sys.stderr)
+        sys.exit(2)
+    if abs(actual - expected) < args.epsilon:
+        return
+    sys.exit(1)
+
+
 def main():
     p = argparse.ArgumentParser(add_help=True)
     p.add_argument('path')
@@ -108,7 +149,17 @@ def main():
     grp.add_argument('--iter', action='store_true', dest='iter_')
     grp.add_argument('--absent', action='store_true')
     p.add_argument('--default', dest='default', default=None)
+    p.add_argument('--float', action='store_true', dest='as_float')
+    p.add_argument('--equals', dest='equals', default=None)
+    p.add_argument('--epsilon', dest='epsilon', type=float, default=1e-9)
     args = p.parse_args()
+
+    if args.equals is not None and not args.as_float:
+        print("harness-json-extract: --equals requires --float", file=sys.stderr)
+        sys.exit(2)
+    if args.as_float and (args.length or args.iter_ or args.absent):
+        print("harness-json-extract: --float is incompatible with --length / --iter / --absent", file=sys.stderr)
+        sys.exit(2)
 
     raw = sys.stdin.read()
     try:
@@ -125,6 +176,10 @@ def main():
 
     wildcard = has_wildcard(tokens)
 
+    if wildcard and args.as_float:
+        print("harness-json-extract: --float / --equals are incompatible with '[*]'", file=sys.stderr)
+        sys.exit(2)
+
     try:
         values = walk(doc, tokens)
     except KeyError as e:
@@ -132,6 +187,11 @@ def main():
             print('absent')
             return
         if args.default is not None:
+            if args.as_float:
+                # --default still wins before the compare; route through the
+                # same float / equals path so callers see consistent behaviour.
+                _emit_float(args.default, args)
+                return
             print(args.default)
             return
         print(f"harness-json-extract: path {args.path!r} not found: {e}", file=sys.stderr)
@@ -157,7 +217,13 @@ def main():
                 print(format_scalar(item))
             return
         if node is None and args.default is not None:
+            if args.as_float:
+                _emit_float(args.default, args)
+                return
             print(args.default)
+            return
+        if args.as_float:
+            _emit_float(node, args)
             return
         print(format_scalar(node))
         return

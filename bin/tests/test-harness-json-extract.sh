@@ -139,6 +139,51 @@ assert_fail "missing key with no default" '{"a": 1}' 'b'
 assert_fail "out-of-range index with no default" '{"a": [1]}' 'a[5]'
 assert_fail "invalid JSON" 'not-json' 'a'
 
+echo "=== --float / --equals / --epsilon ==="
+OUT=$(printf '{"data": {"exposure": 2}}' | "$HELPER" 'data.exposure' --float)
+assert_eq "float round-trip on JSON int" "2.0" "$OUT"
+
+OUT=$(printf '{"a": "3.5"}' | "$HELPER" 'a' --float)
+assert_eq "float on string numeric" "3.5" "$OUT"
+
+if printf '{"data": {"exposure": 2.0}}' | "$HELPER" 'data.exposure' --float --equals 2.0 --epsilon 1e-9 >/dev/null; then
+    echo "  OK: equals hit (float vs float)"
+else
+    echo "FAIL: equals hit (float vs float) — expected exit 0"
+    FAILED=1
+fi
+
+if printf '{"data": {"exposure": 2}}' | "$HELPER" 'data.exposure' --float --equals 2.0 >/dev/null; then
+    echo "  OK: equals hit when JSON encodes as int (the bug being fixed)"
+else
+    echo "FAIL: equals hit when JSON encodes as int — expected exit 0"
+    FAILED=1
+fi
+
+assert_fail "equals miss" '{"data": {"exposure": 2.0}}' 'data.exposure' --float --equals 2.5
+
+if printf '{"a": 2.0005}' | "$HELPER" 'a' --float --equals 2.0 --epsilon 1e-3 >/dev/null; then
+    echo "  OK: epsilon boundary inside window"
+else
+    echo "FAIL: epsilon boundary inside window — expected exit 0"
+    FAILED=1
+fi
+
+assert_fail "epsilon boundary outside window" '{"a": 2.002}' 'a' --float --equals 2.0 --epsilon 1e-3
+
+assert_fail "float on non-numeric string" '{"a": "hello"}' 'a' --float
+assert_fail "float on boolean" '{"a": true}' 'a' --float
+assert_fail "equals without --float" '{"a": 1}' 'a' --equals 1
+
+if printf '{"a": 1}' | "$HELPER" 'missing' --float --default 0 --equals 0 >/dev/null; then
+    echo "  OK: --default routes through float compare (hit)"
+else
+    echo "FAIL: --default routes through float compare (hit) — expected exit 0"
+    FAILED=1
+fi
+
+assert_fail "--default routes through float compare (miss)" '{"a": 1}' 'missing' --float --default 0 --equals 1
+
 echo "=== zoom flow shape ==="
 OUT=$(printf '{"status": "ok", "data": {"isZoomed": false}}' | "$HELPER" 'data.isZoomed')
 assert_eq "zoom flow isZoomed false" "false" "$OUT"

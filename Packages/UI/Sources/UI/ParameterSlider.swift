@@ -16,6 +16,9 @@ struct ParameterSlider: View {
                 .font(.system(size: 11))
 
             Slider(value: $value, in: range, step: step)
+                .simultaneousGesture(
+                    TapGesture(count: 2).onEnded { onReset() }
+                )
 
             Text(formattedValue)
                 .frame(width: 50, alignment: .trailing)

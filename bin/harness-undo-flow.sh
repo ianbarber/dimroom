@@ -240,6 +240,55 @@ echo "  OK: delete undone, asset visible again"
 
 "$CLI_BIN" screenshot "$SCREENSHOT_DIR/undo-06-after-undo-delete.png" --socket "$SOCKET" >/dev/null
 
+# ------------------------------------------------------------------
+# 4. Develop view: edit → undo triggers slider animation to restored
+#    value. Asserts via get-edit that the catalog-backed state is back
+#    to identity; the screenshots capture the animated slider column.
+# ------------------------------------------------------------------
+
+# `set-edit-parameter` activates the Develop view for this asset
+# (no selected asset was propagated to Library → Develop), giving
+# the sliders something to bind to. It does not push onto the undo
+# stack — the subsequent `set-edit` handles that.
+echo "=== activate Develop on $ASSET_ID via set-edit-parameter ==="
+"$CLI_BIN" set-edit-parameter "$ASSET_ID" exposure 0 --socket "$SOCKET" >/dev/null
+
+sleep 1
+
+EXPOSURE_ON='{"exposure":1.0,"contrast":0,"highlights":0,"shadows":0,"whites":0,"blacks":0,"temperature":6500,"tint":0,"clarity":0,"vibrance":0,"saturation":0}'
+
+echo "=== set-edit exposure=+1.0 on $ASSET_ID ==="
+"$CLI_BIN" set-edit "$ASSET_ID" --json "$EXPOSURE_ON" --socket "$SOCKET" >/dev/null
+
+sleep 1
+
+POST_EDIT_EXPOSURE=$("$CLI_BIN" get-edit "$ASSET_ID" --socket "$SOCKET" \
+    | "$REPO_ROOT/bin/harness-json-extract" 'data.exposure')
+if [ "$POST_EDIT_EXPOSURE" != "1" ] && [ "$POST_EDIT_EXPOSURE" != "1.0" ]; then
+    echo "ERROR: expected exposure 1.0 after set-edit, got '$POST_EDIT_EXPOSURE'"
+    exit 1
+fi
+echo "  OK: exposure == $POST_EDIT_EXPOSURE"
+
+"$CLI_BIN" screenshot "$SCREENSHOT_DIR/undo-07-develop-after-edit.png" --socket "$SOCKET" >/dev/null
+
+echo "=== undo develop edit ==="
+"$CLI_BIN" undo --socket "$SOCKET" >/dev/null
+
+# Slider animation runs for ~0.25s; wait past that so the screenshot
+# captures the settled state (identity) rather than a mid-tween frame.
+sleep 1
+
+POST_UNDO_EXPOSURE=$("$CLI_BIN" get-edit "$ASSET_ID" --socket "$SOCKET" \
+    | "$REPO_ROOT/bin/harness-json-extract" 'data.exposure')
+if [ "$POST_UNDO_EXPOSURE" != "0" ] && [ "$POST_UNDO_EXPOSURE" != "0.0" ]; then
+    echo "ERROR: expected exposure 0 after undo, got '$POST_UNDO_EXPOSURE'"
+    exit 1
+fi
+echo "  OK: exposure restored to $POST_UNDO_EXPOSURE"
+
+"$CLI_BIN" screenshot "$SCREENSHOT_DIR/undo-08-develop-after-undo.png" --socket "$SOCKET" >/dev/null
+
 echo "=== quit ==="
 "$CLI_BIN" quit --socket "$SOCKET" 2>&1 || true
 

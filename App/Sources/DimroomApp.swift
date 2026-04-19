@@ -22,6 +22,7 @@ struct DimroomApp: App {
                 importCoordinator: appDelegate.importCoordinator,
                 exportCoordinator: appDelegate.exportCoordinator,
                 uploadCoordinator: appDelegate.uploadCoordinator,
+                undoStack: appDelegate.undoStack,
                 catalog: appDelegate.catalog
             )
         }
@@ -179,6 +180,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
                 catalog: resolvedCatalog,
                 libraryViewModel: libraryViewModel
             )
+            undoStack.attach(developViewModel: developViewModel)
             libraryViewModel.undoStack = undoStack
         }
 
@@ -230,6 +232,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
                     importCoordinator: importCoordinator,
                     exportCoordinator: exportCoordinator,
                     uploadCoordinator: uploadCoordinator,
+                    undoStack: undoStack,
                     catalog: resolvedCatalog
                 )
             )

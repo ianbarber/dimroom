@@ -12,6 +12,13 @@ import SwiftUI
 /// normalised space.
 public struct CropOverlayView: View {
     @ObservedObject var viewModel: CropViewModel
+    /// Pixel-space rect captured at the start of an active drag. Set on
+    /// the first `.onChanged` event and cleared in `.onEnded`. `body`
+    /// re-renders every time `viewModel.cropRect` updates, so without
+    /// this the gesture closure would re-capture the already-moved rect
+    /// on each frame and apply cumulative translation against a moving
+    /// base — making the rect accelerate away from the cursor.
+    @State private var dragStartRect: CGRect?
 
     public init(viewModel: CropViewModel) {
         self.viewModel = viewModel
@@ -89,7 +96,12 @@ public struct CropOverlayView: View {
             .gesture(
                 DragGesture(minimumDistance: 0)
                     .onChanged { value in
-                        translate(by: value.translation, from: cropPixels, imageSize: imageSize)
+                        let start = dragStartRect ?? cropPixels
+                        if dragStartRect == nil { dragStartRect = start }
+                        translate(by: value.translation, from: start, imageSize: imageSize)
+                    }
+                    .onEnded { _ in
+                        dragStartRect = nil
                     }
             )
     }
@@ -124,11 +136,13 @@ public struct CropOverlayView: View {
     ) -> some Gesture {
         DragGesture(minimumDistance: 0)
             .onChanged { value in
+                let start = dragStartRect ?? cropPixels
+                if dragStartRect == nil { dragStartRect = start }
                 let new = handle.apply(
                     translation: value.translation,
-                    to: cropPixels
+                    to: start
                 )
-                let anchor = handle.anchor(in: cropPixels)
+                let anchor = handle.anchor(in: start)
                 let anchorNorm = CGPoint(
                     x: anchor.x / imageSize.width,
                     y: anchor.y / imageSize.height
@@ -138,6 +152,9 @@ public struct CropOverlayView: View {
                     imageSize: imageSize
                 )
                 viewModel.updateRect(normalised, anchor: anchorNorm)
+            }
+            .onEnded { _ in
+                dragStartRect = nil
             }
     }
 
@@ -154,9 +171,11 @@ public struct CropOverlayView: View {
             rect: moved,
             imageSize: imageSize
         )
-        // Translation should never change the shape, so pass a nil
-        // aspect ratio anchor — `updateRect` will still clamp to bounds.
-        viewModel.updateRect(normalised, anchor: CGPoint(x: normalised.midX, y: normalised.midY))
+        // Translation must never change the rect's shape, so route
+        // through `translateRect` (clamp-only) rather than `updateRect`,
+        // which would re-apply the active aspect-ratio constraint and
+        // teleport the rect when the anchor lands at the midpoint.
+        viewModel.translateRect(normalised)
     }
 }
 

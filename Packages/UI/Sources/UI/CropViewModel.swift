@@ -70,6 +70,16 @@ public final class CropViewModel: ObservableObject {
         cropRect = clampToUnit(constrained)
     }
 
+    /// Translate the crop rect, clamping only to the 0…1 image bounds.
+    /// Unlike `updateRect`, this never re-applies the aspect-ratio
+    /// constraint — translation is shape-preserving by definition, and
+    /// routing it through `CropGeometry.constrain` with a midpoint anchor
+    /// would teleport the rect (the ratio branches tie and snap origin
+    /// to `anchor - targetSize`).
+    public func translateRect(_ rect: CGRect) {
+        cropRect = clampToUnit(rect)
+    }
+
     /// Set a new straighten angle. Clamped to -45…+45.
     public func setAngle(_ degrees: Double) {
         cropAngle = CropGeometry.clampAngle(degrees)

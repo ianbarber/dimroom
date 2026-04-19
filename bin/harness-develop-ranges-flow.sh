@@ -105,7 +105,9 @@ drive() {
     local param="$1"
     local value="$2"
     local set_out
-    set_out=$("$CLI_BIN" set-edit-parameter "$ASSET_ID" "$param" "$value" --socket "$SOCKET")
+    # --socket must precede the positional value or a negative value is parsed
+    # as a short flag by ArgumentParser.
+    set_out=$("$CLI_BIN" set-edit-parameter "$ASSET_ID" "$param" --socket "$SOCKET" -- "$value")
     if ! echo "$set_out" | grep -q '"ok"'; then
         echo "ERROR: set-edit-parameter $param $value did not return ok"
         echo "$set_out"

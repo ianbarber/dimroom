@@ -32,14 +32,7 @@ trap cleanup EXIT
 assert_json_field() {
     local label="$1" json="$2" field="$3" expected="$4"
     local actual
-    actual=$(printf '%s' "$json" | /usr/bin/python3 -c "
-import json, sys
-doc = json.loads(sys.stdin.read())
-node = doc
-for key in '$field'.split('.'):
-    node = node[key]
-print(node)
-")
+    actual=$(printf '%s' "$json" | "$REPO_ROOT/bin/harness-json-extract" "$field")
     if [ "$actual" != "$expected" ]; then
         echo "ERROR: $label — expected $field == $expected, got $actual"
         echo "Response: $json"
@@ -119,14 +112,12 @@ echo "  OK: fallback export produced $JPG_COUNT_ALL .jpg files"
 
 echo "=== Fetch asset list to pick a selection target ==="
 LIST_OUT=$("$CLI_BIN" list-assets --socket "$SOCKET")
-TARGET_ID=$(printf '%s' "$LIST_OUT" | /usr/bin/python3 -c "
-import json, sys
-doc = json.loads(sys.stdin.read())
-for item in doc['data']:
-    if item['originalFilename'] == 'IMG_0002.jpg':
-        print(item['id'])
-        break
-")
+# Zip parallel id/originalFilename streams from the same LIST_OUT so the
+# order lines up, then pick the id whose filename matches.
+TARGET_ID=$(paste \
+    <(printf '%s' "$LIST_OUT" | "$REPO_ROOT/bin/harness-json-extract" 'data[*].id') \
+    <(printf '%s' "$LIST_OUT" | "$REPO_ROOT/bin/harness-json-extract" 'data[*].originalFilename') \
+    | awk -F'\t' '$2 == "IMG_0002.jpg" { print $1; exit }')
 if [ -z "$TARGET_ID" ]; then
     echo "ERROR: could not find IMG_0002.jpg in list-assets output"
     echo "$LIST_OUT"

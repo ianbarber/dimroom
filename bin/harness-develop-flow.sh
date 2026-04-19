@@ -84,11 +84,7 @@ echo "=== navigate library ==="
 
 echo "=== list-assets — pick first asset id ==="
 LIST_OUT=$("$CLI_BIN" list-assets --socket "$SOCKET")
-ASSET_ID=$(printf '%s' "$LIST_OUT" | /usr/bin/python3 -c "
-import json, sys
-doc = json.loads(sys.stdin.read())
-print(doc['data'][0]['id'])
-")
+ASSET_ID=$(printf '%s' "$LIST_OUT" | "$REPO_ROOT/bin/harness-json-extract" 'data[0].id')
 if [ -z "$ASSET_ID" ]; then
     echo "ERROR: failed to extract asset id from list-assets"
     exit 1
@@ -123,6 +119,7 @@ sleep 1
 echo "=== get-edit $ASSET_ID — assert exposure == 2.0 ==="
 GET_OUT=$("$CLI_BIN" get-edit "$ASSET_ID" --socket "$SOCKET")
 echo "$GET_OUT"
+# TODO(#122): migrate once harness-json-extract supports --float/--epsilon.
 EXPOSURE=$(printf '%s' "$GET_OUT" | /usr/bin/python3 -c "
 import json, sys
 doc = json.loads(sys.stdin.read())

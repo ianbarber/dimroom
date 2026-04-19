@@ -89,28 +89,20 @@ sleep 1
 echo "=== list-assets — pick first asset id ==="
 LIST_OUT=$("$CLI_BIN" list-assets --socket "$SOCKET")
 echo "$LIST_OUT"
-ASSET_ID=$(printf '%s' "$LIST_OUT" | /usr/bin/python3 -c "
-import json, sys
-doc = json.loads(sys.stdin.read())
-print(doc['data'][0]['id'])
-")
+ASSET_ID=$(printf '%s' "$LIST_OUT" | "$REPO_ROOT/bin/harness-json-extract" 'data[0].id')
 if [ -z "$ASSET_ID" ]; then
     echo "ERROR: failed to extract asset id from list-assets response"
     exit 1
 fi
 echo "  Picked asset id: $ASSET_ID"
 
+# Callers pass ASSET_ID (== data[0].id), so index directly rather than
+# predicate-match. $id is ignored but kept for call-site readability.
 get_field() {
     local id="$1"
     local key="$2"
-    "$CLI_BIN" list-assets --socket "$SOCKET" | /usr/bin/python3 -c "
-import json, sys
-doc = json.loads(sys.stdin.read())
-for a in doc['data']:
-    if a['id'] == '$id':
-        print(a['$key'])
-        break
-"
+    "$CLI_BIN" list-assets --socket "$SOCKET" \
+        | "$REPO_ROOT/bin/harness-json-extract" "data[0].$key"
 }
 
 INITIAL_RATING=$(get_field "$ASSET_ID" rating)

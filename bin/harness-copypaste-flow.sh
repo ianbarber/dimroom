@@ -35,33 +35,17 @@ assert_json_field() {
     echo "  OK: $label — $field == $expected"
 }
 
-# JSON numbers don't round-trip through string comparison: Swift's JSONEncoder
-# writes Double(2.0) as the integer-looking `2`, Python parses it as int, and
-# str(2) != "2.0". Parse both sides as floats and compare with an epsilon.
 assert_json_number() {
     local label="$1" json="$2" field="$3" expected="$4"
-    local actual
-    actual=$(printf '%s' "$json" | /usr/bin/python3 -c "
-import json, sys
-doc = json.loads(sys.stdin.read())
-node = doc
-for key in '$field'.split('.'):
-    node = node[key]
-print(float(node))
-")
-    local matches
-    matches=$(/usr/bin/python3 -c "
-import sys
-a = float('$actual')
-b = float('$expected')
-print('yes' if abs(a - b) < 1e-9 else 'no')
-")
-    if [ "$matches" != "yes" ]; then
-        echo "ERROR: $label — expected $field == $expected, got $actual"
-        echo "Response: $json"
-        exit 1
+    if printf '%s' "$json" | "$REPO_ROOT/bin/harness-json-extract" "$field" --float --equals "$expected" --epsilon 1e-9; then
+        echo "  OK: $label — $field ≈ $expected"
+        return
     fi
-    echo "  OK: $label — $field ≈ $expected"
+    local actual
+    actual=$(printf '%s' "$json" | "$REPO_ROOT/bin/harness-json-extract" "$field" --float 2>/dev/null || echo '?')
+    echo "ERROR: $label — expected $field == $expected, got $actual"
+    echo "Response: $json"
+    exit 1
 }
 
 assert_json_field_absent() {

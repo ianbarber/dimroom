@@ -162,4 +162,126 @@ final class UndoStackTests: XCTestCase {
         // `apply` would immediately re-push and `canUndo` would never
         // flip to false.
     }
+
+    // MARK: - editSave apply writes catalog in both directions
+
+    @MainActor
+    func testUndoEditSaveWritesPreviousToCatalog() async throws {
+        let catalog = try CatalogDatabase.inMemory()
+        let asset = Asset(
+            contentHash: "edit-undo",
+            originalFilename: "t.jpg",
+            captureDate: nil,
+            importedDate: Date(),
+            sourceType: .digital,
+            width: 1, height: 1, bytes: 1
+        )
+        try catalog.insertAsset(asset)
+        let stack = UndoStack(catalog: catalog)
+
+        var previous = EditState()
+        previous.exposure = 1.0
+        var next = EditState()
+        next.exposure = 2.0
+        _ = try catalog.saveEditState(next, for: asset.id)
+
+        stack.push(.editSave(assetId: asset.id, previous: previous, next: next))
+        await stack.undo()
+
+        let latest = try catalog.latestEditState(for: asset.id)
+        XCTAssertEqual(latest?.exposure, 1.0, "undo must restore the previous state")
+    }
+
+    @MainActor
+    func testRedoEditSaveRewritesNextToCatalog() async throws {
+        let catalog = try CatalogDatabase.inMemory()
+        let asset = Asset(
+            contentHash: "edit-redo",
+            originalFilename: "t.jpg",
+            captureDate: nil,
+            importedDate: Date(),
+            sourceType: .digital,
+            width: 1, height: 1, bytes: 1
+        )
+        try catalog.insertAsset(asset)
+        let stack = UndoStack(catalog: catalog)
+
+        var previous = EditState()
+        previous.exposure = 1.0
+        var next = EditState()
+        next.exposure = 2.5
+
+        stack.push(.editSave(assetId: asset.id, previous: previous, next: next))
+        await stack.undo()
+        await stack.redo()
+
+        let latest = try catalog.latestEditState(for: asset.id)
+        XCTAssertEqual(latest?.exposure, 2.5, "redo must re-apply the forward state")
+    }
+
+    @MainActor
+    func testUndoEditSaveWithNilPreviousWritesIdentity() async throws {
+        let catalog = try CatalogDatabase.inMemory()
+        let asset = Asset(
+            contentHash: "edit-nil-prev",
+            originalFilename: "t.jpg",
+            captureDate: nil,
+            importedDate: Date(),
+            sourceType: .digital,
+            width: 1, height: 1, bytes: 1
+        )
+        try catalog.insertAsset(asset)
+        let stack = UndoStack(catalog: catalog)
+
+        var next = EditState()
+        next.exposure = 1.25
+        _ = try catalog.saveEditState(next, for: asset.id)
+
+        stack.push(.editSave(assetId: asset.id, previous: nil, next: next))
+        await stack.undo()
+
+        let latest = try catalog.latestEditState(for: asset.id)
+        XCTAssertEqual(
+            latest,
+            EditState(),
+            "undo with nil previous must restore the identity EditState"
+        )
+    }
+
+    // MARK: - Hydration from on-disk history
+
+    @MainActor
+    func testHydrateEditHistoryAppendsInOrderWithoutClearingRedo() async throws {
+        let stack = try makeStack()
+        // A rating undone → sitting on the redo stack. Hydration must
+        // not clobber it.
+        stack.push(.rating(assetId: sampleId, from: 0, to: 3))
+        await stack.undo()
+        XCTAssertTrue(stack.canRedo)
+
+        var v1 = EditState(); v1.exposure = 0.5
+        var v2 = EditState(); v2.exposure = 1.0
+        stack.hydrateEditHistory(pairs: [
+            (assetId: sampleId, previous: nil, next: v1),
+            (assetId: sampleId, previous: v1, next: v2),
+        ])
+
+        XCTAssertTrue(stack.canUndo, "hydrate must make canUndo true")
+        XCTAssertTrue(
+            stack.canRedo,
+            "hydrate must not clear the redo stack"
+        )
+        XCTAssertEqual(stack.undoDescription, "Edit")
+    }
+
+    @MainActor
+    func testHasEditSaveReflectsStackContents() throws {
+        let stack = try makeStack()
+        let other = UUID()
+        XCTAssertFalse(stack.hasEditSave(forAssetId: sampleId))
+
+        stack.push(.editSave(assetId: sampleId, previous: nil, next: EditState()))
+        XCTAssertTrue(stack.hasEditSave(forAssetId: sampleId))
+        XCTAssertFalse(stack.hasEditSave(forAssetId: other))
+    }
 }

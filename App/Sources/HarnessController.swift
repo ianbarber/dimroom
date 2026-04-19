@@ -547,7 +547,7 @@ final class HarnessController: @unchecked Sendable {
         height: Double,
         angle: Double
     ) async -> Response {
-        guard let catalog else {
+        guard catalog != nil else {
             return .error("catalog not loaded")
         }
 
@@ -566,15 +566,16 @@ final class HarnessController: @unchecked Sendable {
             await developViewModel.activate(assetId: assetId)
         }
 
-        let previous: EditState? = try? catalog.latestEditState(for: assetId)
         let normalisedRect = CGRect(x: x, y: y, width: width, height: height)
         let clampedAngle = CropGeometry.clampAngle(angle)
 
-        let nextState: EditState = await MainActor.run {
+        await MainActor.run {
             developViewModel.commitCrop(normalisedRect: normalisedRect, angle: clampedAngle)
-            return developViewModel.editState
         }
-        await recordEditUndo(assetId: assetId, previous: previous, next: nextState)
+        // The undo push is owned by DevelopViewModel.scheduleSave now,
+        // which debounces slider/crop mutations to one `.editSave` per
+        // save window. Pushing here as well would produce two undo
+        // entries per setCrop.
         return .ok()
     }
 

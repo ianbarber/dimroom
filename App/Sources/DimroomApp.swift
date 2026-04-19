@@ -179,7 +179,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
                 catalog: resolvedCatalog,
                 libraryViewModel: libraryViewModel
             )
+            undoStack.attach(developViewModel: developViewModel)
             libraryViewModel.undoStack = undoStack
+            developViewModel.attach(undoStack: undoStack)
         }
 
         let resolvedDriveClient = resolveDriveClient()

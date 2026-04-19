@@ -1,0 +1,174 @@
+#!/usr/bin/env python3
+"""
+harness-json-extract — shared JSON-path helper for harness flow scripts.
+
+Reads JSON on stdin, walks a small path DSL, prints the addressed value.
+Replaces inline `python3 -c` blocks in bin/harness-*-flow.sh so the
+extraction idiom lives in one place (see issue #115).
+
+Path DSL:
+    - keys separated by '.'          e.g. data.assetCount
+    - numeric indices in brackets    e.g. data[0].id
+    - '[*]' wildcard to iterate      e.g. data[*].id  (one line per element)
+    - keys may contain any character except '.', '[', ']'
+
+Flags:
+    --default VAL   If path is missing or resolves to null, print VAL and exit 0.
+                    Without this, a missing path exits non-zero with a message.
+    --length        Path must resolve to a list; print len(list).
+    --iter          Path must resolve to a list; print one element per line.
+                    Redundant with '[*]' in the path (either form works).
+    --absent        Print 'absent' if the path is missing or null, else 'present'.
+
+Booleans are emitted lowercase ('true' / 'false') to match JSON — callers
+that compare against 'True' / 'False' must be updated at the same time.
+"""
+import argparse
+import json
+import re
+import sys
+
+
+PATH_TOKEN_RE = re.compile(r'[^.\[\]]+')
+
+
+def parse_path(path):
+    tokens = []
+    i = 0
+    n = len(path)
+    while i < n:
+        c = path[i]
+        if c == '.':
+            i += 1
+            continue
+        if c == '[':
+            end = path.find(']', i)
+            if end < 0:
+                raise ValueError(f"unterminated '[' in path: {path!r}")
+            inner = path[i + 1:end]
+            if inner == '*':
+                tokens.append(('wildcard',))
+            else:
+                try:
+                    tokens.append(('index', int(inner)))
+                except ValueError:
+                    raise ValueError(f"bad index {inner!r} in path: {path!r}")
+            i = end + 1
+            continue
+        m = PATH_TOKEN_RE.match(path, i)
+        if not m:
+            raise ValueError(f"bad path near {path[i:]!r} in {path!r}")
+        tokens.append(('key', m.group(0)))
+        i = m.end()
+    return tokens
+
+
+def walk(node, tokens):
+    """Walk tokens. Returns list of resolved values (length > 1 only if wildcard used)."""
+    results = [node]
+    for tok in tokens:
+        kind = tok[0]
+        nxt = []
+        for cur in results:
+            if kind == 'key':
+                key = tok[1]
+                if not isinstance(cur, dict) or key not in cur:
+                    raise KeyError(f"key {key!r} missing")
+                nxt.append(cur[key])
+            elif kind == 'index':
+                idx = tok[1]
+                if not isinstance(cur, list) or idx >= len(cur) or idx < -len(cur):
+                    raise KeyError(f"index {idx} out of range")
+                nxt.append(cur[idx])
+            elif kind == 'wildcard':
+                if not isinstance(cur, list):
+                    raise KeyError("wildcard '[*]' requires a list")
+                nxt.extend(cur)
+        results = nxt
+    return results
+
+
+def format_scalar(v):
+    if isinstance(v, bool):
+        return 'true' if v else 'false'
+    if v is None:
+        return ''
+    return str(v)
+
+
+def has_wildcard(tokens):
+    return any(t[0] == 'wildcard' for t in tokens)
+
+
+def main():
+    p = argparse.ArgumentParser(add_help=True)
+    p.add_argument('path')
+    grp = p.add_mutually_exclusive_group()
+    grp.add_argument('--length', action='store_true')
+    grp.add_argument('--iter', action='store_true', dest='iter_')
+    grp.add_argument('--absent', action='store_true')
+    p.add_argument('--default', dest='default', default=None)
+    args = p.parse_args()
+
+    raw = sys.stdin.read()
+    try:
+        doc = json.loads(raw)
+    except json.JSONDecodeError as e:
+        print(f"harness-json-extract: invalid JSON on stdin: {e}", file=sys.stderr)
+        sys.exit(2)
+
+    try:
+        tokens = parse_path(args.path)
+    except ValueError as e:
+        print(f"harness-json-extract: {e}", file=sys.stderr)
+        sys.exit(2)
+
+    wildcard = has_wildcard(tokens)
+
+    try:
+        values = walk(doc, tokens)
+    except KeyError as e:
+        if args.absent:
+            print('absent')
+            return
+        if args.default is not None:
+            print(args.default)
+            return
+        print(f"harness-json-extract: path {args.path!r} not found: {e}", file=sys.stderr)
+        sys.exit(3)
+
+    # wildcard always produces a list of results; otherwise values has length 1
+    if not wildcard:
+        node = values[0]
+        if args.absent:
+            print('absent' if node is None else 'present')
+            return
+        if args.length:
+            if not isinstance(node, list):
+                print(f"harness-json-extract: path {args.path!r} is not a list", file=sys.stderr)
+                sys.exit(4)
+            print(len(node))
+            return
+        if args.iter_:
+            if not isinstance(node, list):
+                print(f"harness-json-extract: path {args.path!r} is not a list", file=sys.stderr)
+                sys.exit(4)
+            for item in node:
+                print(format_scalar(item))
+            return
+        if node is None and args.default is not None:
+            print(args.default)
+            return
+        print(format_scalar(node))
+        return
+
+    # wildcard path
+    if args.length or args.absent:
+        print("harness-json-extract: --length / --absent are incompatible with '[*]'", file=sys.stderr)
+        sys.exit(2)
+    for v in values:
+        print(format_scalar(v))
+
+
+if __name__ == '__main__':
+    main()

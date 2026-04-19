@@ -113,11 +113,7 @@ echo "Screenshot verified: $FILE_TYPE"
 echo "=== state — assert assetCount > 0 ==="
 STATE_OUT=$("$CLI_BIN" state --socket "$SOCKET")
 echo "$STATE_OUT"
-ASSET_COUNT=$(printf '%s' "$STATE_OUT" | /usr/bin/python3 -c "
-import json, sys
-doc = json.loads(sys.stdin.read())
-print(doc['data']['assetCount'])
-")
+ASSET_COUNT=$(printf '%s' "$STATE_OUT" | "$REPO_ROOT/bin/harness-json-extract" 'data.assetCount')
 if [ -z "$ASSET_COUNT" ] || [ "$ASSET_COUNT" -le 0 ]; then
     echo "ERROR: expected assetCount > 0, got '$ASSET_COUNT'"
     exit 1
@@ -127,11 +123,7 @@ echo "  OK: assetCount == $ASSET_COUNT"
 echo "=== list-assets — grab first UUID ==="
 LIST_OUT=$("$CLI_BIN" list-assets --socket "$SOCKET")
 echo "$LIST_OUT"
-FIRST_UUID=$(printf '%s' "$LIST_OUT" | /usr/bin/python3 -c "
-import json, sys
-doc = json.loads(sys.stdin.read())
-print(doc['data'][0]['id'])
-")
+FIRST_UUID=$(printf '%s' "$LIST_OUT" | "$REPO_ROOT/bin/harness-json-extract" 'data[0].id')
 if [ -z "$FIRST_UUID" ]; then
     echo "ERROR: could not extract first asset UUID"
     exit 1

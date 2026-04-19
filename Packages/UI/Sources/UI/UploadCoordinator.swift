@@ -56,8 +56,12 @@ public final class UploadCoordinator: ObservableObject {
 
         for asset in assets {
             guard let localPath = asset.localPath else {
-                currentItem += 1
-                continue
+                // Originally silently skipped — that made the harness
+                // `uploadToDrive` command return `uploaded: 0, skipped: 0`
+                // with no error, leaving callers guessing. Surface the
+                // planned `missingLocalFile` so the failure is visible.
+                phase = .failed(Self.message(for: DriveUploadError.missingLocalFile(asset.id)))
+                return
             }
             let ref = DriveAssetRef(
                 assetId: asset.id,

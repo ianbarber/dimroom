@@ -83,7 +83,7 @@ final class UploadCoordinatorTests: XCTestCase {
     }
 
     @MainActor
-    func testMissingLocalPathIsSkippedWithoutUpload() async throws {
+    func testMissingLocalPathSurfacesFailedPhase() async throws {
         let catalog = try makeCatalog()
         let asset = makeSampleAsset(localPath: nil)
         try catalog.insertAsset(asset)
@@ -92,8 +92,13 @@ final class UploadCoordinatorTests: XCTestCase {
         let coordinator = UploadCoordinator()
         await coordinator.run(assets: [asset], catalog: catalog, uploader: uploader)
 
-        // Both counters stay zero; uploader never invoked; phase done.
-        XCTAssertEqual(coordinator.phase, .done(uploadedCount: 0, skippedCount: 0))
+        // Uploader must not be invoked — but the caller needs a visible
+        // signal rather than a silent `done(0, 0)`.
+        if case .failed(let message) = coordinator.phase {
+            XCTAssertTrue(message.contains("missing"), "got: \(message)")
+        } else {
+            XCTFail("expected .failed, got \(coordinator.phase)")
+        }
         XCTAssertEqual(uploader.callCount, 0)
     }
 

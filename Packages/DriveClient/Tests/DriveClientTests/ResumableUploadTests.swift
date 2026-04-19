@@ -125,6 +125,109 @@ final class ResumableUploadTests: XCTestCase {
         }
     }
 
+    func testChunkPersistent5xxSurfacesRetryBudgetExhausted() async throws {
+        let fixture = try writeFixture(bytes: Array(repeating: UInt8(9), count: 500))
+        defer { try? FileManager.default.removeItem(at: fixture) }
+
+        let http = RoutingStubHTTPClient()
+        http.route(
+            method: "POST",
+            urlContains: "uploadType=resumable",
+            response: .init(
+                status: 200,
+                body: Data(),
+                headers: ["Location": "https://upload.example/s-stuck"]
+            )
+        )
+        // Enough 500s to exhaust a 3-attempt budget twice over; sendWithRetry
+        // should exhaust the budget on the first chunk and abort without
+        // consuming more responses than `maxAttempts`.
+        http.route(
+            method: "PUT",
+            urlContains: "s-stuck",
+            responses: Array(repeating: .init(status: 500), count: 10)
+        )
+
+        let clock = RecordingClock()
+        let session = AuthorizedSession(client: http, provider: StubTokenProvider(accessTokens: ["t"]))
+        do {
+            _ = try await ResumableUpload.upload(
+                metadata: .init(name: "x.jpg", parents: ["f"], mimeType: "image/jpeg", appProperties: [:]),
+                fileURL: fixture,
+                totalBytes: 500,
+                session: session,
+                retryPolicy: RetryPolicy(maxAttempts: 3, baseDelay: .milliseconds(10), maxDelay: .seconds(1)),
+                clock: clock,
+                chunkSize: 500,
+                progress: { _, _ in }
+            )
+            XCTFail("expected retryBudgetExhausted")
+        } catch DriveUploadError.retryBudgetExhausted {
+            // expected
+        } catch {
+            XCTFail("unexpected error \(error)")
+        }
+
+        // sendWithRetry makes exactly `maxAttempts` PUTs for the single chunk.
+        let puts = http.requestsMatching(method: "PUT", urlContains: "s-stuck")
+        XCTAssertEqual(puts.count, 3)
+        // Backoff schedule grows per attempt — 1 × base, 2 × base (the last
+        // attempt throws before sleeping again). Guards against the old bug
+        // where `forAttempt: 1` was hard-coded.
+        XCTAssertEqual(clock.recordedDelays, [.milliseconds(10), .milliseconds(20)])
+    }
+
+    func testRepeated308WithoutRangeSurfacesRetryBudgetExhausted() async throws {
+        let fixture = try writeFixture(bytes: Array(repeating: UInt8(3), count: 500))
+        defer { try? FileManager.default.removeItem(at: fixture) }
+
+        let http = RoutingStubHTTPClient()
+        http.route(
+            method: "POST",
+            urlContains: "uploadType=resumable",
+            response: .init(
+                status: 200,
+                body: Data(),
+                headers: ["Location": "https://upload.example/s-noack"]
+            )
+        )
+        // 308 with no `Range` header = server acknowledges nothing. Without
+        // the no-progress counter the old code spun here forever.
+        http.route(
+            method: "PUT",
+            urlContains: "s-noack",
+            responses: Array(repeating: .init(status: 308), count: 10)
+        )
+
+        let clock = RecordingClock()
+        let session = AuthorizedSession(client: http, provider: StubTokenProvider(accessTokens: ["t"]))
+        do {
+            _ = try await ResumableUpload.upload(
+                metadata: .init(name: "y.jpg", parents: ["f"], mimeType: "image/jpeg", appProperties: [:]),
+                fileURL: fixture,
+                totalBytes: 500,
+                session: session,
+                retryPolicy: RetryPolicy(maxAttempts: 3, baseDelay: .milliseconds(10), maxDelay: .seconds(1)),
+                clock: clock,
+                chunkSize: 500,
+                progress: { _, _ in }
+            )
+            XCTFail("expected retryBudgetExhausted")
+        } catch DriveUploadError.retryBudgetExhausted {
+            // expected
+        } catch {
+            XCTFail("unexpected error \(error)")
+        }
+
+        // Each round trip is one PUT; the loop gives up after `maxAttempts`
+        // consecutive no-progress responses.
+        let puts = http.requestsMatching(method: "PUT", urlContains: "s-noack")
+        XCTAssertEqual(puts.count, 3)
+        // Two backoff sleeps (after attempts 1 and 2); the third attempt
+        // throws without sleeping.
+        XCTAssertEqual(clock.recordedDelays, [.milliseconds(10), .milliseconds(20)])
+    }
+
     // MARK: - helpers
 
     private func writeFixture(bytes: [UInt8]) throws -> URL {
@@ -134,5 +237,39 @@ final class ResumableUploadTests: XCTestCase {
         let url = dir.appendingPathComponent("fixture.bin")
         try Data(bytes).write(to: url)
         return url
+    }
+}
+
+/// Records the durations passed to `sleep(for:)` without actually sleeping.
+/// Lets the retry tests verify backoff grows per attempt rather than being
+/// pinned to `forAttempt: 1`.
+///
+/// Records via the underlying `sleep(until:tolerance:)` entry point since
+/// the `sleep(for:)` convenience on `Clock` ultimately routes through it.
+final class RecordingClock: Clock, @unchecked Sendable {
+    typealias Duration = Swift.Duration
+    typealias Instant = ContinuousClock.Instant
+
+    private let lock = NSLock()
+    private var delays: [Duration] = []
+    private let fixedNow: Instant
+
+    init() {
+        self.fixedNow = ContinuousClock().now
+    }
+
+    var recordedDelays: [Duration] {
+        lock.lock(); defer { lock.unlock() }
+        return delays
+    }
+
+    var now: Instant { fixedNow }
+    var minimumResolution: Duration { .nanoseconds(1) }
+
+    func sleep(until deadline: Instant, tolerance: Duration?) async throws {
+        let delta = fixedNow.duration(to: deadline)
+        lock.lock()
+        delays.append(delta)
+        lock.unlock()
     }
 }

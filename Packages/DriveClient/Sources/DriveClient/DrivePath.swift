@@ -34,6 +34,12 @@ public enum DrivePath {
 
     /// Full folder chain from the Drive root, e.g.
     /// `["PhotoTool", "library", "2024", "2024-06-14", "digital"]`.
+    ///
+    /// Uses `captureDate` when available, falling back to `importedDate`.
+    /// The rationale: users organise by shoot date, so a 2024 photo
+    /// imported today belongs under `2024/…`, not under the import day.
+    /// Assets without EXIF capture data (e.g. film scans with no embedded
+    /// timestamp) still land somewhere predictable via `importedDate`.
     public static func libraryFolderSegments(
         captureDate: Date?,
         importedDate: Date,

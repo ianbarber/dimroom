@@ -120,6 +120,10 @@ enum ResumableUpload {
         defer { try? handle.close() }
 
         var nextByte: Int64 = 0
+        // Counts consecutive 308 responses that didn't move `nextByte`
+        // forward. Bounds the "server keeps 308ing without ack" path so it
+        // can't spin forever.
+        var noProgressAttempts = 0
         while nextByte < totalBytes {
             try handle.seek(toOffset: UInt64(nextByte))
             let remaining = totalBytes - nextByte
@@ -138,8 +142,19 @@ enum ResumableUpload {
                 mimeType: metadata.mimeType
             )
 
-            let (data, response) = try await session.data(for: request)
-            let status = response.statusCode
+            // `sendWithRetry` handles 5xx / 429 / quota-flavoured 403 /
+            // transient URLErrors with the full retry budget and
+            // exponential backoff; on exhaustion it throws
+            // `retryBudgetExhausted`. Non-retryable status codes come back
+            // as a normal result and we branch on them below.
+            let result = try await sendWithRetry(
+                request: request,
+                session: session,
+                retryPolicy: retryPolicy,
+                clock: clock
+            )
+            let status = result.response.statusCode
+            let data = result.data
 
             if (200..<300).contains(status) {
                 // Server signals completion. Decode the file ID.
@@ -148,18 +163,23 @@ enum ResumableUpload {
                 return decoded.id
             }
             if status == 308 {
-                // Partial ack — advance past the last acknowledged byte.
-                if let ack = parseRangeAck(response.value(forHTTPHeaderField: "Range")) {
+                let previousByte = nextByte
+                if let ack = parseRangeAck(result.response.value(forHTTPHeaderField: "Range")) {
                     nextByte = ack + 1
                 }
-                // No Range header → server has nothing yet; leave nextByte
-                // where it is so we retry the same chunk.
+                if nextByte == previousByte {
+                    // Server acknowledged nothing — no Range header or the
+                    // header pointed at the same byte. Bound the retries so
+                    // a stuck session can't hot-loop.
+                    noProgressAttempts += 1
+                    if noProgressAttempts >= retryPolicy.maxAttempts {
+                        throw DriveUploadError.retryBudgetExhausted
+                    }
+                    try? await clock.sleep(for: retryPolicy.delay(forAttempt: noProgressAttempts))
+                } else {
+                    noProgressAttempts = 0
+                }
                 progress(nextByte, totalBytes)
-                continue
-            }
-            if status >= 500 || status == 429 {
-                // Transient — back off and retry this chunk.
-                try? await clock.sleep(for: retryPolicy.delay(forAttempt: 1))
                 continue
             }
             if status == 404 || status == 410 {

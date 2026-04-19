@@ -24,6 +24,16 @@ concurrency:
   cancel-in-progress: true
 
 jobs:
+  bash-tests:
+    name: bash helper tests
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Install jq
+        run: sudo apt-get update && sudo apt-get install -y jq
+      - name: Run bash tests
+        run: bin/tests/run.sh
+
   swift-test:
     name: swift test (Packages)
     runs-on: macos-14

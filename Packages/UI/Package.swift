@@ -14,6 +14,7 @@ let package = Package(
         .package(path: "../ImportKit"),
         .package(path: "../Previews"),
         .package(path: "../TestSupport"),
+        .package(url: "https://github.com/nalexn/ViewInspector", exact: "0.10.0"),
     ],
     targets: [
         .target(
@@ -34,6 +35,7 @@ let package = Package(
                 .product(name: "ImportKit", package: "ImportKit"),
                 .product(name: "Previews", package: "Previews"),
                 .product(name: "TestSupport", package: "TestSupport"),
+                .product(name: "ViewInspector", package: "ViewInspector"),
             ],
             exclude: ["__Snapshots__"],
             resources: [

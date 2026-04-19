@@ -477,13 +477,7 @@ public final class LibraryViewModel: ObservableObject {
     /// guarantee the original is present, so rotation must not require
     /// it to succeed.
     public func rotate(assetId: UUID, clockwise: Bool = true) async {
-        let assets: [Asset]
-        do {
-            assets = try catalog.fetchAssets(filter: AssetFilter(includeDeleted: true))
-        } catch {
-            return
-        }
-        guard let asset = assets.first(where: { $0.id == assetId }) else {
+        guard let asset = try? catalog.fetchAsset(id: assetId) else {
             return
         }
         let newRotation: Int
@@ -508,13 +502,7 @@ public final class LibraryViewModel: ObservableObject {
     /// forward entrypoint) and the undo stack (which needs to replay
     /// rotations at absolute values, not deltas).
     public func applyRotation(assetId: UUID, to rotation: Int) async {
-        let assets: [Asset]
-        do {
-            assets = try catalog.fetchAssets(filter: AssetFilter(includeDeleted: true))
-        } catch {
-            return
-        }
-        guard let asset = assets.first(where: { $0.id == assetId }) else {
+        guard let asset = try? catalog.fetchAsset(id: assetId) else {
             return
         }
         do {

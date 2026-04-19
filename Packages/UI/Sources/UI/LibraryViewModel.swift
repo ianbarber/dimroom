@@ -361,6 +361,7 @@ public final class LibraryViewModel: ObservableObject {
         select(nil)
         await reloadAndWait()
         showUndoToast(for: deleted)
+        undoStack?.push(.softDelete(assetIds: deleted))
     }
 
     /// Clear `deletedAt` on the given ids and reload. Unlike

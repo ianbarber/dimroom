@@ -199,6 +199,55 @@ echo "  OK: rotation restored to $INITIAL_ROTATION"
 
 "$CLI_BIN" screenshot "$SCREENSHOT_DIR/undo-04-after-undo-rotate.png" --socket "$SOCKET" >/dev/null
 
+# ------------------------------------------------------------------
+# 3. Delete a second asset → assert gone → undo → assert restored
+# ------------------------------------------------------------------
+
+echo "=== pick second asset id for delete/undo ==="
+DELETE_ID=$(printf '%s' "$LIST_OUT" | /usr/bin/python3 -c "
+import json, sys
+doc = json.loads(sys.stdin.read())
+print(doc['data'][1]['id'])
+")
+if [ -z "$DELETE_ID" ] || [ "$DELETE_ID" = "$ASSET_ID" ]; then
+    echo "ERROR: failed to extract distinct second asset id"
+    exit 1
+fi
+echo "  Picked delete target: $DELETE_ID"
+
+contains_id() {
+    local id="$1"
+    "$CLI_BIN" list-assets --socket "$SOCKET" | /usr/bin/python3 -c "
+import json, sys
+doc = json.loads(sys.stdin.read())
+print('yes' if any(a['id'] == '$id' for a in doc['data']) else 'no')
+"
+}
+
+echo "=== delete-assets $DELETE_ID ==="
+"$CLI_BIN" delete-assets "$DELETE_ID" --socket "$SOCKET" >/dev/null
+
+POST_DELETE=$(contains_id "$DELETE_ID")
+if [ "$POST_DELETE" != "no" ]; then
+    echo "ERROR: expected asset $DELETE_ID gone after delete, still present"
+    exit 1
+fi
+echo "  OK: asset soft-deleted"
+
+"$CLI_BIN" screenshot "$SCREENSHOT_DIR/undo-05-after-delete.png" --socket "$SOCKET" >/dev/null
+
+echo "=== undo delete ==="
+"$CLI_BIN" undo --socket "$SOCKET" >/dev/null
+
+POST_UNDO_DELETE=$(contains_id "$DELETE_ID")
+if [ "$POST_UNDO_DELETE" != "yes" ]; then
+    echo "ERROR: expected asset $DELETE_ID back after undo, still missing"
+    exit 1
+fi
+echo "  OK: delete undone, asset visible again"
+
+"$CLI_BIN" screenshot "$SCREENSHOT_DIR/undo-06-after-undo-delete.png" --socket "$SOCKET" >/dev/null
+
 echo "=== quit ==="
 "$CLI_BIN" quit --socket "$SOCKET" 2>&1 || true
 

@@ -166,6 +166,71 @@ final class DeleteUndoTests: XCTestCase {
         XCTAssertNil(vm.primarySelectedAssetId)
     }
 
+    // MARK: - Cmd+Z undo via stack
+
+    @MainActor
+    func testUndoAfterDeleteRestoresSingleAsset() async throws {
+        let (vm, ids) = try await makeViewModel(count: 1)
+        let stack = UndoStack(catalog: catalog(for: vm), libraryViewModel: vm)
+        vm.undoStack = stack
+
+        await vm.deleteAssets(ids: [ids[0]])
+        XCTAssertTrue(vm.rows.isEmpty)
+        XCTAssertTrue(stack.canUndo)
+
+        await stack.undo()
+
+        XCTAssertEqual(vm.rows.count, 1)
+        XCTAssertEqual(vm.rows.first?.id, ids[0])
+        XCTAssertFalse(stack.canUndo)
+        XCTAssertTrue(stack.canRedo)
+    }
+
+    @MainActor
+    func testUndoAfterBatchDeleteRestoresAllInOneFrame() async throws {
+        let (vm, ids) = try await makeViewModel(count: 3)
+        let stack = UndoStack(catalog: catalog(for: vm), libraryViewModel: vm)
+        vm.undoStack = stack
+
+        await vm.deleteAssets(ids: [ids[0], ids[1], ids[2]])
+        XCTAssertTrue(vm.rows.isEmpty)
+        XCTAssertTrue(stack.canUndo)
+
+        await stack.undo()
+
+        XCTAssertEqual(Set(vm.rows.map(\.id)), Set(ids))
+        XCTAssertFalse(stack.canUndo, "batch delete pushes a single frame")
+    }
+
+    @MainActor
+    func testRedoAfterUndoOfDeleteReappliesSoftDelete() async throws {
+        let (vm, ids) = try await makeViewModel(count: 2)
+        let stack = UndoStack(catalog: catalog(for: vm), libraryViewModel: vm)
+        vm.undoStack = stack
+
+        await vm.deleteAssets(ids: [ids[0], ids[1]])
+        await stack.undo()
+        XCTAssertEqual(vm.rows.count, 2)
+
+        await stack.redo()
+
+        XCTAssertTrue(vm.rows.isEmpty)
+        XCTAssertTrue(stack.canUndo)
+        XCTAssertFalse(stack.canRedo)
+    }
+
+    @MainActor
+    func testDeleteFollowedByUndoLeavesNoReplayFrame() async throws {
+        let (vm, ids) = try await makeViewModel(count: 1)
+        let stack = UndoStack(catalog: catalog(for: vm), libraryViewModel: vm)
+        vm.undoStack = stack
+
+        await vm.deleteAssets(ids: [ids[0]])
+        await stack.undo()
+
+        XCTAssertFalse(stack.canUndo, "reverse apply must not re-push")
+    }
+
     // MARK: - Helpers
 
     @MainActor

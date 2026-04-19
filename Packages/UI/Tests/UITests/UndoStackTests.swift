@@ -47,7 +47,7 @@ final class UndoStackTests: XCTestCase {
     }
 
     func testSoftDeleteDescription() {
-        let action = UndoAction.softDelete(assetId: sampleId)
+        let action = UndoAction.softDelete(assetIds: [sampleId])
         XCTAssertEqual(action.description, "Delete")
     }
 

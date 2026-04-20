@@ -15,12 +15,24 @@ public enum UploadOutcome: Sendable, Equatable {
 /// tests can swap them for canned responses, and the live
 /// `resolveDriveClient()` wiring in the app just composes them.
 public actor DriveUploader {
+    /// Controls how broadly `DriveUploader` looks for an existing file
+    /// with the same `contentHash` before uploading. `.library` queries
+    /// the whole Drive (the default, per #139: re-imports under a
+    /// different capture date still dedup); `.folder` keeps the old
+    /// per-daily-folder query and exists as a code-level rollback if the
+    /// wider query proves flaky in practice.
+    public enum DedupScope: Sendable {
+        case library
+        case folder
+    }
+
     private let session: AuthorizedSession
     private let folderResolver: DriveFolderResolver
     private let retryPolicy: RetryPolicy
     private let clock: any Clock<Duration>
     private let simpleUploadThreshold: Int64
     private let resumableChunkSize: Int
+    private let dedupScope: DedupScope
 
     public init(
         session: AuthorizedSession,
@@ -28,7 +40,8 @@ public actor DriveUploader {
         retryPolicy: RetryPolicy = .default,
         clock: any Clock<Duration> = ContinuousClock(),
         simpleUploadThreshold: Int64 = 5 * 1024 * 1024,
-        resumableChunkSize: Int = 8 * 1024 * 1024
+        resumableChunkSize: Int = 8 * 1024 * 1024,
+        dedupScope: DedupScope = .library
     ) {
         self.session = session
         self.folderResolver = folderResolver
@@ -36,6 +49,7 @@ public actor DriveUploader {
         self.clock = clock
         self.simpleUploadThreshold = simpleUploadThreshold
         self.resumableChunkSize = resumableChunkSize
+        self.dedupScope = dedupScope
     }
 
     public func upload(
@@ -52,9 +66,6 @@ public actor DriveUploader {
         )
         let folderId = try await folderResolver.resolve(segments: segments)
 
-        // Dedup — any existing file in the folder with the same
-        // contentHash is reused. Issue-scoped to one folder for now; a
-        // library-wide lookup is tracked as a follow-up.
         if let existing = try await findExisting(contentHash: ref.contentHash, folderId: folderId) {
             return .skippedDuplicate(fileID: existing)
         }
@@ -103,10 +114,16 @@ public actor DriveUploader {
     }
 
     private func findExisting(contentHash: String, folderId: String) async throws -> String? {
-        let request = DriveFilesAPI.findByContentHashRequest(
-            contentHash: contentHash,
-            parentId: folderId
-        )
+        let request: URLRequest
+        switch dedupScope {
+        case .library:
+            request = DriveFilesAPI.findByContentHashAnywhereRequest(contentHash: contentHash)
+        case .folder:
+            request = DriveFilesAPI.findByContentHashRequest(
+                contentHash: contentHash,
+                parentId: folderId
+            )
+        }
         let result = try await sendWithRetry(
             request: request,
             session: session,

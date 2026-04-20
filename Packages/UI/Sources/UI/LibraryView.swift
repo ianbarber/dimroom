@@ -99,10 +99,30 @@ public struct LibraryView: View {
             .labelsHidden()
             .frame(maxWidth: 320)
             Spacer()
+            deleteButton
         }
         .padding(.horizontal, 12)
         .padding(.vertical, 8)
         .background(Color(white: 0.12))
+    }
+
+    /// Trash icon wired to the same `pendingDeleteCount` binding the
+    /// menu shortcut uses, so the confirmation dialog path is
+    /// identical regardless of how the user triggered it. Disabled
+    /// — not hidden — when nothing is selected so users learn where
+    /// the control lives before they have a selection.
+    private var deleteButton: some View {
+        Button {
+            let count = viewModel.selectedAssetIds.count
+            guard count > 0 else { return }
+            pendingDeleteCount = count
+        } label: {
+            Image(systemName: "trash")
+        }
+        .buttonStyle(.borderless)
+        .help("Delete Selected")
+        .accessibilityLabel("Delete Selected")
+        .disabled(viewModel.selectedAssetIds.isEmpty)
     }
 
     /// Bridge the view model's `setMinRating(_:)` async entry point into

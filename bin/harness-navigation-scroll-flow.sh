@@ -102,12 +102,21 @@ if [ "$ASSET_COUNT" -lt 16 ]; then
 fi
 
 echo "=== select newest asset (top of grid) ==="
-# `list-assets` returns catalog insertion order; the grid sorts rows
-# newest-first by capture date. The seeder gives later-inserted assets
-# the newer captureDate, so the LAST id from list-assets is rows[0].
-# We start from the top of the grid so select-down has room to walk
-# the selection off-screen.
-NEWEST_ID="${ASSET_IDS[$((ASSET_COUNT-1))]}"
+# `list-assets` returns rows in grid order (captureDate desc) per #120,
+# so ASSET_IDS[0] is the top-of-grid asset. Starting from the top gives
+# select-down room to walk the selection off-screen.
+#
+# Regression guard: the seed fixture gives 03.jpg the newest capture
+# date, so it must come first. Catches accidental reverts of the #120
+# sort with a clear message rather than "step N did not move selection".
+FIRST_FILENAME=$(printf '%s' "$LIST_OUT" | "$REPO_ROOT/bin/harness-json-extract" 'data[0].originalFilename')
+if [ "$FIRST_FILENAME" != "03.jpg" ]; then
+    echo "ERROR: expected first list-assets row to be 03.jpg (newest captureDate), got '$FIRST_FILENAME'"
+    exit 1
+fi
+echo "  OK: first row is 03.jpg (grid order preserved)"
+
+NEWEST_ID="${ASSET_IDS[0]}"
 SEL_OUT=$("$CLI_BIN" select-asset "$NEWEST_ID" --socket "$SOCKET")
 if ! echo "$SEL_OUT" | grep -q '"ok"'; then
     echo "ERROR: select-asset did not return ok"

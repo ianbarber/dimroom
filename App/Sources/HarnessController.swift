@@ -82,6 +82,10 @@ final class HarnessController: @unchecked Sendable {
                 case .session: kind = "session"
                 case .recentlyDeleted: kind = "recentlyDeleted"
                 }
+                var progressByString: [String: Double] = [:]
+                for (id, value) in libraryViewModel.downloadProgressByAssetId {
+                    progressByString[id.uuidString] = value
+                }
                 return AppState(
                     route: router.route,
                     assetCount: libraryViewModel.rows.count,
@@ -91,7 +95,9 @@ final class HarnessController: @unchecked Sendable {
                     scopeKind: kind,
                     selectedAssetIds: Array(libraryViewModel.selectedAssetIds),
                     isZoomed: libraryViewModel.isZoomed,
-                    hasUndoToast: libraryViewModel.undoToast != nil
+                    hasUndoToast: libraryViewModel.undoToast != nil,
+                    downloadingAssetIds: Array(libraryViewModel.downloadingAssetIds),
+                    downloadProgressByAssetId: progressByString
                 )
             }
             let encoder = JSONEncoder()
@@ -412,6 +418,12 @@ final class HarnessController: @unchecked Sendable {
                 } else {
                     captureDate = .null
                 }
+                let driveFileId: AnyCodableValue
+                if let id = asset.driveFileId {
+                    driveFileId = .string(id)
+                } else {
+                    driveFileId = .null
+                }
                 return .dictionary([
                     "id": .string(asset.id.uuidString),
                     "originalFilename": .string(asset.originalFilename),
@@ -419,6 +431,7 @@ final class HarnessController: @unchecked Sendable {
                     "rating": .int(asset.rating),
                     "rotation": .int(asset.rotation),
                     "sourceType": .string(asset.sourceType.rawValue),
+                    "driveFileId": driveFileId,
                 ])
             }
             return .ok(data: .array(array))

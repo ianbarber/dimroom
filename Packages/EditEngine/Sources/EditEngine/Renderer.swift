@@ -65,18 +65,20 @@ public enum Renderer {
         guard whites != 0 || blacks != 0 else { return image }
         let filter = CIFilter(name: "CIToneCurve")!
         filter.setValue(image, forKey: kCIInputImageKey)
-        // Five-point tone curve. Identity is a straight line from (0,0) to (1,1).
-        // Whites adjust the top endpoint, blacks adjust the bottom endpoint.
-        // Scale so ±100 moves each endpoint ~±0.25 (not ±0.5) — the curve still
-        // pivots through the 0.25/0.5/0.75 interior points but endpoints don't
-        // collapse onto the midline.
-        let blacksY = max(0.0, min(1.0, blacks / 400.0))
-        let whitesY = max(0.0, min(1.0, 1.0 + whites / 400.0))
-        filter.setValue(CIVector(x: 0.0, y: CGFloat(blacksY)), forKey: "inputPoint0")
-        filter.setValue(CIVector(x: 0.25, y: 0.25), forKey: "inputPoint1")
+        // Five-point tone curve with locked (0,0) and (1,1) endpoints so pure
+        // black and pure white pass through unchanged. Blacks drives the 0.25
+        // interior point, whites drives the 0.75 interior point — ±100 shifts
+        // each by ±0.2, keeping y values inside [0.05, 0.45] and [0.55, 0.95]
+        // so the curve stays monotonic and both slider directions have
+        // usable range. Earlier versions put whites/blacks on the endpoints,
+        // which meant +100 whites / -100 blacks clamped to identity (#155).
+        let blacksY = 0.25 + blacks / 500.0
+        let whitesY = 0.75 + whites / 500.0
+        filter.setValue(CIVector(x: 0.0, y: 0.0), forKey: "inputPoint0")
+        filter.setValue(CIVector(x: 0.25, y: CGFloat(blacksY)), forKey: "inputPoint1")
         filter.setValue(CIVector(x: 0.5, y: 0.5), forKey: "inputPoint2")
-        filter.setValue(CIVector(x: 0.75, y: 0.75), forKey: "inputPoint3")
-        filter.setValue(CIVector(x: 1.0, y: CGFloat(whitesY)), forKey: "inputPoint4")
+        filter.setValue(CIVector(x: 0.75, y: CGFloat(whitesY)), forKey: "inputPoint3")
+        filter.setValue(CIVector(x: 1.0, y: 1.0), forKey: "inputPoint4")
         return filter.outputImage!
     }
 

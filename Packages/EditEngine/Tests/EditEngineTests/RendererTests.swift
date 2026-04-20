@@ -110,17 +110,22 @@ final class RendererTests: XCTestCase {
         let width = Int(source.extent.width)
         let midY = Int(source.extent.height) / 2
 
-        // Whites adjustment — sample near the bright end
-        let brightX = width - 4
+        // Sample in the region where each slider's effect is maximal. The
+        // tone-curve spline overshoots around its interior control points,
+        // so x=0.25 and x=0.75 (the control point positions themselves) are
+        // near-identity dips; the usable effect lies closer to the endpoints.
+        // x=0 and x=width-1 are locked and can't move.
+        let darkX = width / 8
+        let brightX = 3 * width / 4
+
         let srcBright = samplePixel(image: source, x: brightX, y: midY, context: ctx)
         let whitesDown = Renderer.render(source: source, editState: EditState(whites: -50))
         let resBright = samplePixel(image: whitesDown, x: brightX, y: midY, context: ctx)
         XCTAssertLessThan(resBright.r, srcBright.r, "Negative whites should pull down bright values")
 
-        // Blacks adjustment — sample at pure black (x=0) with strong adjustment
-        let srcDark = samplePixel(image: source, x: 0, y: midY, context: ctx)
+        let srcDark = samplePixel(image: source, x: darkX, y: midY, context: ctx)
         let blacksUp = Renderer.render(source: source, editState: EditState(blacks: 100))
-        let resDark = samplePixel(image: blacksUp, x: 0, y: midY, context: ctx)
+        let resDark = samplePixel(image: blacksUp, x: darkX, y: midY, context: ctx)
         XCTAssertGreaterThan(resDark.r, srcDark.r, "Positive blacks should lift dark values")
     }
 
@@ -338,19 +343,127 @@ final class RendererTests: XCTestCase {
         let width = Int(source.extent.width)
         let midY = Int(source.extent.height) / 2
 
-        // Blacks at +100 lifts the (0,0) curve point; at -100 it sits at 0.
+        // Blacks at +100 lifts the 0.25 interior curve point; the dark-region
+        // lift peaks below the pivot X, so sample at x=width/8.
+        let darkX = width / 8
+        let srcDark = samplePixel(image: source, x: darkX, y: midY, context: ctx)
         let blacksUp = Renderer.render(source: source, editState: EditState(blacks: 100))
-        let blacksUpPx = samplePixel(image: blacksUp, x: 0, y: midY, context: ctx)
-        XCTAssertGreaterThan(blacksUpPx.r, 10, "+100 blacks should lift the black point off zero")
-        XCTAssertLessThan(blacksUpPx.r, 120, "+100 blacks should not drag the black point halfway up")
+        let blacksUpPx = samplePixel(image: blacksUp, x: darkX, y: midY, context: ctx)
+        XCTAssertGreaterThan(blacksUpPx.r, srcDark.r, "+100 blacks should lift dark-interior pixels")
+        XCTAssertLessThan(blacksUpPx.r, 180, "+100 blacks should not drag the dark region past the midline")
 
-        // Whites at -100 pulls the (1,1) curve point down; bright pixel should drop.
-        let brightX = width - 4
+        // Whites at -100 pulls the 0.75 interior curve point down; a bright
+        // pixel should drop but not crush below the dark pivot.
+        let brightX = 3 * width / 4
         let srcBright = samplePixel(image: source, x: brightX, y: midY, context: ctx)
         let whitesDown = Renderer.render(source: source, editState: EditState(whites: -100))
         let whitesDownPx = samplePixel(image: whitesDown, x: brightX, y: midY, context: ctx)
         XCTAssertLessThan(whitesDownPx.r, srcBright.r, "-100 whites should pull bright pixel down")
-        XCTAssertGreaterThan(whitesDownPx.r, 120, "-100 whites should not crush brights below midline")
+        XCTAssertGreaterThan(whitesDownPx.r, 80, "-100 whites should not crush brights below the dark pivot")
+    }
+
+    // Previously-dead directions (#155): under the old endpoint-clamped
+    // implementation, +100 whites and -100 blacks were silent no-ops because
+    // the clamped endpoint Y was already saturated. Pin both directions now
+    // that whites/blacks ride interior control points.
+
+    func testWhitesPositiveBrightensBrights() {
+        let source = makeGradientImage()
+        let width = Int(source.extent.width)
+        let midY = Int(source.extent.height) / 2
+        let brightX = 3 * width / 4
+
+        let srcBright = samplePixel(image: source, x: brightX, y: midY, context: ctx)
+        let whitesUp = Renderer.render(source: source, editState: EditState(whites: 100))
+        let resBright = samplePixel(image: whitesUp, x: brightX, y: midY, context: ctx)
+
+        XCTAssertGreaterThan(resBright.r, srcBright.r, "+100 whites should brighten the bright interior (was a no-op before #155)")
+    }
+
+    func testBlacksNegativeDarkensDarks() {
+        let source = makeGradientImage()
+        let width = Int(source.extent.width)
+        let midY = Int(source.extent.height) / 2
+        let darkX = width / 8
+
+        let srcDark = samplePixel(image: source, x: darkX, y: midY, context: ctx)
+        let blacksDown = Renderer.render(source: source, editState: EditState(blacks: -100))
+        let resDark = samplePixel(image: blacksDown, x: darkX, y: midY, context: ctx)
+
+        XCTAssertLessThan(resDark.r, srcDark.r, "-100 blacks should darken the dark interior (was a no-op before #155)")
+    }
+
+    func testWhitesBlacksIdentityIsPassThrough() {
+        // The early-return guard already handles whites=0,blacks=0 at the
+        // filter-graph level. This pins the acceptance-criterion identity
+        // requirement at parameter granularity — if the guard is ever removed
+        // or refactored, the underlying curve must still evaluate to identity.
+        let source = makeGradientImage()
+        let width = Int(source.extent.width)
+        let midY = Int(source.extent.height) / 2
+        let sampleXs = [0, width / 4, width / 2, 3 * width / 4, width - 1]
+
+        let result = Renderer.render(source: source, editState: EditState(whites: 0, blacks: 0))
+
+        for x in sampleXs {
+            let srcPx = samplePixel(image: source, x: x, y: midY, context: ctx)
+            let resPx = samplePixel(image: result, x: x, y: midY, context: ctx)
+            XCTAssertEqual(srcPx.r, resPx.r, "whites=0,blacks=0 must pass through unchanged at x=\(x)")
+            XCTAssertEqual(srcPx.g, resPx.g)
+            XCTAssertEqual(srcPx.b, resPx.b)
+        }
+    }
+
+    func testWhitesBlacksEndpointsLocked() {
+        // With extreme values in both directions the tone-curve endpoints
+        // must stay locked at (0,0) and (1,1): pure black stays black,
+        // pure white stays white. This invariant is what lets both slider
+        // directions have usable range without clamping.
+        let source = makeGradientImage()
+        let width = Int(source.extent.width)
+        let midY = Int(source.extent.height) / 2
+
+        let result = Renderer.render(source: source, editState: EditState(whites: 100, blacks: -100))
+        let blackPx = samplePixel(image: result, x: 0, y: midY, context: ctx)
+        let whitePx = samplePixel(image: result, x: width - 1, y: midY, context: ctx)
+
+        XCTAssertEqual(Int(blackPx.r), 0, accuracy: 4, "x=0 (pure black source) must stay at the black endpoint")
+        XCTAssertEqual(Int(whitePx.r), 255, accuracy: 4, "x=width-1 (pure white source) must stay at the white endpoint")
+    }
+
+    func testWhitesBlacksSymmetry() {
+        // Sign-flip symmetry in each slider's effective region: +N and -N
+        // produce deltas of opposite sign. Guards against a future regression
+        // that reintroduces a clamp on one side.
+        let source = makeGradientImage()
+        let width = Int(source.extent.width)
+        let midY = Int(source.extent.height) / 2
+        let brightX = 3 * width / 4
+        let darkX = width / 8
+
+        let srcBright = samplePixel(image: source, x: brightX, y: midY, context: ctx)
+        let whitesPos = samplePixel(
+            image: Renderer.render(source: source, editState: EditState(whites: 50)),
+            x: brightX, y: midY, context: ctx
+        )
+        let whitesNeg = samplePixel(
+            image: Renderer.render(source: source, editState: EditState(whites: -50)),
+            x: brightX, y: midY, context: ctx
+        )
+        XCTAssertGreaterThan(Int(whitesPos.r), Int(srcBright.r), "+50 whites should push the bright pivot up")
+        XCTAssertLessThan(Int(whitesNeg.r), Int(srcBright.r), "-50 whites should pull the bright pivot down")
+
+        let srcDark = samplePixel(image: source, x: darkX, y: midY, context: ctx)
+        let blacksPos = samplePixel(
+            image: Renderer.render(source: source, editState: EditState(blacks: 50)),
+            x: darkX, y: midY, context: ctx
+        )
+        let blacksNeg = samplePixel(
+            image: Renderer.render(source: source, editState: EditState(blacks: -50)),
+            x: darkX, y: midY, context: ctx
+        )
+        XCTAssertGreaterThan(Int(blacksPos.r), Int(srcDark.r), "+50 blacks should lift the dark pivot")
+        XCTAssertLessThan(Int(blacksNeg.r), Int(srcDark.r), "-50 blacks should push the dark pivot down")
     }
 
     func testClarityMaxIsBounded() {

@@ -136,6 +136,12 @@ public final class LibraryViewModel: ObservableObject {
     private var previewStore: PreviewStore
     private var reloadTask: Task<Void, Never>?
     private var undoDismissTask: Task<Void, Never>?
+    /// Subscription to `PreviewStore.previewRegenerated`. Bumps
+    /// `rowVersion` and triggers a reload so the grid and loupe pick up
+    /// the rewritten cache files after a Develop auto-save. Held so the
+    /// subscription survives across `configure(...)` swaps without
+    /// leaking the previous one.
+    private var previewRegenerationCancellable: AnyCancellable?
 
     /// Shared undo stack used to record rating/rotation mutations. Set
     /// by `AppDelegate` after construction; `nil` in the placeholder
@@ -162,6 +168,7 @@ public final class LibraryViewModel: ObservableObject {
     public init(catalog: CatalogDatabase, previewStore: PreviewStore) {
         self.catalog = catalog
         self.previewStore = previewStore
+        subscribeToPreviewRegeneration()
     }
 
     /// Swap the backing catalog and preview store, then reload. Used by
@@ -172,7 +179,23 @@ public final class LibraryViewModel: ObservableObject {
     public func configure(catalog: CatalogDatabase, previewStore: PreviewStore) {
         self.catalog = catalog
         self.previewStore = previewStore
+        subscribeToPreviewRegeneration()
         reload()
+    }
+
+    /// Listen for preview-regenerated signals from the `PreviewStore` so
+    /// Library/Loupe pick up the rewritten JPEGs after a Develop
+    /// auto-save. Bumping `rowVersion` re-reads `NSImage(contentsOf:)` in
+    /// cells that key off it (see `LibraryCell` and `LoupeView`);
+    /// `reload()` refreshes `rows` in case list-level state changed too.
+    private func subscribeToPreviewRegeneration() {
+        previewRegenerationCancellable = previewStore.previewRegenerated
+            .receive(on: DispatchQueue.main)
+            .sink { [weak self] _ in
+                guard let self else { return }
+                self.rowVersion &+= 1
+                self.reload()
+            }
     }
 
     /// Reload the current-scope assets from the catalog, sort them

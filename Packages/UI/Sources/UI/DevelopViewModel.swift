@@ -97,6 +97,16 @@ public final class DevelopViewModel: ObservableObject {
             let next = editState
             _ = try? catalog.saveEditState(editState, for: assetId)
             recordEditUndo(assetId: assetId, previous: previous, next: next)
+            // Regenerate the cached thumb + preview in the background so
+            // the Library grid we're navigating back to picks up the
+            // edited look. Fire-and-forget — deactivate itself must stay
+            // synchronous to keep its existing callers simple.
+            let previewStore = self.previewStore
+            let catalog = self.catalog
+            Task.detached {
+                guard let asset = try? catalog.fetchAsset(id: assetId) else { return }
+                await previewStore.regenerateWithEdit(for: asset, editState: next)
+            }
         }
         hasUnsavedChanges = false
         pendingUndoPrevious = nil
@@ -293,6 +303,16 @@ public final class DevelopViewModel: ObservableObject {
             hasUnsavedChanges = false
             pendingUndoPrevious = nil
             recordEditUndo(assetId: assetId, previous: previous, next: next)
+
+            // Re-render the cached thumbnail + preview so Library/Loupe
+            // reflect the edit. Chained off the save so it inherits the
+            // same 500 ms debounce; in-flight regeneration is cancelled
+            // implicitly when the outer `saveTask` is cancelled by a
+            // subsequent `scheduleSave`.
+            guard !Task.isCancelled else { return }
+            if let asset = try? catalog.fetchAsset(id: assetId) {
+                await previewStore.regenerateWithEdit(for: asset, editState: next)
+            }
         }
     }
 

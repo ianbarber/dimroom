@@ -60,15 +60,19 @@ public struct ZoomState: Equatable {
 
     // MARK: - Mutations
 
-    /// Toggle between fit-to-window and 100% (1:1 pixel mapping).
-    /// When at fit, jumps to 1.0. When at any other scale, returns to fit.
+    /// Toggle between fit-to-window and a zoomed-in view.
+    /// When at fit, jumps to `max(1.0, fit × 2)` capped at `maxZoom`: for a
+    /// normal image (fit ≤ 0.5) this is 1:1 pixel mapping, while for a
+    /// small image (fit > 0.5) it guarantees a visible zoom change instead
+    /// of being clamped silently back to fit. When at any other scale,
+    /// returns to fit.
     public mutating func toggleFitTo100(
         imageSize: CGSize,
         containerSize: CGSize
     ) {
         let fit = Self.fitScale(imageSize: imageSize, containerSize: containerSize)
         if isAtFit(imageSize: imageSize, containerSize: containerSize) {
-            zoomScale = 1.0
+            zoomScale = min(Self.maxZoom, max(1.0, fit * 2))
         } else {
             zoomScale = fit
             panOffset = .zero

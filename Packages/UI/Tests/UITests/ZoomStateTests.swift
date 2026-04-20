@@ -61,21 +61,49 @@ final class ZoomStateTests: XCTestCase {
         XCTAssertEqual(state.panOffset, .zero)
     }
 
-    func test_toggleFitTo100_from_fit_clamps_when_image_smaller_than_container() {
-        // When the image is smaller than the container in both axes, fit >
-        // 1.0, so "go to 100%" is below the minimum zoom and clampZoom
-        // snaps back to fit — the toggle is a visible no-op. This invariant
-        // is what bin/harness-zoom-flow.sh's fixture sizing relies on: the
-        // library-seed JPEGs are chosen large enough (≥ container in at
-        // least one axis) that fit ≤ 1.0 and toggling actually changes
-        // isZoomed. A 256×256 image in the 1024×768 container reproduces
-        // the original failure mode.
-        let smallImage = CGSize(width: 256, height: 256)
+    func test_toggleFitTo100_when_image_smaller_than_container_zooms_in() {
+        // 512×512 image in 1024×768 container: fit = min(2.0, 1.5) = 1.5.
+        // At-fit target becomes max(1.0, 1.5 × 2) = 3.0, which is under
+        // maxZoom (4.0) so clampZoom leaves it alone. The toggle must
+        // produce a visible zoom change rather than silently staying at fit.
+        let smallImage = CGSize(width: 512, height: 512)
         let fit = ZoomState.fitScale(imageSize: smallImage, containerSize: container)
-        XCTAssertGreaterThan(fit, 1.0, "precondition: fit must exceed 1.0")
+        XCTAssertEqual(fit, 1.5, accuracy: 0.001, "precondition: fit must be 1.5")
         var state = ZoomState(zoomScale: fit)
         state.toggleFitTo100(imageSize: smallImage, containerSize: container)
+        XCTAssertEqual(state.zoomScale, 3.0, accuracy: 0.001)
+        XCTAssertFalse(state.isAtFit(imageSize: smallImage, containerSize: container))
+    }
+
+    func test_toggleFitTo100_noop_when_fit_exceeds_maxZoom() {
+        // 100×100 image in 1024×768 container: fit = min(10.24, 7.68) = 7.68,
+        // which exceeds maxZoom (4.0). clampZoom's range [fit, maxZoom]
+        // collapses to a single point at fit, so there is no scale above fit
+        // the toggle can land on — pressing Z is an unavoidable no-op in
+        // this extreme case. Changing clampZoom's range is explicitly out
+        // of scope in #147, so this test documents the remaining limitation.
+        let tinyImage = CGSize(width: 100, height: 100)
+        let fit = ZoomState.fitScale(imageSize: tinyImage, containerSize: container)
+        XCTAssertGreaterThan(fit, ZoomState.maxZoom,
+            "precondition: fit must exceed maxZoom")
+        var state = ZoomState(zoomScale: fit)
+        state.toggleFitTo100(imageSize: tinyImage, containerSize: container)
         XCTAssertEqual(state.zoomScale, fit, accuracy: 0.001)
+        XCTAssertTrue(state.isAtFit(imageSize: tinyImage, containerSize: container))
+    }
+
+    func test_toggleFitTo100_roundtrip_on_small_image() {
+        // Toggle once from fit (→ zoomed), then toggle back (→ fit, panOffset
+        // zeroed). Guards the reverse branch when the at-fit target is not
+        // 1.0. Uses the same 512×512 image as the zooms-in test.
+        let smallImage = CGSize(width: 512, height: 512)
+        let fit = ZoomState.fitScale(imageSize: smallImage, containerSize: container)
+        var state = ZoomState(zoomScale: fit)
+        state.toggleFitTo100(imageSize: smallImage, containerSize: container)
+        XCTAssertEqual(state.zoomScale, 3.0, accuracy: 0.001)
+        state.toggleFitTo100(imageSize: smallImage, containerSize: container)
+        XCTAssertEqual(state.zoomScale, fit, accuracy: 0.001)
+        XCTAssertEqual(state.panOffset, .zero)
         XCTAssertTrue(state.isAtFit(imageSize: smallImage, containerSize: container))
     }
 

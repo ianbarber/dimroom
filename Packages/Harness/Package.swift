@@ -32,6 +32,12 @@ let package = Package(
                 .product(name: "Previews", package: "Previews"),
             ]
         ),
-        .testTarget(name: "HarnessTests", dependencies: ["Harness"]),
+        .testTarget(
+            name: "HarnessTests",
+            dependencies: [
+                "Harness",
+                .product(name: "Catalog", package: "Catalog"),
+            ]
+        ),
     ]
 )

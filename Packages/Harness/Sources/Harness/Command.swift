@@ -39,6 +39,7 @@ public enum Command: Codable, Sendable, Equatable {
     case restoreAssets(ids: [UUID])
     case permanentlyDeleteAssets(ids: [UUID])
     case uploadToDrive(assetId: UUID)
+    case getPreviewSignature(assetId: UUID)
 
     private enum CodingKeys: String, CodingKey {
         case type
@@ -102,6 +103,7 @@ public enum Command: Codable, Sendable, Equatable {
         case restoreAssets
         case permanentlyDeleteAssets
         case uploadToDrive
+        case getPreviewSignature
     }
 
     public init(from decoder: Decoder) throws {
@@ -223,6 +225,9 @@ public enum Command: Codable, Sendable, Equatable {
         case .uploadToDrive:
             let assetId = try container.decode(UUID.self, forKey: .assetId)
             self = .uploadToDrive(assetId: assetId)
+        case .getPreviewSignature:
+            let assetId = try container.decode(UUID.self, forKey: .assetId)
+            self = .getPreviewSignature(assetId: assetId)
         }
     }
 
@@ -336,6 +341,9 @@ public enum Command: Codable, Sendable, Equatable {
             try container.encode(ids, forKey: .ids)
         case .uploadToDrive(let assetId):
             try container.encode(CommandType.uploadToDrive, forKey: .type)
+            try container.encode(assetId, forKey: .assetId)
+        case .getPreviewSignature(let assetId):
+            try container.encode(CommandType.getPreviewSignature, forKey: .type)
             try container.encode(assetId, forKey: .assetId)
         }
     }

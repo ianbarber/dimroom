@@ -70,7 +70,30 @@ struct DimroomApp: App {
             CommandGroup(replacing: .undoRedo) {
                 UndoRedoMenuItems(undoStack: appDelegate.undoStack)
             }
+            CommandGroup(after: .pasteboard) {
+                DeleteMenuItem(
+                    libraryViewModel: appDelegate.libraryViewModel,
+                    router: appDelegate.router
+                )
+            }
         }
+    }
+}
+
+/// A menu-attached key equivalent dispatches Backspace through the
+/// menu's responder chain, bypassing the focus bug that made the
+/// grid's `onKeyPress(.delete)` beep. Observes the view model and
+/// router so enablement tracks selection + mode.
+private struct DeleteMenuItem: View {
+    @ObservedObject var libraryViewModel: LibraryViewModel
+    let router: AppRouter
+
+    var body: some View {
+        Button("Delete Selected") {
+            NotificationCenter.default.post(name: .requestDeleteSelected, object: nil)
+        }
+        .keyboardShortcut(.delete, modifiers: [])
+        .disabled(libraryViewModel.selectedAssetIds.isEmpty || router.route != .library)
     }
 }
 
@@ -559,6 +582,7 @@ private struct UnavailableOriginalsDownloader: OriginalsDownloader {
 // once flags are known.
 extension Notification.Name {
     static let showExportSheet = Notification.Name("dimroom.showExportSheet")
+    static let requestDeleteSelected = Notification.Name("dimroom.requestDeleteSelected")
 }
 
 private extension DevelopViewModel {

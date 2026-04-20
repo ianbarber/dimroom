@@ -221,21 +221,15 @@ struct ContentView: View {
             libraryViewModel.selectAllVisible()
             return .handled
         }
-        // Delete / Backspace — open the delete-confirmation dialog.
-        // Library only so Loupe rating keys aren't disturbed.
-        .onKeyPress(.delete) {
-            guard router.route == .library else { return .ignored }
+        // Delete is dispatched from the Edit → Delete Selected menu
+        // item (keyboardShortcut .delete). Routing it through a
+        // notification sidesteps the focus bug that kept the grid's
+        // own `onKeyPress(.delete)` from firing.
+        .onReceive(deleteSelectedPublisher) { _ in
+            guard router.route == .library else { return }
             let count = libraryViewModel.selectedAssetIds.count
-            guard count > 0 else { return .ignored }
+            guard count > 0 else { return }
             pendingDeleteCount = count
-            return .handled
-        }
-        .onKeyPress(.deleteForward) {
-            guard router.route == .library else { return .ignored }
-            let count = libraryViewModel.selectedAssetIds.count
-            guard count > 0 else { return .ignored }
-            pendingDeleteCount = count
-            return .handled
         }
         .onChange(of: router.route) { oldRoute, newRoute in
             if newRoute == .develop {
@@ -253,5 +247,10 @@ struct ContentView: View {
     /// a notification from the menu command in DimroomApp.
     private var exportSheetPublisher: NotificationCenter.Publisher {
         NotificationCenter.default.publisher(for: .showExportSheet)
+    }
+
+    /// Edit → Delete Selected (or Backspace via its key equivalent).
+    private var deleteSelectedPublisher: NotificationCenter.Publisher {
+        NotificationCenter.default.publisher(for: .requestDeleteSelected)
     }
 }

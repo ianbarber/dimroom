@@ -48,6 +48,22 @@ extension DimroomFixture {
         )
         var duplicate: Int = 1
 
+        /// Append one extra asset whose `driveFileId` is set and `localPath`
+        /// is `nil`, so the harness download flow can route through
+        /// `OriginalsCoordinator` → `OriginalsCache`. The preview reuses
+        /// the first seed JPEG so the library grid renders something for
+        /// the row.
+        @Flag(
+            name: .customLong("drive-backed"),
+            help: "Append a Drive-backed fixture asset with no localPath for download flows."
+        )
+        var driveBacked: Bool = false
+
+        /// File id baked into the Drive-backed fixture asset. Pinned so
+        /// stub downloaders and harness flows can reference it without
+        /// having to round-trip through `list-assets`.
+        static let driveBackedFileId = "harness-drive-fixture-file-id"
+
         func run() async throws {
             let fm = FileManager.default
             let catalogURL = URL(fileURLWithPath: catalog)
@@ -117,6 +133,29 @@ extension DimroomFixture {
                     try await store.generate(for: asset, sourceURL: url)
                     imported += 1
                     assetIndex += 1
+                }
+            }
+
+            if driveBacked, let firstSeed = jpegs.first {
+                let asset = Asset(
+                    contentHash: "drive-backed-fixture-hash",
+                    originalFilename: "drive-backed.jpg",
+                    captureDate: baseDate.addingTimeInterval(Double(assetIndex) * 3600),
+                    importedDate: baseDate,
+                    sourceType: .digital,
+                    width: 800,
+                    height: 600,
+                    driveFileId: Self.driveBackedFileId,
+                    localPath: nil,
+                    bytes: 0
+                )
+                if try db.fetchAsset(byHash: asset.contentHash) == nil {
+                    try db.insertAsset(asset)
+                    // Reuse a real seed JPEG for the preview — the grid only
+                    // needs *a* preview to render the cell. The "original"
+                    // bytes the stub downloader will produce are unrelated.
+                    try await store.generate(for: asset, sourceURL: firstSeed)
+                    imported += 1
                 }
             }
 

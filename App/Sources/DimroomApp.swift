@@ -191,7 +191,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         if let resolvedCatalog {
             let cacheDir = resolveOriginalsCacheDirectory(from: args)
             let budget = resolveOriginalsCacheBudget()
-            let downloader: OriginalsDownloader = resolvedDriveClient ?? UnavailableOriginalsDownloader()
+            let downloader: OriginalsDownloader = resolveHarnessDownloader()
+                ?? resolvedDriveClient
+                ?? UnavailableOriginalsDownloader()
             let coordinator = OriginalsCoordinator(catalog: resolvedCatalog)
             if let cache = try? OriginalsCache(
                 directory: cacheDir,
@@ -521,6 +523,19 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     private func resolveDriveClient() -> DriveClient? {
         guard let config = try? OAuthConfig.load() else { return nil }
         return DriveClient(config: config)
+    }
+
+    /// Returns a harness-specific downloader when the env var requests
+    /// one, so Layer C flows can drive the determinate-progress overlay
+    /// without needing real Drive credentials. Production runs (no env
+    /// var) get `nil` and fall through to the regular Drive client.
+    private func resolveHarnessDownloader() -> OriginalsDownloader? {
+        switch ProcessInfo.processInfo.environment["DIMROOM_HARNESS_STUB_DOWNLOADER"] {
+        case "slow-chunks":
+            return SlowChunkHarnessDownloader()
+        default:
+            return nil
+        }
     }
 }
 

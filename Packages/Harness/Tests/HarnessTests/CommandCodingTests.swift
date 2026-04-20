@@ -505,7 +505,7 @@ final class CommandCodingTests: XCTestCase {
         let json = String(data: data, encoding: .utf8)!
         XCTAssertEqual(
             json,
-            #"{"assetCount":3,"hasUndoToast":false,"isZoomed":false,"minRating":3,"route":"library","scopeKind":"all","selectedAssetId":"12345678-1234-1234-1234-123456789012","selectedAssetIds":[]}"#
+            #"{"assetCount":3,"downloadProgressByAssetId":{},"downloadingAssetIds":[],"hasUndoToast":false,"isZoomed":false,"minRating":3,"route":"library","scopeKind":"all","selectedAssetId":"12345678-1234-1234-1234-123456789012","selectedAssetIds":[]}"#
         )
     }
 
@@ -513,14 +513,16 @@ final class CommandCodingTests: XCTestCase {
         // Swift's default JSONEncoder omits nil optionals rather than
         // emitting them as `null`. Pin that shape so the harness wire
         // format is explicit about what consumers will see. `minRating`,
-        // `isZoomed`, `scopeKind`, `selectedAssetIds`, and
-        // `hasUndoToast` are non-optional and must always be present.
+        // `isZoomed`, `scopeKind`, `selectedAssetIds`,
+        // `hasUndoToast`, `downloadingAssetIds`, and
+        // `downloadProgressByAssetId` are non-optional and must always
+        // be present.
         let state = AppState(route: .library, assetCount: 0, selectedAssetId: nil)
         let data = try encoder.encode(state)
         let json = String(data: data, encoding: .utf8)!
         XCTAssertEqual(
             json,
-            #"{"assetCount":0,"hasUndoToast":false,"isZoomed":false,"minRating":0,"route":"library","scopeKind":"all","selectedAssetIds":[]}"#
+            #"{"assetCount":0,"downloadProgressByAssetId":{},"downloadingAssetIds":[],"hasUndoToast":false,"isZoomed":false,"minRating":0,"route":"library","scopeKind":"all","selectedAssetIds":[]}"#
         )
     }
 
@@ -538,7 +540,38 @@ final class CommandCodingTests: XCTestCase {
         let json = String(data: data, encoding: .utf8)!
         XCTAssertEqual(
             json,
-            #"{"assetCount":0,"hasUndoToast":false,"isZoomed":true,"minRating":0,"route":"loupe","scopeKind":"all","selectedAssetIds":[]}"#
+            #"{"assetCount":0,"downloadProgressByAssetId":{},"downloadingAssetIds":[],"hasUndoToast":false,"isZoomed":true,"minRating":0,"route":"loupe","scopeKind":"all","selectedAssetIds":[]}"#
+        )
+    }
+
+    func testAppStateRoundTripWithDownloadProgress() throws {
+        let id = UUID(uuidString: "12345678-1234-1234-1234-123456789012")!
+        let state = AppState(
+            route: .loupe,
+            selectedAssetId: id,
+            downloadingAssetIds: [id],
+            downloadProgressByAssetId: [id.uuidString: 0.42]
+        )
+        let data = try encoder.encode(state)
+        let decoded = try decoder.decode(AppState.self, from: data)
+        XCTAssertEqual(state, decoded)
+        XCTAssertEqual(decoded.downloadingAssetIds, [id])
+        XCTAssertEqual(decoded.downloadProgressByAssetId[id.uuidString], 0.42)
+    }
+
+    func testAppStateJSONShapeWithDownloadProgress() throws {
+        let id = UUID(uuidString: "12345678-1234-1234-1234-123456789012")!
+        let state = AppState(
+            route: .loupe,
+            selectedAssetId: id,
+            downloadingAssetIds: [id],
+            downloadProgressByAssetId: [id.uuidString: 0.5]
+        )
+        let data = try encoder.encode(state)
+        let json = String(data: data, encoding: .utf8)!
+        XCTAssertEqual(
+            json,
+            #"{"assetCount":0,"downloadProgressByAssetId":{"12345678-1234-1234-1234-123456789012":0.5},"downloadingAssetIds":["12345678-1234-1234-1234-123456789012"],"hasUndoToast":false,"isZoomed":false,"minRating":0,"route":"loupe","scopeKind":"all","selectedAssetId":"12345678-1234-1234-1234-123456789012","selectedAssetIds":[]}"#
         )
     }
 

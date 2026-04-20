@@ -31,6 +31,15 @@ public struct AppState: Codable, Sendable, Equatable {
     /// verify a soft-delete surfaced the toast without having to look
     /// inside the screenshot.
     public let hasUndoToast: Bool
+    /// Asset ids whose original is being fetched right now. Mirrors
+    /// `LibraryViewModel.downloadingAssetIds` so harness flows can poll
+    /// for the in-flight set without scraping the screenshot.
+    public let downloadingAssetIds: [UUID]
+    /// Per-asset download progress in `[0, 1]`. Keys are UUID strings so
+    /// JSON consumers can index by asset id (Swift's JSONEncoder rejects
+    /// non-string dictionary keys, and `data.downloadProgressByAssetId.<uuid>`
+    /// is a much friendlier wire shape than a parallel array).
+    public let downloadProgressByAssetId: [String: Double]
 
     public init(
         route: Route,
@@ -41,7 +50,9 @@ public struct AppState: Codable, Sendable, Equatable {
         scopeKind: String = "all",
         selectedAssetIds: [UUID] = [],
         isZoomed: Bool = false,
-        hasUndoToast: Bool = false
+        hasUndoToast: Bool = false,
+        downloadingAssetIds: [UUID] = [],
+        downloadProgressByAssetId: [String: Double] = [:]
     ) {
         self.route = route
         self.assetCount = assetCount
@@ -52,5 +63,7 @@ public struct AppState: Codable, Sendable, Equatable {
         self.selectedAssetIds = selectedAssetIds
         self.isZoomed = isZoomed
         self.hasUndoToast = hasUndoToast
+        self.downloadingAssetIds = downloadingAssetIds
+        self.downloadProgressByAssetId = downloadProgressByAssetId
     }
 }

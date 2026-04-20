@@ -822,9 +822,6 @@ final class LibraryViewModelTests: XCTestCase {
 
         let assetId = UUID()
         _ = await vm.fetchOriginalIfNeeded(assetId: assetId)
-        // Drain any trailing main-actor work so the cleanup defer's
-        // synchronous removal isn't racing a queued progress write.
-        await MainActor.run { }
         XCTAssertNil(
             vm.downloadProgressByAssetId[assetId],
             "progress entry must be cleared once the fetch resolves"
@@ -847,11 +844,43 @@ final class LibraryViewModelTests: XCTestCase {
         let assetId = UUID()
         let url = await vm.fetchOriginalIfNeeded(assetId: assetId)
         XCTAssertNil(url)
-        await MainActor.run { }
         XCTAssertNil(
             vm.downloadProgressByAssetId[assetId],
             "failed fetch must still clear the progress entry"
         )
+    }
+
+    /// A progress tick whose `Task { @MainActor }` runs *after*
+    /// `fetchOriginalIfNeeded` has already cleared state must be a no-op.
+    /// Regression guard for the race between the cleanup `defer` and
+    /// fire-and-forget progress writes scheduled from the fetcher's
+    /// delegate thread.
+    @MainActor
+    func testFetchOriginalIfNeededIgnoresProgressTickAfterReturn() async throws {
+        let catalog = try CatalogDatabase.inMemory()
+        let store = PreviewStore(cacheDirectory: tempCacheDir)
+        let vm = LibraryViewModel(catalog: catalog, previewStore: store)
+
+        let resultURL = tempCacheDir.appendingPathComponent("orig.jpg")
+        let fetcher = DeferredProgressFetcher(resultURL: resultURL)
+        vm.originalFetcher = fetcher
+
+        let assetId = UUID()
+        let returned = await vm.fetchOriginalIfNeeded(assetId: assetId)
+        XCTAssertEqual(returned, resultURL)
+
+        // Simulate the late delegate tick: invoke the captured closure
+        // *after* fetchOriginalIfNeeded has resolved and the defer has
+        // run. Drain any Task the closure schedules onto the main actor.
+        let captured = await fetcher.capturedProgress
+        captured?(1.0)
+        await MainActor.run { }
+
+        XCTAssertNil(
+            vm.downloadProgressByAssetId[assetId],
+            "late progress tick must not resurrect a cleared entry"
+        )
+        XCTAssertFalse(vm.downloadingAssetIds.contains(assetId))
     }
 
     @MainActor
@@ -918,6 +947,27 @@ private actor StubProgressFetcher: OriginalFetcher {
                 await onTick()
             }
         }
+        return resultURL
+    }
+}
+
+/// `OriginalFetcher` stub that captures the `progress` closure without
+/// invoking it and returns `resultURL` immediately, so the view-model's
+/// cleanup `defer` has already run by the time the test fires a tick
+/// through the captured closure.
+private actor DeferredProgressFetcher: OriginalFetcher {
+    private let resultURL: URL?
+    var capturedProgress: (@Sendable (Double) -> Void)?
+
+    init(resultURL: URL?) {
+        self.resultURL = resultURL
+    }
+
+    func fetchOriginal(
+        assetId: UUID,
+        progress: (@Sendable (Double) -> Void)?
+    ) async -> URL? {
+        capturedProgress = progress
         return resultURL
     }
 }

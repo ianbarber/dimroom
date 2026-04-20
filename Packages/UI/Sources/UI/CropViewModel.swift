@@ -80,9 +80,15 @@ public final class CropViewModel: ObservableObject {
         cropRect = clampToUnit(rect)
     }
 
-    /// Set a new straighten angle. Clamped to -45…+45.
+    /// Set a new straighten angle. Clamped to -45…+45, then any
+    /// `cropRect` that would spill into the blank corners of the rotated
+    /// image is shrunk about its existing centre via
+    /// `CropGeometry.fitCropToRotatedBounds` (current centre is kept so
+    /// the crop doesn't jump away from the user's placement).
     public func setAngle(_ degrees: Double) {
-        cropAngle = CropGeometry.clampAngle(degrees)
+        let clamped = CropGeometry.clampAngle(degrees)
+        cropRect = CropGeometry.fitCropToRotatedBounds(cropRect: cropRect, angle: clamped)
+        cropAngle = clamped
     }
 
     /// Apply the currently selected preset to the existing rect, keeping

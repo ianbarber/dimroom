@@ -51,6 +51,58 @@ final class CropViewModelTests: XCTestCase {
         XCTAssertEqual(vm.cropRect.maxY, 0.9, accuracy: 1e-9)
     }
 
+    // MARK: - setAngle
+
+    /// Regression for #137: a near-edge crop rotated by 30° must be
+    /// shrunk so all corners stay within the inscribed rectangle of the
+    /// rotated unit square.
+    @MainActor
+    func testSetAngleShrinksNearEdgeCropToStayInsideRotatedBounds() {
+        let vm = CropViewModel()
+        // Near-edge (only 0.15 clearance on each side) and large enough
+        // that the 30° rotated projection exceeds the unit square.
+        let initial = CGRect(x: 0.15, y: 0.15, width: 0.8, height: 0.8)
+        vm.activate(cropRect: initial, angle: 0, imageAspect: 1.0)
+
+        vm.setAngle(30)
+
+        XCTAssertEqual(vm.cropAngle, 30, accuracy: 1e-9)
+        XCTAssertLessThan(vm.cropRect.width, initial.width)
+        XCTAssertLessThan(vm.cropRect.height, initial.height)
+
+        // Centre is preserved — helper's documented contract.
+        XCTAssertEqual(vm.cropRect.midX, initial.midX, accuracy: 1e-9)
+        XCTAssertEqual(vm.cropRect.midY, initial.midY, accuracy: 1e-9)
+
+        // Projection onto the rotated axes must fit within the unit
+        // square.
+        let theta = 30.0 * .pi / 180.0
+        let cosT = Foundation.cos(theta)
+        let sinT = Foundation.sin(theta)
+        let w = vm.cropRect.width
+        let h = vm.cropRect.height
+        let epsilon = 1e-9
+        XCTAssertLessThanOrEqual(w * cosT + h * sinT, 1.0 + epsilon)
+        XCTAssertLessThanOrEqual(w * sinT + h * cosT, 1.0 + epsilon)
+    }
+
+    /// A small centred crop already fits inside the rotated bounds and
+    /// must not be shrunk — guards against over-eager fitting.
+    @MainActor
+    func testSetAngleLeavesSmallCentredCropUnchanged() {
+        let vm = CropViewModel()
+        let initial = CGRect(x: 0.4, y: 0.4, width: 0.2, height: 0.2)
+        vm.activate(cropRect: initial, angle: 0, imageAspect: 1.0)
+
+        vm.setAngle(30)
+
+        XCTAssertEqual(vm.cropAngle, 30, accuracy: 1e-9)
+        XCTAssertEqual(vm.cropRect.origin.x, initial.origin.x, accuracy: 1e-9)
+        XCTAssertEqual(vm.cropRect.origin.y, initial.origin.y, accuracy: 1e-9)
+        XCTAssertEqual(vm.cropRect.width, initial.width, accuracy: 1e-9)
+        XCTAssertEqual(vm.cropRect.height, initial.height, accuracy: 1e-9)
+    }
+
     // MARK: - updateRect (sanity: still applies preset)
 
     @MainActor

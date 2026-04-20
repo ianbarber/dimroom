@@ -110,6 +110,40 @@ public final class UndoStack: ObservableObject {
         publishStateFlags()
     }
 
+    /// True if the current undo stack already has an `.editSave` entry
+    /// for the given asset. `DevelopViewModel.activate` checks this
+    /// before hydrating to avoid double-loading version history it
+    /// already has in memory.
+    public func hasEditSave(forAssetId assetId: UUID) -> Bool {
+        undoActions.contains { action in
+            if case .editSave(let id, _, _) = action { return id == assetId }
+            return false
+        }
+    }
+
+    /// Append `.editSave` entries produced from on-disk version history
+    /// without clearing the redo stack or respecting `isReplaying`.
+    /// Entries are appended oldest-first (callers must pass them in
+    /// chronological order) and the stack is trimmed to `maxDepth`.
+    ///
+    /// Used by `DevelopViewModel.activate` to make Cmd+Z walk back
+    /// through prior versions when Develop is re-entered for an asset
+    /// whose history exists only on disk.
+    public func hydrateEditHistory(pairs: [(assetId: UUID, previous: EditState?, next: EditState)]) {
+        guard !pairs.isEmpty else { return }
+        for pair in pairs {
+            undoActions.append(.editSave(
+                assetId: pair.assetId,
+                previous: pair.previous,
+                next: pair.next
+            ))
+        }
+        if undoActions.count > Self.maxDepth {
+            undoActions.removeFirst(undoActions.count - Self.maxDepth)
+        }
+        publishStateFlags()
+    }
+
     /// Pop the top action and apply its inverse. No-op when empty.
     public func undo() async {
         guard let action = undoActions.popLast() else { return }
@@ -155,11 +189,16 @@ public final class UndoStack: ObservableObject {
                 try? catalog.updateRotation(assetId: assetId, rotation: target)
             }
         case .editSave(let assetId, let previous, let next):
+            let activeDevelop = developViewModel?.currentAssetId == assetId ? developViewModel : nil
+            // Drop any in-flight debounced save before writing the
+            // inverse, so a save that happens to fire during our
+            // `await`s below can't clobber what we're about to write.
+            activeDevelop?.cancelPendingSave()
             let state = direction == .forward ? next : (previous ?? EditState())
             _ = try? catalog.saveEditState(state, for: assetId)
             await libraryViewModel?.reloadAndWait()
-            if developViewModel?.currentAssetId == assetId {
-                await developViewModel?.reloadEditState(for: assetId)
+            if let activeDevelop {
+                await activeDevelop.reloadEditState(for: assetId)
             }
         case .softDelete(let assetIds):
             if direction == .forward {

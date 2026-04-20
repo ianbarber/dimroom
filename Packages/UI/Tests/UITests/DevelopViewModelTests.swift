@@ -224,6 +224,169 @@ final class DevelopViewModelTests: XCTestCase {
         XCTAssertNil(vm.renderedImage)
     }
 
+    // MARK: - Undo integration
+
+    @MainActor
+    func testSetParameterPushesEditSaveAfterDebounce() async throws {
+        let (vm, asset, catalog) = try await makeViewModelWithAsset(hash: "undo-push")
+        let stack = UndoStack(catalog: catalog)
+        vm.attach(undoStack: stack)
+        stack.attach(developViewModel: vm)
+
+        await vm.activate(assetId: asset.id)
+        XCTAssertFalse(stack.canUndo)
+
+        vm.setParameter(\.exposure, value: 1.25)
+        try await Task.sleep(nanoseconds: 800_000_000)
+
+        XCTAssertTrue(stack.canUndo, "setParameter must push an undo entry after debounce")
+        XCTAssertEqual(stack.undoDescription, "Edit")
+    }
+
+    @MainActor
+    func testRapidSetParameterCoalescesToOneUndoEntry() async throws {
+        let (vm, asset, catalog) = try await makeViewModelWithAsset(hash: "undo-coalesce")
+        let stack = UndoStack(catalog: catalog)
+        vm.attach(undoStack: stack)
+        stack.attach(developViewModel: vm)
+
+        await vm.activate(assetId: asset.id)
+
+        for value in [0.1, 0.2, 0.3, 0.4, 0.5] {
+            vm.setParameter(\.exposure, value: value)
+            try await Task.sleep(nanoseconds: 20_000_000)
+        }
+        try await Task.sleep(nanoseconds: 800_000_000)
+
+        XCTAssertTrue(stack.canUndo)
+        await stack.undo()
+        XCTAssertFalse(
+            stack.canUndo,
+            "A coalesced slider drag must land as exactly one undo entry"
+        )
+    }
+
+    @MainActor
+    func testUndoAfterSetParameterRestoresSliderValueAndCatalog() async throws {
+        let (vm, asset, catalog) = try await makeViewModelWithAsset(hash: "undo-round-trip")
+        let stack = UndoStack(catalog: catalog)
+        vm.attach(undoStack: stack)
+        stack.attach(developViewModel: vm)
+
+        await vm.activate(assetId: asset.id)
+
+        vm.setParameter(\.exposure, value: 2.0)
+        try await Task.sleep(nanoseconds: 800_000_000)
+        XCTAssertEqual(vm.editState.exposure, 2.0)
+
+        await stack.undo()
+        XCTAssertEqual(
+            vm.editState.exposure,
+            0.0,
+            "undo must restore the in-memory editState so sliders reflect it"
+        )
+        let catalogExposure = try catalog.latestEditState(for: asset.id)?.exposure ?? -1
+        XCTAssertEqual(catalogExposure, 0.0, "undo must write the previous state to the catalog")
+    }
+
+    @MainActor
+    func testRedoAfterUndoReappliesEditState() async throws {
+        let (vm, asset, catalog) = try await makeViewModelWithAsset(hash: "undo-redo")
+        let stack = UndoStack(catalog: catalog)
+        vm.attach(undoStack: stack)
+        stack.attach(developViewModel: vm)
+
+        await vm.activate(assetId: asset.id)
+        vm.setParameter(\.exposure, value: 1.5)
+        try await Task.sleep(nanoseconds: 800_000_000)
+
+        await stack.undo()
+        XCTAssertEqual(vm.editState.exposure, 0.0)
+
+        await stack.redo()
+        XCTAssertEqual(
+            vm.editState.exposure,
+            1.5,
+            "redo must re-apply the forward state to the live view model"
+        )
+    }
+
+    // MARK: - Hydration on activate
+
+    @MainActor
+    func testActivateHydratesUndoStackFromEditHistory() async throws {
+        let (vm, asset, catalog) = try await makeViewModelWithAsset(hash: "undo-hydrate")
+        let stack = UndoStack(catalog: catalog)
+        vm.attach(undoStack: stack)
+        stack.attach(developViewModel: vm)
+
+        var v1 = EditState(); v1.exposure = 0.5
+        var v2 = EditState(); v2.exposure = 1.0
+        var v3 = EditState(); v3.exposure = 1.5
+        _ = try catalog.saveEditState(v1, for: asset.id)
+        _ = try catalog.saveEditState(v2, for: asset.id)
+        _ = try catalog.saveEditState(v3, for: asset.id)
+
+        XCTAssertFalse(stack.canUndo)
+
+        await vm.activate(assetId: asset.id)
+
+        XCTAssertTrue(
+            stack.canUndo,
+            "activate must hydrate the undo stack from persisted edit history"
+        )
+
+        await stack.undo()
+        XCTAssertEqual(
+            vm.editState.exposure,
+            1.0,
+            "first undo after hydration must roll back to v2"
+        )
+        await stack.undo()
+        XCTAssertEqual(
+            vm.editState.exposure,
+            0.5,
+            "second undo after hydration must roll back to v1"
+        )
+        await stack.undo()
+        XCTAssertEqual(
+            vm.editState.exposure,
+            0.0,
+            "last undo after hydration must roll back to identity (nil previous)"
+        )
+    }
+
+    @MainActor
+    func testReactivatingSameAssetDoesNotDoubleHydrate() async throws {
+        let (vm, asset, catalog) = try await makeViewModelWithAsset(hash: "undo-no-rehydrate")
+        let stack = UndoStack(catalog: catalog)
+        vm.attach(undoStack: stack)
+        stack.attach(developViewModel: vm)
+
+        var saved = EditState()
+        saved.exposure = 0.75
+        _ = try catalog.saveEditState(saved, for: asset.id)
+
+        await vm.activate(assetId: asset.id)
+        vm.deactivate()
+        await vm.activate(assetId: asset.id)
+
+        var count = 0
+        while stack.canUndo {
+            await stack.undo()
+            count += 1
+            if count > 5 {
+                XCTFail("Re-activation hydrated history more than once; got \(count) entries")
+                return
+            }
+        }
+        XCTAssertEqual(
+            count,
+            1,
+            "re-activation must not double-hydrate the stack"
+        )
+    }
+
     // MARK: - Reload for undo/redo replay
 
     @MainActor

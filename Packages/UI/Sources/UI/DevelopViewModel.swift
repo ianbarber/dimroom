@@ -30,10 +30,23 @@ public final class DevelopViewModel: ObservableObject {
     private var renderTask: Task<Void, Never>?
     private var saveTask: Task<Void, Never>?
     private var hasUnsavedChanges: Bool = false
+    /// `EditState` snapshot taken the first time `setParameter` /
+    /// `commitCrop` runs in a debounce window. Used as the `previous`
+    /// value on the `.editSave` undo entry pushed after the save fires,
+    /// so a continuous slider drag collapses to a single undo step.
+    private var pendingUndoPrevious: EditState?
+    private weak var undoStack: UndoStack?
 
     public init(catalog: CatalogDatabase, previewStore: PreviewStore) {
         self.catalog = catalog
         self.previewStore = previewStore
+    }
+
+    /// Late-bind the shared undo stack so edit saves show up as Cmd+Z
+    /// actions. Optional — unit tests / the `.empty()` placeholder can
+    /// run without one.
+    public func attach(undoStack: UndoStack) {
+        self.undoStack = undoStack
     }
 
     /// Size of the preview image currently driving the Develop pipeline,
@@ -59,6 +72,8 @@ public final class DevelopViewModel: ObservableObject {
             currentAssetId = assetId
             editState = (try? catalog.latestEditState(for: assetId)) ?? EditState()
             hasUnsavedChanges = false
+            pendingUndoPrevious = nil
+            hydrateUndoStack(for: assetId)
             return
         }
 
@@ -66,6 +81,8 @@ public final class DevelopViewModel: ObservableObject {
         currentAssetId = assetId
         editState = (try? catalog.latestEditState(for: assetId)) ?? EditState()
         hasUnsavedChanges = false
+        pendingUndoPrevious = nil
+        hydrateUndoStack(for: assetId)
         triggerRender()
     }
 
@@ -76,9 +93,13 @@ public final class DevelopViewModel: ObservableObject {
         saveTask = nil
 
         if hasUnsavedChanges, let assetId = currentAssetId {
+            let previous = pendingUndoPrevious
+            let next = editState
             _ = try? catalog.saveEditState(editState, for: assetId)
+            recordEditUndo(assetId: assetId, previous: previous, next: next)
         }
         hasUnsavedChanges = false
+        pendingUndoPrevious = nil
 
         sourceImage = nil
         renderedImage = nil
@@ -104,6 +125,7 @@ public final class DevelopViewModel: ObservableObject {
     }
 
     public func setParameter(_ keyPath: WritableKeyPath<EditState, Double>, value: Double) {
+        capturePendingUndoPreviousIfNeeded()
         editState[keyPath: keyPath] = value
         hasUnsavedChanges = true
         scheduleRender()
@@ -158,6 +180,7 @@ public final class DevelopViewModel: ObservableObject {
     /// Full-image identity crop (rect ≈ (0,0,1,1), angle == 0) is
     /// written as `nil` for both fields so EditState stays canonical.
     public func commitCrop(normalisedRect: CGRect, angle: Double) {
+        capturePendingUndoPreviousIfNeeded()
         let clampedAngle = CropGeometry.clampAngle(angle)
         let isIdentity = abs(normalisedRect.minX) < 1e-9 &&
             abs(normalisedRect.minY) < 1e-9 &&
@@ -264,8 +287,67 @@ public final class DevelopViewModel: ObservableObject {
             try? await Task.sleep(nanoseconds: 500_000_000)
             guard !Task.isCancelled else { return }
             guard let assetId = currentAssetId else { return }
-            _ = try? catalog.saveEditState(editState, for: assetId)
+            let previous = pendingUndoPrevious
+            let next = editState
+            _ = try? catalog.saveEditState(next, for: assetId)
             hasUnsavedChanges = false
+            pendingUndoPrevious = nil
+            recordEditUndo(assetId: assetId, previous: previous, next: next)
         }
+    }
+
+    /// Snapshot the current `editState` the first time a mutation
+    /// happens in a save-debounce window, so the `.editSave` we push
+    /// after the save has an accurate `previous` value.
+    private func capturePendingUndoPreviousIfNeeded() {
+        if pendingUndoPrevious == nil {
+            pendingUndoPrevious = editState
+        }
+    }
+
+    private func recordEditUndo(assetId: UUID, previous: EditState?, next: EditState) {
+        guard let stack = undoStack else { return }
+        // The stack suppresses pushes made while `apply` is replaying,
+        // so a save-triggered-by-undo never re-pushes itself.
+        stack.push(.editSave(assetId: assetId, previous: previous, next: next))
+    }
+
+    /// Hydrate the undo stack from on-disk version history on Develop
+    /// entry, so Cmd+Z can walk back through prior versions even after
+    /// the app restarts or the user re-enters Develop on a different
+    /// asset. No-op if the stack already has an `.editSave` entry for
+    /// this asset (avoids double-load when the user leaves and
+    /// re-enters within the same session).
+    private func hydrateUndoStack(for assetId: UUID) {
+        guard let stack = undoStack else { return }
+        guard !stack.hasEditSave(forAssetId: assetId) else { return }
+        guard let history = try? catalog.editHistory(for: assetId) else { return }
+        // `editHistory` returns newest-first; chronological order for
+        // hydration means oldest-first.
+        let chronological = history.reversed()
+        var previous: EditState? = nil
+        var pairs: [(assetId: UUID, previous: EditState?, next: EditState)] = []
+        for entry in chronological {
+            pairs.append((assetId: assetId, previous: previous, next: entry.state))
+            previous = entry.state
+        }
+        let bounded: [(assetId: UUID, previous: EditState?, next: EditState)]
+        if pairs.count > UndoStack.maxDepth {
+            bounded = Array(pairs.suffix(UndoStack.maxDepth))
+        } else {
+            bounded = pairs
+        }
+        stack.hydrateEditHistory(pairs: bounded)
+    }
+
+    /// Drop any in-flight debounced save + its captured undo baseline.
+    /// `UndoStack.apply` calls this before the catalog write on an
+    /// `.editSave` replay so a slider change whose 500 ms save happens
+    /// to wake during the replay can't clobber the undone state.
+    public func cancelPendingSave() {
+        saveTask?.cancel()
+        saveTask = nil
+        hasUnsavedChanges = false
+        pendingUndoPrevious = nil
     }
 }

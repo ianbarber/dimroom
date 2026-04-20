@@ -51,30 +51,41 @@ public struct DevelopView: View {
                     cropSection
                 }
 
-                sliderSection("Tone") {
-                    slider("Exposure", keyPath: \.exposure, range: -5.0...5.0, step: 0.01, identity: 0)
-                    slider("Contrast", keyPath: \.contrast, range: -100...100, step: 1, identity: 0)
-                    slider("Highlights", keyPath: \.highlights, range: -100...100, step: 1, identity: 0)
-                    slider("Shadows", keyPath: \.shadows, range: -100...100, step: 1, identity: 0)
-                    slider("Whites", keyPath: \.whites, range: -100...100, step: 1, identity: 0)
-                    slider("Blacks", keyPath: \.blacks, range: -100...100, step: 1, identity: 0)
-                }
-
-                sliderSection("White Balance") {
-                    slider("Temperature", keyPath: \.temperature, range: 2000...12000, step: 50, identity: 6500)
-                    slider("Tint", keyPath: \.tint, range: -150...150, step: 1, identity: 0)
-                }
-
-                sliderSection("Presence") {
-                    slider("Clarity", keyPath: \.clarity, range: -100...100, step: 1, identity: 0)
-                    slider("Vibrance", keyPath: \.vibrance, range: -100...100, step: 1, identity: 0)
-                    slider("Saturation", keyPath: \.saturation, range: -100...100, step: 1, identity: 0)
-                }
+                sliderColumn
             }
             .padding(12)
         }
         .frame(width: 280)
         .background(Color(white: 0.1))
+    }
+
+    /// Tone + White Balance + Presence slider stack. Animated on
+    /// `replaySequence` so undo/redo tweens the bound values, while
+    /// interactive drags (which do not bump `replaySequence`) stay
+    /// instant.
+    private var sliderColumn: some View {
+        VStack(alignment: .leading, spacing: 12) {
+            sliderSection("Tone") {
+                slider("Exposure", keyPath: \.exposure, range: -5.0...5.0, step: 0.01, identity: 0)
+                slider("Contrast", keyPath: \.contrast, range: -100...100, step: 1, identity: 0)
+                slider("Highlights", keyPath: \.highlights, range: -100...100, step: 1, identity: 0)
+                slider("Shadows", keyPath: \.shadows, range: -100...100, step: 1, identity: 0)
+                slider("Whites", keyPath: \.whites, range: -100...100, step: 1, identity: 0)
+                slider("Blacks", keyPath: \.blacks, range: -100...100, step: 1, identity: 0)
+            }
+
+            sliderSection("White Balance") {
+                slider("Temperature", keyPath: \.temperature, range: 2000...12000, step: 50, identity: 6500)
+                slider("Tint", keyPath: \.tint, range: -150...150, step: 1, identity: 0)
+            }
+
+            sliderSection("Presence") {
+                slider("Clarity", keyPath: \.clarity, range: -100...100, step: 1, identity: 0)
+                slider("Vibrance", keyPath: \.vibrance, range: -100...100, step: 1, identity: 0)
+                slider("Saturation", keyPath: \.saturation, range: -100...100, step: 1, identity: 0)
+            }
+        }
+        .animation(.easeOut(duration: 0.25), value: viewModel.replaySequence)
     }
 
     private var cropToggle: some View {

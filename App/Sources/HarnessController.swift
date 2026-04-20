@@ -201,6 +201,9 @@ final class HarnessController: @unchecked Sendable {
         case .setEditParameter(let assetId, let parameter, let value):
             return await handleSetEditParameter(assetId: assetId, parameter: parameter, value: value)
 
+        case .resetEditParameter(let assetId, let parameter):
+            return await handleResetEditParameter(assetId: assetId, parameter: parameter)
+
         case .undo:
             return await handleUndo()
 
@@ -493,6 +496,12 @@ final class HarnessController: @unchecked Sendable {
             let previous = try? catalog.latestEditState(for: assetId)
             _ = try catalog.saveEditState(state, for: assetId)
             await recordEditUndo(assetId: assetId, previous: previous, next: state)
+            // Keep the live DevelopViewModel in sync with the catalog
+            // write so a subsequent undo has a real starting value to
+            // animate from. Without this, VM and catalog diverge and
+            // undo's `reloadEditState` reads a state the VM is already
+            // at, so `replaySequence` bumps but no slider moves.
+            await developViewModel.reloadEditState(for: assetId)
             return .ok()
         } catch {
             return .error("setEdit failed: \(error.localizedDescription)")
@@ -595,6 +604,26 @@ final class HarnessController: @unchecked Sendable {
         }
         await MainActor.run {
             developViewModel.setParameter(keyPath, value: value)
+        }
+        return .ok()
+    }
+
+    private func handleResetEditParameter(assetId: UUID, parameter: String) async -> Response {
+        guard let keyPath = DevelopViewModel.keyPath(forParameter: parameter) else {
+            return .error("unknown parameter: \(parameter)")
+        }
+        let alreadyActive: Bool = await MainActor.run {
+            if developViewModel.currentAssetId != assetId {
+                router.route = .develop
+                return false
+            }
+            return true
+        }
+        if !alreadyActive {
+            await developViewModel.activate(assetId: assetId)
+        }
+        await MainActor.run {
+            developViewModel.resetParameter(keyPath)
         }
         return .ok()
     }

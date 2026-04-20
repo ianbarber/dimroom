@@ -11,6 +11,7 @@ struct ContentView: View {
     @ObservedObject var importCoordinator: ImportCoordinator
     @ObservedObject var exportCoordinator: ExportCoordinator
     @ObservedObject var uploadCoordinator: UploadCoordinator
+    @ObservedObject var undoStack: UndoStack
     let catalog: CatalogDatabase?
     @State private var showExportSheet = false
     /// Non-nil while the delete-confirmation dialog is presented.
@@ -36,7 +37,13 @@ struct ContentView: View {
                     case .loupe: router.route = .loupe
                     case .develop: router.route = .develop
                     }
-                }
+                },
+                undoEnabled: undoStack.canUndo,
+                redoEnabled: undoStack.canRedo,
+                undoTooltip: undoStack.undoDescription.map { "Undo \($0)" } ?? "Undo",
+                redoTooltip: undoStack.redoDescription.map { "Redo \($0)" } ?? "Redo",
+                onUndo: { Task { await undoStack.undo() } },
+                onRedo: { Task { await undoStack.redo() } }
             )
 
             Group {

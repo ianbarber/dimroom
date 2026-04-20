@@ -73,9 +73,9 @@ public final class UndoStack: ObservableObject {
         self.libraryViewModel = libraryViewModel
     }
 
-    /// Late binding for the shared `DevelopViewModel` so `.editSave`
-    /// replays can refresh the live preview / sliders when undo fires
-    /// while Develop is on screen.
+    /// Late binding for the Develop view model. On an `.editSave`
+    /// undo/redo replay we ask it to re-read the restored `EditState`
+    /// from the catalog so the sliders animate to the new values.
     public func attach(developViewModel: DevelopViewModel) {
         self.developViewModel = developViewModel
     }
@@ -198,7 +198,7 @@ public final class UndoStack: ObservableObject {
             _ = try? catalog.saveEditState(state, for: assetId)
             await libraryViewModel?.reloadAndWait()
             if let activeDevelop {
-                await activeDevelop.reloadAfterUndo(assetId: assetId)
+                await activeDevelop.reloadEditState(for: assetId)
             }
         case .softDelete(let assetIds):
             if direction == .forward {

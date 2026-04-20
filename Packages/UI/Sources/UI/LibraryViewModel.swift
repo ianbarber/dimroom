@@ -77,7 +77,10 @@ public final class LibraryViewModel: ObservableObject {
     /// indeterminate (e.g. the `Content-Length` was unknown so no ticks
     /// fired, or the fetch hit the cache and skipped the network). Values
     /// are clamped monotonically non-decreasing so a late, lower tick
-    /// cannot move the bar backwards.
+    /// cannot move the bar backwards. Writes are additionally gated on
+    /// `downloadingAssetIds.contains(assetId)` so a progress `Task`
+    /// scheduled before the cleanup `defer` but executed after it cannot
+    /// resurrect a cleared entry.
     @Published public private(set) var downloadProgressByAssetId: [UUID: Double] = [:]
 
     /// App-level coordinator that returns a local URL for an original,
@@ -304,6 +307,7 @@ public final class LibraryViewModel: ObservableObject {
         let progress: @Sendable (Double) -> Void = { [weak self] fraction in
             Task { @MainActor [weak self] in
                 guard let self else { return }
+                guard self.downloadingAssetIds.contains(assetId) else { return }
                 let clamped = min(max(fraction, 0), 1)
                 let existing = self.downloadProgressByAssetId[assetId] ?? 0
                 if clamped >= existing {

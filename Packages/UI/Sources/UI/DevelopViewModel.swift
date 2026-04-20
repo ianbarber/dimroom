@@ -10,6 +10,7 @@ public final class DevelopViewModel: ObservableObject {
     @Published public private(set) var editState: EditState = EditState()
     @Published public private(set) var renderedImage: NSImage?
     @Published public private(set) var isRendering: Bool = false
+    @Published public private(set) var histogram: HistogramData?
     /// Monotonic counter bumped whenever `reloadEditState()` refreshes
     /// `editState` from the catalog (i.e. an undo/redo replay replaced
     /// the current values). The Develop view keys its slider animation
@@ -81,6 +82,7 @@ public final class DevelopViewModel: ObservableObject {
 
         sourceImage = nil
         renderedImage = nil
+        histogram = nil
         currentAssetId = nil
         editState = EditState()
     }
@@ -234,17 +236,19 @@ public final class DevelopViewModel: ObservableObject {
         let state = editState
         isRendering = true
 
-        let result: NSImage? = await Task.detached(priority: .userInitiated) { [ciContext] in
+        let result: (image: NSImage?, histogram: HistogramData?) = await Task.detached(priority: .userInitiated) { [ciContext] in
             let output = Renderer.render(source: source, editState: state)
+            let histogram = Histogram.compute(from: output, context: ciContext)
             guard let cgImage = ciContext.createCGImage(output, from: output.extent) else {
-                return nil
+                return (nil, histogram)
             }
             let size = NSSize(width: cgImage.width, height: cgImage.height)
-            return NSImage(cgImage: cgImage, size: size)
+            return (NSImage(cgImage: cgImage, size: size), histogram)
         }.value
 
         guard !Task.isCancelled else { return }
-        renderedImage = result
+        renderedImage = result.image
+        histogram = result.histogram
         isRendering = false
     }
 

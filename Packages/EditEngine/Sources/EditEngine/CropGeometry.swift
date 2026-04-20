@@ -35,6 +35,39 @@ public enum CropGeometry {
         )
     }
 
+    /// Convert a crop rect from display-space (top-left origin, normalised
+    /// 0…1) into Core Image pixel coordinates (bottom-left origin).
+    ///
+    /// SwiftUI overlays use a top-left origin so a `(0, 0, 0.5, 0.5)`
+    /// selection means "the top-left quadrant." Core Image's coordinate
+    /// system has Y growing upward, so the same quadrant lives at
+    /// `(0, H/2, W/2, H/2)`. Without this flip the renderer would crop
+    /// the bottom-left quadrant instead — the visible symptom of #156's
+    /// region mismatch bug.
+    public static func normalizedTopLeftToCIPixel(rect: CGRect, imageSize: CGSize) -> CGRect {
+        let pixel = normalizedToPixel(rect: rect, imageSize: imageSize)
+        return CGRect(
+            x: pixel.origin.x,
+            y: imageSize.height - pixel.origin.y - pixel.size.height,
+            width: pixel.size.width,
+            height: pixel.size.height
+        )
+    }
+
+    /// Inverse of `normalizedTopLeftToCIPixel`. Used when re-entering crop
+    /// mode to seed the SwiftUI overlay from a stored Core Image rect.
+    /// Degenerate (zero-sized) images return the input unchanged.
+    public static func ciPixelToNormalizedTopLeft(rect: CGRect, imageSize: CGSize) -> CGRect {
+        guard imageSize.width > 0, imageSize.height > 0 else { return rect }
+        let displayY = imageSize.height - rect.origin.y - rect.size.height
+        return CGRect(
+            x: rect.origin.x / imageSize.width,
+            y: displayY / imageSize.height,
+            width: rect.size.width / imageSize.width,
+            height: rect.size.height / imageSize.height
+        )
+    }
+
     // MARK: - Aspect ratio
 
     /// Constrain `rect` to the given aspect `ratio` (width / height), keeping

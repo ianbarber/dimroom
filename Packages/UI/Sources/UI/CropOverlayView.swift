@@ -1,3 +1,4 @@
+import AppKit
 import EditEngine
 import SwiftUI
 
@@ -19,6 +20,13 @@ public struct CropOverlayView: View {
     /// on each frame and apply cumulative translation against a moving
     /// base — making the rect accelerate away from the cursor.
     @State private var dragStartRect: CGRect?
+    /// True while any Shift modifier is held. Updated by a local event
+    /// monitor; used to promote a `.free`-mode corner drag into a
+    /// ratio-locked one (Photoshop/Lightroom convention).
+    @State private var shiftHeld: Bool = false
+    /// Token returned by `NSEvent.addLocalMonitorForEvents`; retained so
+    /// we can remove the monitor on disappear and never leak it.
+    @State private var flagMonitor: Any?
 
     public init(viewModel: CropViewModel) {
         self.viewModel = viewModel
@@ -43,6 +51,23 @@ public struct CropOverlayView: View {
                 translateCatcher(cropPixels: cropPixels, imageSize: geo.size)
                 handles(cropPixels: cropPixels, imageSize: geo.size)
             }
+        }
+        .onAppear {
+            // Shift-state read via a process-wide local monitor rather
+            // than polling `NSEvent.modifierFlags` inside the drag
+            // closure, which reads app state and can desync under
+            // SwiftUI's gesture coalescing.
+            flagMonitor = NSEvent.addLocalMonitorForEvents(matching: .flagsChanged) { event in
+                shiftHeld = event.modifierFlags.contains(.shift)
+                return event
+            }
+        }
+        .onDisappear {
+            if let monitor = flagMonitor {
+                NSEvent.removeMonitor(monitor)
+                flagMonitor = nil
+            }
+            shiftHeld = false
         }
     }
 
@@ -89,10 +114,19 @@ public struct CropOverlayView: View {
     }
 
     private func translateCatcher(cropPixels: CGRect, imageSize: CGSize) -> some View {
+        // Double-click wins over the drag gesture via `highPriorityGesture`
+        // so a quick double-tap doesn't register as a zero-translation
+        // drag-to-translate. Normal single-press drags still translate.
         Color.clear
             .contentShape(Rectangle())
             .frame(width: cropPixels.width, height: cropPixels.height)
             .offset(x: cropPixels.minX, y: cropPixels.minY)
+            .highPriorityGesture(
+                TapGesture(count: 2)
+                    .onEnded {
+                        viewModel.resetRect()
+                    }
+            )
             .gesture(
                 DragGesture(minimumDistance: 0)
                     .onChanged { value in
@@ -151,7 +185,18 @@ public struct CropOverlayView: View {
                     rect: new,
                     imageSize: imageSize
                 )
-                viewModel.updateRect(normalised, anchor: anchorNorm)
+                // Shift-drag on a corner locks to the rect's current
+                // ratio even in `.free` mode — Photoshop/Lightroom
+                // convention. Uses the drag-start rect so the ratio
+                // doesn't drift mid-gesture as the rect resizes.
+                let overrideRatio: Double?
+                if handle.isCorner, shiftHeld, viewModel.selectedPreset == .free,
+                   start.height > 0 {
+                    overrideRatio = Double(start.width / start.height)
+                } else {
+                    overrideRatio = nil
+                }
+                viewModel.updateRect(normalised, anchor: anchorNorm, overrideRatio: overrideRatio)
             }
             .onEnded { _ in
                 dragStartRect = nil
@@ -184,6 +229,17 @@ public struct CropOverlayView: View {
 private enum Handle: CaseIterable {
     case topLeft, topRight, bottomLeft, bottomRight
     case top, bottom, leading, trailing
+
+    /// True for the 4 corner handles; shift-drag ratio locking only
+    /// makes sense on corners (edge handles resize one axis only).
+    var isCorner: Bool {
+        switch self {
+        case .topLeft, .topRight, .bottomLeft, .bottomRight:
+            return true
+        case .top, .bottom, .leading, .trailing:
+            return false
+        }
+    }
 
     func position(in rect: CGRect) -> CGPoint {
         switch self {

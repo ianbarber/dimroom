@@ -82,6 +82,36 @@ final class CropGeometryTests: XCTestCase {
         XCTAssertEqual(constrained.minY, rect.minY, accuracy: 1e-9)
     }
 
+    /// Anchor at the top-right corner: the opposite (bottom-left)
+    /// handle was dragged. The right edge stays fixed and the rect
+    /// grows leftward + downward.
+    func testConstrainAnchoredAtTopRight() {
+        let rect = CGRect(x: 0.1, y: 0.0, width: 0.6, height: 0.4)
+        let anchor = CGPoint(x: rect.maxX, y: rect.minY)
+        let constrained = CropGeometry.constrain(rect: rect, to: 1.0, anchor: anchor)
+
+        XCTAssertEqual(constrained.width, constrained.height, accuracy: 1e-9)
+        // Right edge preserved — anchor is on the right.
+        XCTAssertEqual(constrained.maxX, rect.maxX, accuracy: 1e-9)
+        // Top edge preserved — anchor is at the top.
+        XCTAssertEqual(constrained.minY, rect.minY, accuracy: 1e-9)
+    }
+
+    /// Anchor at the bottom-left corner: the opposite (top-right)
+    /// handle was dragged. The left edge stays fixed and the rect
+    /// grows rightward + upward.
+    func testConstrainAnchoredAtBottomLeft() {
+        let rect = CGRect(x: 0.0, y: 0.1, width: 0.6, height: 0.4)
+        let anchor = CGPoint(x: rect.minX, y: rect.maxY)
+        let constrained = CropGeometry.constrain(rect: rect, to: 1.0, anchor: anchor)
+
+        XCTAssertEqual(constrained.width, constrained.height, accuracy: 1e-9)
+        // Left edge preserved — anchor is on the left.
+        XCTAssertEqual(constrained.minX, rect.minX, accuracy: 1e-9)
+        // Bottom edge preserved — anchor is at the bottom.
+        XCTAssertEqual(constrained.maxY, rect.maxY, accuracy: 1e-9)
+    }
+
     func testConstrainSixteenToNineProducesExactRatio() {
         let rect = CGRect(x: 0.1, y: 0.1, width: 0.8, height: 0.8)
         let anchor = CGPoint(x: rect.midX, y: rect.midY)

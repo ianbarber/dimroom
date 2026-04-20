@@ -228,11 +228,9 @@ public enum Renderer {
     }
 
     private static func applyCrop(_ image: CIImage, rect: CGRect?, angle: Double?) -> CIImage {
-        guard let cropRect = rect else { return image }
         var result = image
 
-        // Apply rotation around image center if angle is set
-        if let angle = angle, angle != 0 {
+        if let angle, angle != 0 {
             let radians = angle * .pi / 180.0
             let cx = result.extent.midX
             let cy = result.extent.midY
@@ -242,9 +240,13 @@ public enum Renderer {
             result = result.transformed(by: transform)
         }
 
-        result = result.cropped(to: cropRect)
-        // Translate so the crop origin is at (0,0)
-        result = result.transformed(by: CGAffineTransform(translationX: -cropRect.origin.x, y: -cropRect.origin.y))
+        if let cropRect = rect {
+            result = result.cropped(to: cropRect)
+            result = result.transformed(by: CGAffineTransform(
+                translationX: -cropRect.origin.x,
+                y: -cropRect.origin.y
+            ))
+        }
         return result
     }
 }

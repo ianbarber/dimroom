@@ -40,6 +40,11 @@ public enum Command: Codable, Sendable, Equatable {
     case permanentlyDeleteAssets(ids: [UUID])
     case uploadToDrive(assetId: UUID)
     case getPreviewSignature(assetId: UUID)
+    case enterCropMode(assetId: UUID)
+    case commitCrop
+    case cancelCrop
+    case setCropPreset(name: String)
+    case resetCrop
 
     private enum CodingKeys: String, CodingKey {
         case type
@@ -64,6 +69,7 @@ public enum Command: Codable, Sendable, Equatable {
         case width
         case height
         case angle
+        case name
     }
 
     private enum CommandType: String, Codable {
@@ -104,6 +110,11 @@ public enum Command: Codable, Sendable, Equatable {
         case permanentlyDeleteAssets
         case uploadToDrive
         case getPreviewSignature
+        case enterCropMode
+        case commitCrop
+        case cancelCrop
+        case setCropPreset
+        case resetCrop
     }
 
     public init(from decoder: Decoder) throws {
@@ -228,6 +239,18 @@ public enum Command: Codable, Sendable, Equatable {
         case .getPreviewSignature:
             let assetId = try container.decode(UUID.self, forKey: .assetId)
             self = .getPreviewSignature(assetId: assetId)
+        case .enterCropMode:
+            let assetId = try container.decode(UUID.self, forKey: .assetId)
+            self = .enterCropMode(assetId: assetId)
+        case .commitCrop:
+            self = .commitCrop
+        case .cancelCrop:
+            self = .cancelCrop
+        case .setCropPreset:
+            let name = try container.decode(String.self, forKey: .name)
+            self = .setCropPreset(name: name)
+        case .resetCrop:
+            self = .resetCrop
         }
     }
 
@@ -345,6 +368,18 @@ public enum Command: Codable, Sendable, Equatable {
         case .getPreviewSignature(let assetId):
             try container.encode(CommandType.getPreviewSignature, forKey: .type)
             try container.encode(assetId, forKey: .assetId)
+        case .enterCropMode(let assetId):
+            try container.encode(CommandType.enterCropMode, forKey: .type)
+            try container.encode(assetId, forKey: .assetId)
+        case .commitCrop:
+            try container.encode(CommandType.commitCrop, forKey: .type)
+        case .cancelCrop:
+            try container.encode(CommandType.cancelCrop, forKey: .type)
+        case .setCropPreset(let name):
+            try container.encode(CommandType.setCropPreset, forKey: .type)
+            try container.encode(name, forKey: .name)
+        case .resetCrop:
+            try container.encode(CommandType.resetCrop, forKey: .type)
         }
     }
 }

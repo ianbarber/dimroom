@@ -146,12 +146,14 @@ public final class DevelopViewModel: ObservableObject {
 
     /// Enter the interactive crop mode, seeding `cropViewModel` from
     /// the current `editState` (or identity if no crop has been
-    /// applied yet).
+    /// applied yet). Schedules a render so the preview switches to the
+    /// uncropped source image while the overlay is active — the user
+    /// must be able to see the full frame to adjust or undo the crop.
     public func enterCropMode() {
         let normalised: CGRect
         if let existing = editState.cropRect, let size = sourceImageSize,
            size.width > 0, size.height > 0 {
-            normalised = CropGeometry.pixelToNormalized(
+            normalised = CropGeometry.ciPixelToNormalizedTopLeft(
                 rect: existing,
                 imageSize: size
             )
@@ -169,6 +171,7 @@ public final class DevelopViewModel: ObservableObject {
             angle: editState.cropAngle ?? 0,
             imageAspect: aspect
         )
+        scheduleRender()
     }
 
     /// Commit the CropViewModel's current rect + angle to `editState`
@@ -178,9 +181,31 @@ public final class DevelopViewModel: ObservableObject {
         commitCrop(normalisedRect: rect, angle: angle)
     }
 
-    /// Exit crop mode discarding any in-progress edits.
+    /// Exit crop mode discarding any in-progress edits. Re-renders so
+    /// the preview snaps back to the pre-activate crop.
     public func cancelCrop() {
         cropViewModel.cancel()
+        scheduleRender()
+    }
+
+    /// Update the straighten angle while crop mode is active and
+    /// re-render the preview so the user sees the rotation live.
+    /// `CropViewModel.setAngle` only mutates VM state — without a paired
+    /// render schedule the Develop preview stays stuck at the
+    /// pre-activation angle while the slider moves.
+    public func setCropAngleLive(_ degrees: Double) {
+        cropViewModel.setAngle(degrees)
+        scheduleRender()
+    }
+
+    /// Reset the in-progress crop back to the full frame. Called by
+    /// the double-click gesture in `CropOverlayView`. Leaves the
+    /// `previousCropRect` snapshot untouched so Escape / `cancel()`
+    /// still reverts to the pre-activate state.
+    public func resetCrop() {
+        cropViewModel.resetRect()
+        cropViewModel.selectedPreset = .free
+        scheduleRender()
     }
 
     /// Write a normalised crop rect and straighten angle into
@@ -203,7 +228,11 @@ public final class DevelopViewModel: ObservableObject {
             editState.cropAngle = nil
         } else {
             if let size = sourceImageSize, size.width > 0, size.height > 0 {
-                editState.cropRect = CropGeometry.normalizedToPixel(
+                // SwiftUI overlays use a top-left origin; Core Image
+                // uses a bottom-left origin. Flip Y here so the
+                // renderer crops the region the user selected rather
+                // than its vertical mirror — see #156 bug 1.
+                editState.cropRect = CropGeometry.normalizedTopLeftToCIPixel(
                     rect: normalisedRect,
                     imageSize: size
                 )
@@ -272,7 +301,16 @@ public final class DevelopViewModel: ObservableObject {
 
     private func performRender() async {
         guard let source = sourceImage else { return }
-        let state = editState
+        // While the crop overlay is active the user must see the full
+        // frame with the overlay drawn on top — otherwise adjusting or
+        // undoing an existing crop is impossible (#156 bug 2). Strip
+        // the crop rect for the live render but keep `cropAngle` so
+        // the straighten slider still reflects its rotation.
+        var state = editState
+        if cropViewModel.isActive {
+            state.cropRect = nil
+            state.cropAngle = cropViewModel.cropAngle == 0 ? nil : cropViewModel.cropAngle
+        }
         isRendering = true
 
         let result: (image: NSImage?, histogram: HistogramData?) = await Task.detached(priority: .userInitiated) { [ciContext] in

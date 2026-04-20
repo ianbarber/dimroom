@@ -10,12 +10,14 @@ let package = Package(
     ],
     dependencies: [
         .package(path: "../Catalog"),
+        .package(path: "../EditEngine"),
     ],
     targets: [
         .target(
             name: "Previews",
             dependencies: [
                 .product(name: "Catalog", package: "Catalog"),
+                .product(name: "EditEngine", package: "EditEngine"),
             ],
             linkerSettings: [
                 .linkedFramework("CoreImage"),

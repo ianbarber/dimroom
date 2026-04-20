@@ -1,4 +1,5 @@
 import Catalog
+import CryptoKit
 import Foundation
 import Previews
 @testable import UI
@@ -460,6 +461,48 @@ final class DevelopViewModelTests: XCTestCase {
             1,
             "reloadEditState must not schedule a save — the catalog write belongs to whoever is replaying"
         )
+    }
+
+    // MARK: - Thumbnail regeneration after save
+
+    /// After the auto-save debounce fires, the cached thumbnail must be
+    /// (re)written via EditEngine — that's how Library/Loupe pick up the
+    /// edited look. Placing a pre-existing thumbnail proves the bytes
+    /// actually change rather than getting populated for the first time.
+    @MainActor
+    func testAutoSaveRegeneratesThumbnail() async throws {
+        let (vm, asset, _) = try await makeViewModelWithAsset(hash: "regen-thumb-afteredit")
+        try TestFixtures.placeThumbnail(
+            for: asset,
+            cacheDirectory: tempCacheDir,
+            color: (r: 120, g: 120, b: 120)
+        )
+
+        await vm.activate(assetId: asset.id)
+
+        let thumbURL = tempCacheDir
+            .appendingPathComponent(String(asset.contentHash.prefix(2)), isDirectory: true)
+            .appendingPathComponent("\(asset.contentHash).thumb.jpg")
+        let hashBefore = try Self.sha256(of: thumbURL)
+
+        vm.setParameter(\.exposure, value: 2.0)
+
+        // Debounce is 500ms; wait 1.5s for the save + async regenerate
+        // to land.
+        try await Task.sleep(nanoseconds: 1_500_000_000)
+
+        let hashAfter = try Self.sha256(of: thumbURL)
+        XCTAssertNotEqual(
+            hashBefore,
+            hashAfter,
+            "Cached thumbnail bytes must change after auto-save completes"
+        )
+    }
+
+    private static func sha256(of url: URL) throws -> String {
+        let data = try Data(contentsOf: url)
+        let digest = SHA256.hash(data: data)
+        return digest.map { String(format: "%02x", $0) }.joined()
     }
 
     // MARK: - Parameter name → keypath lookup

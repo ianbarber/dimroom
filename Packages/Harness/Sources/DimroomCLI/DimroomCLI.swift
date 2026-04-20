@@ -42,6 +42,7 @@ struct DimroomCLI: ParsableCommand {
             RestoreAssets.self,
             PermanentlyDeleteAssets.self,
             SetScopeRecentlyDeleted.self,
+            GetPreviewSignature.self,
         ]
     )
 }
@@ -685,6 +686,26 @@ extension DimroomCLI {
                 return u
             }
             try runCommand(.permanentlyDeleteAssets(ids: uuids), socket: socket)
+        }
+    }
+
+    struct GetPreviewSignature: ParsableCommand {
+        static let configuration = CommandConfiguration(
+            commandName: "get-preview-signature",
+            abstract: "Get the SHA-256 of the cached thumbnail JPEG for an asset (hash + bytes)."
+        )
+
+        @Argument(help: "The UUID of the asset.")
+        var id: String
+
+        @Option(name: .long, help: "Path to the harness socket.")
+        var socket: String = HarnessServer.defaultSocketPath
+
+        func run() throws {
+            guard let uuid = UUID(uuidString: id) else {
+                throw ValidationError("Invalid UUID '\(id)'.")
+            }
+            try runCommand(.getPreviewSignature(assetId: uuid), socket: socket)
         }
     }
 

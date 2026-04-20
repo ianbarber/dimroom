@@ -1,5 +1,6 @@
 import AppKit
 import Catalog
+import CryptoKit
 import DriveClient
 import EditEngine
 import Foundation
@@ -243,7 +244,48 @@ final class HarnessController: @unchecked Sendable {
 
         case .uploadToDrive(let assetId):
             return await handleUploadToDrive(assetId: assetId)
+
+        case .getPreviewSignature(let assetId):
+            return handleGetPreviewSignature(assetId: assetId)
         }
+    }
+
+    // MARK: - Preview signature
+
+    private func handleGetPreviewSignature(assetId: UUID) -> Response {
+        guard let catalog else {
+            return .error("catalog not loaded")
+        }
+        let asset: Asset?
+        do {
+            asset = try catalog.fetchAsset(id: assetId)
+        } catch {
+            return .error("fetchAsset failed: \(error.localizedDescription)")
+        }
+        guard let asset else {
+            return .error("asset not found: \(assetId)")
+        }
+        guard let thumbURL = previewStore.thumbnailURL(for: asset) else {
+            return .ok(data: .dictionary([
+                "present": .bool(false),
+            ]))
+        }
+        do {
+            let data = try Data(contentsOf: thumbURL)
+            let hash = Self.sha256Hex(data)
+            return .ok(data: .dictionary([
+                "present": .bool(true),
+                "sha256": .string(hash),
+                "bytes": .int(data.count),
+            ]))
+        } catch {
+            return .error("read thumbnail failed: \(error.localizedDescription)")
+        }
+    }
+
+    private static func sha256Hex(_ data: Data) -> String {
+        let digest = SHA256.hash(data: data)
+        return digest.map { String(format: "%02x", $0) }.joined()
     }
 
     // MARK: - Upload to Drive

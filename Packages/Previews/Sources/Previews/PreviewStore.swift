@@ -1,6 +1,8 @@
 import Catalog
+import Combine
 import CoreGraphics
 import CoreImage
+import EditEngine
 import Foundation
 import ImageIO
 import UniformTypeIdentifiers
@@ -29,6 +31,18 @@ public actor PreviewStore {
     /// taken. Used by tests to distinguish "decoded via RAW path" from
     /// "decoded via JPEG path" without having to commit a real DNG.
     private(set) var rawDecodeCount: Int = 0
+
+    /// Emits the asset id whose cached thumbnail + preview have just been
+    /// rewritten via `regenerateWithEdit(for:editState:)`. Observers
+    /// (e.g. `LibraryViewModel`) subscribe to force a grid reload so the
+    /// edited look replaces the original-appearance thumbnail. Declared
+    /// `nonisolated` so non-actor callers can subscribe without hopping
+    /// through the actor; sends happen only on the actor.
+    private nonisolated let regeneratedSubject = PassthroughSubject<UUID, Never>()
+
+    public nonisolated var previewRegenerated: AnyPublisher<UUID, Never> {
+        regeneratedSubject.eraseToAnyPublisher()
+    }
 
     public init(cacheDirectory: URL) {
         self.init(
@@ -118,6 +132,43 @@ public actor PreviewStore {
         }
 
         return PreviewSet(thumbnail: thumbURL, preview: previewURL)
+    }
+
+    /// Re-render `asset`'s cached thumbnail and preview JPEGs by applying
+    /// `editState` to the existing 2048px preview. No-op when the preview
+    /// cache has not been populated yet — the next `generate` call will
+    /// include a full edit render, so there is nothing to update here.
+    ///
+    /// Uses the already-decoded preview JPEG as the source rather than
+    /// the original file, because originals may live only in Drive (see
+    /// CLAUDE.md hard rule 3). This matches `DevelopViewModel.activate`,
+    /// which already drives the interactive render from the preview.
+    ///
+    /// Emits `asset.id` on `previewRegenerated` on success so observers
+    /// can reload.
+    public func regenerateWithEdit(for asset: Asset, editState: EditState) async {
+        let previewURL = CachePaths.fileURL(for: asset, kind: .preview, in: cacheDirectory)
+        guard fileManager.fileExists(atPath: previewURL.path),
+              let source = CIImage(contentsOf: previewURL) else {
+            return
+        }
+
+        let rendered = Renderer.render(source: source, editState: editState)
+
+        for kind in PreviewKind.allCases {
+            let target = CachePaths.fileURL(for: asset, kind: kind, in: cacheDirectory)
+            let scaled = scale(rendered, longEdge: kind.maxEdge)
+            do {
+                try writeJPEG(scaled, to: target)
+            } catch {
+                // A write failure on one size leaves the cache in a
+                // best-effort state; don't emit a signal that would
+                // prompt consumers to reload stale bytes.
+                return
+            }
+        }
+
+        regeneratedSubject.send(asset.id)
     }
 
     // MARK: - Decoding

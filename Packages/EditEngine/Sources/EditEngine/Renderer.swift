@@ -17,9 +17,16 @@ public enum Renderer {
         image = applyWhitesBlacks(image, whites: editState.whites, blacks: editState.blacks)
         image = applyContrast(image, contrast: editState.contrast)
         image = applyClarity(image, clarity: editState.clarity)
+        image = applySharpening(image, sharpening: editState.sharpening)
         image = applyVibrance(image, vibrance: editState.vibrance)
         image = applySaturation(image, saturation: editState.saturation)
         image = applyCrop(image, rect: editState.cropRect, angle: editState.cropAngle)
+        image = applyVignette(
+            image,
+            amount: editState.vignetteAmount,
+            roundness: editState.vignetteRoundness,
+            softness: editState.vignetteSoftness
+        )
         return image
     }
 
@@ -150,6 +157,72 @@ public enum Renderer {
         filter.setValue(1.0, forKey: "inputContrast")
         filter.setValue(0.0, forKey: "inputBrightness")
         return filter.outputImage!
+    }
+
+    private static func applySharpening(_ image: CIImage, sharpening: Double) -> CIImage {
+        guard sharpening != 0 else { return image }
+        // Luminance-only sharpen avoids the colour fringing CIUnsharpMask can
+        // introduce on saturated edges. Map 0…100 to 0…2.0 — the upper end is
+        // a strong output sharpen without visible haloing on photo previews.
+        let filter = CIFilter(name: "CISharpenLuminance")!
+        filter.setValue(image, forKey: kCIInputImageKey)
+        filter.setValue(sharpening / 50.0, forKey: "inputSharpness")
+        return filter.outputImage!.cropped(to: image.extent)
+    }
+
+    private static func applyVignette(
+        _ image: CIImage,
+        amount: Double,
+        roundness: Double,
+        softness: Double
+    ) -> CIImage {
+        guard amount != 0 else { return image }
+
+        let extent = image.extent
+        let center = CIVector(x: extent.midX, y: extent.midY)
+
+        // Roundness maps to the radial gradient's inner/outer radii relative
+        // to the image's shortest half-dimension. At roundness=100 the inner
+        // radius is large and close to the outer radius — the gradient hugs
+        // the corners as a circle. At roundness=0 the inner radius is small,
+        // producing a broad gradient that reaches the frame edges roughly
+        // following their rectangular shape.
+        let halfMin = Double(min(extent.width, extent.height)) / 2.0
+        let halfDiag = sqrt(Double(extent.width * extent.width + extent.height * extent.height)) / 2.0
+
+        // Softness controls the distance between inner and outer radii.
+        // softness=0 → hard edge (inner ≈ outer), softness=100 → gradient
+        // spans the full shortest half-dimension.
+        let softnessFraction = 0.15 + (softness / 100.0) * 0.85
+        let roundnessFraction = roundness / 100.0
+
+        // Outer radius extends further (past the corners) as roundness
+        // decreases so rectangular frames get full edge coverage.
+        let outerRadius = halfMin + (halfDiag - halfMin) * (1.0 - roundnessFraction)
+        let innerRadius = max(0.0, outerRadius - halfMin * softnessFraction)
+
+        let gradient = CIFilter(name: "CIRadialGradient")!
+        gradient.setValue(center, forKey: "inputCenter")
+        gradient.setValue(innerRadius, forKey: "inputRadius0")
+        gradient.setValue(outerRadius, forKey: "inputRadius1")
+        // Mask: inner is black (no effect), outer is white (full effect).
+        gradient.setValue(CIColor(red: 0, green: 0, blue: 0, alpha: 0), forKey: "inputColor0")
+        gradient.setValue(CIColor(red: 1, green: 1, blue: 1, alpha: 1), forKey: "inputColor1")
+        let mask = gradient.outputImage!.cropped(to: extent)
+
+        // Blend the image with a tint image (black for dark, white for light)
+        // using the radial mask — corners converge toward the tint colour.
+        let intensity = Swift.abs(amount) / 100.0
+        let tintColor: CIColor = amount < 0
+            ? CIColor(red: 0, green: 0, blue: 0, alpha: CGFloat(intensity))
+            : CIColor(red: 1, green: 1, blue: 1, alpha: CGFloat(intensity))
+        let tint = CIImage(color: tintColor).cropped(to: extent)
+
+        let blend = CIFilter(name: "CIBlendWithMask")!
+        blend.setValue(tint, forKey: kCIInputImageKey)
+        blend.setValue(image, forKey: kCIInputBackgroundImageKey)
+        blend.setValue(mask, forKey: "inputMaskImage")
+        return blend.outputImage!.cropped(to: extent)
     }
 
     private static func applyCrop(_ image: CIImage, rect: CGRect?, angle: Double?) -> CIImage {

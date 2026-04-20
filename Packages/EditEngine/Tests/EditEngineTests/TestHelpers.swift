@@ -88,6 +88,44 @@ func makeColorImage(width: Int = 64, height: Int = 64) -> CIImage {
     return CIImage(cgImage: cgImage)
 }
 
+/// Create a solid mid-grey image. Useful for vignette tests where we want the
+/// source centre and corners to start at the same value so any difference
+/// comes from the filter, not the source gradient.
+func makeMidGreyImage(width: Int = 64, height: Int = 64, value: UInt8 = 128) -> CIImage {
+    let bytesPerPixel = 4
+    let bytesPerRow = width * bytesPerPixel
+    var pixels = [UInt8](repeating: 0, count: width * height * bytesPerPixel)
+
+    for y in 0..<height {
+        for x in 0..<width {
+            let offset = y * bytesPerRow + x * bytesPerPixel
+            pixels[offset] = value
+            pixels[offset + 1] = value
+            pixels[offset + 2] = value
+            pixels[offset + 3] = 255
+        }
+    }
+
+    let data = Data(pixels)
+    let colorSpace = CGColorSpace(name: CGColorSpace.sRGB)!
+    let bitmapInfo = CGBitmapInfo(rawValue: CGImageAlphaInfo.premultipliedLast.rawValue)
+    let provider = CGDataProvider(data: data as CFData)!
+    let cgImage = CGImage(
+        width: width,
+        height: height,
+        bitsPerComponent: 8,
+        bitsPerPixel: 32,
+        bytesPerRow: bytesPerRow,
+        space: colorSpace,
+        bitmapInfo: bitmapInfo,
+        provider: provider,
+        decode: nil,
+        shouldInterpolate: false,
+        intent: .defaultIntent
+    )!
+    return CIImage(cgImage: cgImage)
+}
+
 /// A single RGBA pixel value with 8-bit components.
 struct PixelRGBA {
     let r: UInt8

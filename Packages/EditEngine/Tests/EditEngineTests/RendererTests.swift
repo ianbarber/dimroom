@@ -422,6 +422,93 @@ final class RendererTests: XCTestCase {
         XCTAssertGreaterThan(boostedPx.b, 200, "+100 saturation should keep blue channel strong")
     }
 
+    // MARK: - Sharpening
+
+    func testSharpeningIdentityIsNoOp() {
+        let source = makeColorImage()
+        let midY = Int(source.extent.height) / 2
+        let edgeX = Int(source.extent.width) / 2 - 1
+
+        let srcPx = samplePixel(image: source, x: edgeX, y: midY, context: ctx)
+        let result = Renderer.render(source: source, editState: EditState(sharpening: 0))
+        let resPx = samplePixel(image: result, x: edgeX, y: midY, context: ctx)
+
+        XCTAssertEqual(srcPx.r, resPx.r)
+        XCTAssertEqual(srcPx.g, resPx.g)
+        XCTAssertEqual(srcPx.b, resPx.b)
+    }
+
+    func testSharpeningChangesPixels() {
+        // CISharpenLuminance enhances contrast on luminance edges. The
+        // edge pixel in makeColorImage should visibly change under strong
+        // sharpening.
+        let source = makeColorImage()
+        let midY = Int(source.extent.height) / 2
+        let edgeX = Int(source.extent.width) / 2 - 1
+
+        let srcPx = samplePixel(image: source, x: edgeX, y: midY, context: ctx)
+        let result = Renderer.render(source: source, editState: EditState(sharpening: 80))
+        let resPx = samplePixel(image: result, x: edgeX, y: midY, context: ctx)
+
+        let changed = srcPx.r != resPx.r || srcPx.g != resPx.g || srcPx.b != resPx.b
+        XCTAssertTrue(changed, "Sharpening should change edge pixels")
+    }
+
+    // MARK: - Vignette
+
+    func testVignetteIdentityIsNoOp() {
+        let source = makeGradientImage()
+        let midX = Int(source.extent.width) / 2
+        let midY = Int(source.extent.height) / 2
+
+        let srcPx = samplePixel(image: source, x: midX, y: midY, context: ctx)
+        let result = Renderer.render(source: source, editState: EditState(vignetteAmount: 0))
+        let resPx = samplePixel(image: result, x: midX, y: midY, context: ctx)
+
+        XCTAssertEqual(srcPx.r, resPx.r)
+        XCTAssertEqual(srcPx.g, resPx.g)
+        XCTAssertEqual(srcPx.b, resPx.b)
+    }
+
+    func testDarkVignetteDarkensCorners() {
+        // A grey source so both darkening and lightening are detectable.
+        let source = makeMidGreyImage()
+        let cornerX = 2
+        let cornerY = 2
+        let midX = Int(source.extent.width) / 2
+        let midY = Int(source.extent.height) / 2
+
+        let srcCorner = samplePixel(image: source, x: cornerX, y: cornerY, context: ctx)
+        let srcCenter = samplePixel(image: source, x: midX, y: midY, context: ctx)
+
+        let result = Renderer.render(
+            source: source,
+            editState: EditState(vignetteAmount: -100)
+        )
+        let resCorner = samplePixel(image: result, x: cornerX, y: cornerY, context: ctx)
+        let resCenter = samplePixel(image: result, x: midX, y: midY, context: ctx)
+
+        XCTAssertLessThan(resCorner.r, srcCorner.r, "Negative vignette should darken corners")
+        // Centre should be largely unaffected — the radial mask's black disc
+        // covers the middle.
+        XCTAssertEqual(Int(resCenter.r), Int(srcCenter.r), accuracy: 10)
+    }
+
+    func testLightVignetteBrightensCorners() {
+        let source = makeMidGreyImage()
+        let cornerX = 2
+        let cornerY = 2
+        let srcCorner = samplePixel(image: source, x: cornerX, y: cornerY, context: ctx)
+
+        let result = Renderer.render(
+            source: source,
+            editState: EditState(vignetteAmount: 100)
+        )
+        let resCorner = samplePixel(image: result, x: cornerX, y: cornerY, context: ctx)
+
+        XCTAssertGreaterThan(resCorner.r, srcCorner.r, "Positive vignette should brighten corners")
+    }
+
     func testClaritySymmetry() {
         // Positive and negative clarity should move the same edge pixel in opposite directions
         let source = makeColorImage()

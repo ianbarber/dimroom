@@ -4,10 +4,12 @@ import SwiftUI
 public struct DevelopView: View {
     @ObservedObject private var viewModel: DevelopViewModel
     @ObservedObject private var cropViewModel: CropViewModel
+    @Binding private var showHistogram: Bool
 
-    public init(viewModel: DevelopViewModel) {
+    public init(viewModel: DevelopViewModel, showHistogram: Binding<Bool> = .constant(true)) {
         self.viewModel = viewModel
         self.cropViewModel = viewModel.cropViewModel
+        self._showHistogram = showHistogram
     }
 
     public var body: some View {
@@ -184,7 +186,7 @@ public struct DevelopView: View {
     // MARK: - Preview
 
     private var preview: some View {
-        ZStack {
+        ZStack(alignment: .bottomLeading) {
             Color(white: 0.05)
                 .ignoresSafeArea()
 
@@ -192,6 +194,7 @@ public struct DevelopView: View {
                 Image(nsImage: image)
                     .resizable()
                     .aspectRatio(contentMode: .fit)
+                    .frame(maxWidth: .infinity, maxHeight: .infinity)
                     .overlay(alignment: .center) {
                         if cropViewModel.isActive {
                             GeometryReader { geo in
@@ -200,6 +203,11 @@ public struct DevelopView: View {
                             }
                         }
                     }
+            }
+
+            if showHistogram, let data = viewModel.histogram {
+                HistogramOverlayView(data: data)
+                    .padding(12)
             }
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity)

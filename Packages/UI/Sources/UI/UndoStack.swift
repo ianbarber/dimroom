@@ -54,6 +54,7 @@ public final class UndoStack: ObservableObject {
 
     private var catalog: CatalogDatabase
     private weak var libraryViewModel: LibraryViewModel?
+    private weak var developViewModel: DevelopViewModel?
 
     private var undoActions: [UndoAction] = []
     private var redoActions: [UndoAction] = []
@@ -70,6 +71,13 @@ public final class UndoStack: ObservableObject {
     /// shared view model is fully wired.
     public func attach(libraryViewModel: LibraryViewModel) {
         self.libraryViewModel = libraryViewModel
+    }
+
+    /// Late binding for the Develop view model. On an `.editSave`
+    /// undo/redo replay we ask it to re-read the restored `EditState`
+    /// from the catalog so the sliders animate to the new values.
+    public func attach(developViewModel: DevelopViewModel) {
+        self.developViewModel = developViewModel
     }
 
     /// Swap the backing catalog (and optionally the library view model) in
@@ -150,6 +158,9 @@ public final class UndoStack: ObservableObject {
             let state = direction == .forward ? next : (previous ?? EditState())
             _ = try? catalog.saveEditState(state, for: assetId)
             await libraryViewModel?.reloadAndWait()
+            if developViewModel?.currentAssetId == assetId {
+                await developViewModel?.reloadEditState(for: assetId)
+            }
         case .softDelete(let assetIds):
             if direction == .forward {
                 _ = try? catalog.deleteAssets(ids: assetIds)

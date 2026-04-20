@@ -1,4 +1,5 @@
 import Catalog
+import CoreGraphics
 import EditEngine
 import Foundation
 import Previews
@@ -146,6 +147,98 @@ final class UndoStackTests: XCTestCase {
         // must still be on the undo stack.
         XCTAssertTrue(stack.canUndo)
         XCTAssertFalse(stack.canRedo)
+    }
+
+    // MARK: - DevelopViewModel replay hook
+
+    @MainActor
+    func testEditSaveUndoReloadsDevelopViewModelWhenAssetMatches() async throws {
+        let catalog = try CatalogDatabase.inMemory()
+        let asset = TestFixtures.makeAsset(hash: "undo-develop-reload")
+        try catalog.insertAsset(asset)
+        let previewCache = FileManager.default.temporaryDirectory
+            .appendingPathComponent("dimroom-undostack-tests-\(UUID().uuidString)")
+        try FileManager.default.createDirectory(
+            at: previewCache,
+            withIntermediateDirectories: true
+        )
+        defer { try? FileManager.default.removeItem(at: previewCache) }
+        try TestFixtures.placePreview(
+            for: asset,
+            cacheDirectory: previewCache,
+            color: (r: 100, g: 100, b: 100)
+        )
+
+        let store = PreviewStore(cacheDirectory: previewCache)
+        let developVM = DevelopViewModel(catalog: catalog, previewStore: store)
+        await developVM.activate(assetId: asset.id)
+
+        // Seed catalog with the "next" state so undo restores identity.
+        var next = EditState()
+        next.exposure = 2.0
+        _ = try catalog.saveEditState(next, for: asset.id)
+
+        let stack = UndoStack(catalog: catalog)
+        stack.attach(developViewModel: developVM)
+
+        let startSeq = developVM.replaySequence
+        stack.push(.editSave(assetId: asset.id, previous: nil, next: next))
+
+        await stack.undo()
+
+        XCTAssertGreaterThan(
+            developVM.replaySequence,
+            startSeq,
+            "UndoStack must ask the develop view model to reload after an editSave undo"
+        )
+        XCTAssertEqual(
+            developVM.editState.exposure,
+            0.0,
+            "Develop view model must show the previous (identity) state after undo"
+        )
+    }
+
+    @MainActor
+    func testEditSaveUndoSkipsDevelopReloadForDifferentAsset() async throws {
+        let catalog = try CatalogDatabase.inMemory()
+        let viewedAsset = TestFixtures.makeAsset(hash: "undo-develop-other-viewed")
+        let editedAsset = TestFixtures.makeAsset(hash: "undo-develop-other-edited")
+        try catalog.insertAsset(viewedAsset)
+        try catalog.insertAsset(editedAsset)
+        let previewCache = FileManager.default.temporaryDirectory
+            .appendingPathComponent("dimroom-undostack-tests-\(UUID().uuidString)")
+        try FileManager.default.createDirectory(
+            at: previewCache,
+            withIntermediateDirectories: true
+        )
+        defer { try? FileManager.default.removeItem(at: previewCache) }
+        try TestFixtures.placePreview(
+            for: viewedAsset,
+            cacheDirectory: previewCache,
+            color: (r: 80, g: 80, b: 80)
+        )
+
+        let store = PreviewStore(cacheDirectory: previewCache)
+        let developVM = DevelopViewModel(catalog: catalog, previewStore: store)
+        await developVM.activate(assetId: viewedAsset.id)
+
+        let stack = UndoStack(catalog: catalog)
+        stack.attach(developViewModel: developVM)
+
+        var next = EditState()
+        next.exposure = 1.0
+        _ = try catalog.saveEditState(next, for: editedAsset.id)
+
+        let startSeq = developVM.replaySequence
+        stack.push(.editSave(assetId: editedAsset.id, previous: nil, next: next))
+
+        await stack.undo()
+
+        XCTAssertEqual(
+            developVM.replaySequence,
+            startSeq,
+            "Reload must only fire when the develop view model is showing the affected asset"
+        )
     }
 
     // MARK: - isReplaying suppresses push

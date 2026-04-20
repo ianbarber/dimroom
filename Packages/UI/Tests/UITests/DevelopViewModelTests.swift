@@ -218,6 +218,81 @@ final class DevelopViewModelTests: XCTestCase {
         XCTAssertNil(vm.renderedImage)
     }
 
+    // MARK: - Reload for undo/redo replay
+
+    @MainActor
+    func testReloadEditStateUpdatesEditStateFromCatalog() async throws {
+        let (vm, asset, catalog) = try await makeViewModelWithAsset(hash: "reload-from-catalog")
+        await vm.activate(assetId: asset.id)
+
+        // Out-of-band catalog write — simulates what UndoStack does on
+        // an editSave replay.
+        var restored = EditState()
+        restored.exposure = 1.5
+        restored.contrast = 40
+        _ = try catalog.saveEditState(restored, for: asset.id)
+
+        XCTAssertEqual(vm.editState.exposure, 0)
+
+        await vm.reloadEditState(for: asset.id)
+
+        XCTAssertEqual(vm.editState.exposure, 1.5)
+        XCTAssertEqual(vm.editState.contrast, 40)
+    }
+
+    @MainActor
+    func testReloadEditStateBumpsReplaySequence() async throws {
+        let (vm, asset, _) = try await makeViewModelWithAsset(hash: "replay-seq")
+        await vm.activate(assetId: asset.id)
+
+        let startSeq = vm.replaySequence
+        await vm.reloadEditState(for: asset.id)
+        XCTAssertEqual(vm.replaySequence, startSeq + 1)
+
+        await vm.reloadEditState(for: asset.id)
+        XCTAssertEqual(vm.replaySequence, startSeq + 2)
+    }
+
+    @MainActor
+    func testReloadEditStateIsNoOpForWrongAssetId() async throws {
+        let (vm, asset, _) = try await makeViewModelWithAsset(hash: "reload-wrong-asset")
+        await vm.activate(assetId: asset.id)
+
+        let startSeq = vm.replaySequence
+        await vm.reloadEditState(for: UUID())
+
+        XCTAssertEqual(
+            vm.replaySequence,
+            startSeq,
+            "reloadEditState must not bump replaySequence for a different asset"
+        )
+    }
+
+    @MainActor
+    func testReloadEditStateDoesNotScheduleSave() async throws {
+        let (vm, asset, catalog) = try await makeViewModelWithAsset(hash: "reload-no-save")
+        await vm.activate(assetId: asset.id)
+
+        // Prime catalog with a state that reloadEditState will pick up.
+        var primed = EditState()
+        primed.exposure = 2.0
+        _ = try catalog.saveEditState(primed, for: asset.id)
+
+        await vm.reloadEditState(for: asset.id)
+
+        // Wait past the debounce window. If reloadEditState had
+        // (incorrectly) scheduled a save, a second history row would
+        // appear.
+        try await Task.sleep(nanoseconds: 800_000_000)
+
+        let history = try catalog.editHistory(for: asset.id)
+        XCTAssertEqual(
+            history.count,
+            1,
+            "reloadEditState must not schedule a save — the catalog write belongs to whoever is replaying"
+        )
+    }
+
     // MARK: - Parameter name → keypath lookup
 
     func testKeyPathLookupCoversAllElevenParameters() {

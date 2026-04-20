@@ -10,6 +10,11 @@ public final class DevelopViewModel: ObservableObject {
     @Published public private(set) var editState: EditState = EditState()
     @Published public private(set) var renderedImage: NSImage?
     @Published public private(set) var isRendering: Bool = false
+    /// Monotonic counter bumped whenever `reloadEditState()` refreshes
+    /// `editState` from the catalog (i.e. an undo/redo replay replaced
+    /// the current values). The Develop view keys its slider animation
+    /// off this so only replays tween — interactive drags don't.
+    @Published public private(set) var replaySequence: Int = 0
     public private(set) var currentAssetId: UUID?
 
     /// Child view model driving the interactive crop overlay. Owned
@@ -78,6 +83,22 @@ public final class DevelopViewModel: ObservableObject {
         renderedImage = nil
         currentAssetId = nil
         editState = EditState()
+    }
+
+    /// Re-read the latest `EditState` from the catalog for the active
+    /// asset and bump `replaySequence` so the Develop view animates the
+    /// sliders to the new values. No-op if the view model isn't
+    /// currently showing `assetId` (or isn't active at all). Does NOT
+    /// schedule a save — the caller (UndoStack replay) has already
+    /// written the catalog and we must not loop back through
+    /// `scheduleSave` on top of it.
+    public func reloadEditState(for assetId: UUID) async {
+        guard currentAssetId == assetId else { return }
+        let reloaded = (try? catalog.latestEditState(for: assetId)) ?? EditState()
+        editState = reloaded
+        replaySequence &+= 1
+        hasUnsavedChanges = false
+        scheduleRender()
     }
 
     public func setParameter(_ keyPath: WritableKeyPath<EditState, Double>, value: Double) {

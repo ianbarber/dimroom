@@ -113,4 +113,75 @@ final class NavigationBarSnapshotTests: XCTestCase {
             )
         }
     }
+
+    // MARK: - Undo/Redo toolbar buttons
+
+    @MainActor
+    func test_navigation_bar_undo_redo_both_enabled() {
+        let bar = NavigationBar(
+            currentMode: .library,
+            undoEnabled: true,
+            redoEnabled: true,
+            undoTooltip: "Undo Set Rating 4",
+            redoTooltip: "Redo Rotate"
+        )
+        .frame(width: Self.barSize.width, height: Self.barSize.height)
+
+        let image = renderFixedPixelImage(for: bar)
+
+        runAssertSnapshot {
+            assertSnapshot(
+                of: image,
+                as: .image(
+                    precision: Self.snapshotPrecision,
+                    perceptualPrecision: Self.snapshotPerceptualPrecision
+                )
+            )
+        }
+    }
+
+    @MainActor
+    func test_navigation_bar_undo_redo_both_disabled() {
+        let bar = NavigationBar(
+            currentMode: .library,
+            undoEnabled: false,
+            redoEnabled: false
+        )
+        .frame(width: Self.barSize.width, height: Self.barSize.height)
+
+        let image = renderFixedPixelImage(for: bar)
+
+        runAssertSnapshot {
+            assertSnapshot(
+                of: image,
+                as: .image(
+                    precision: Self.snapshotPrecision,
+                    perceptualPrecision: Self.snapshotPerceptualPrecision
+                )
+            )
+        }
+    }
+
+    @MainActor
+    func test_navigation_bar_undo_enabled_redo_disabled() {
+        let bar = NavigationBar(
+            currentMode: .library,
+            undoEnabled: true,
+            redoEnabled: false,
+            undoTooltip: "Undo Rotate"
+        )
+        .frame(width: Self.barSize.width, height: Self.barSize.height)
+
+        let image = renderFixedPixelImage(for: bar)
+
+        runAssertSnapshot {
+            assertSnapshot(
+                of: image,
+                as: .image(
+                    precision: Self.snapshotPrecision,
+                    perceptualPrecision: Self.snapshotPerceptualPrecision
+                )
+            )
+        }
+    }
 }

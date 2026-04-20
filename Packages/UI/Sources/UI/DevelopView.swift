@@ -83,8 +83,15 @@ public struct DevelopView: View {
 
             sliderSection("Presence") {
                 slider("Clarity", keyPath: \.clarity, range: -100...100, step: 1, identity: 0)
+                slider("Sharpening", keyPath: \.sharpening, range: 0...100, step: 1, identity: 0)
                 slider("Vibrance", keyPath: \.vibrance, range: -100...100, step: 1, identity: 0)
                 slider("Saturation", keyPath: \.saturation, range: -100...100, step: 1, identity: 0)
+            }
+
+            sliderSection("Vignette") {
+                slider("Amount", keyPath: \.vignetteAmount, range: -100...100, step: 1, identity: 0)
+                slider("Roundness", keyPath: \.vignetteRoundness, range: 0...100, step: 1, identity: 50)
+                slider("Softness", keyPath: \.vignetteSoftness, range: 0...100, step: 1, identity: 50)
             }
         }
         .animation(.easeOut(duration: 0.25), value: viewModel.replaySequence)

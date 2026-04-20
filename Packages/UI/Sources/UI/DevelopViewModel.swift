@@ -202,8 +202,12 @@ public final class DevelopViewModel: ObservableObject {
         case "temperature": return \.temperature
         case "tint": return \.tint
         case "clarity": return \.clarity
+        case "sharpening": return \.sharpening
         case "vibrance": return \.vibrance
         case "saturation": return \.saturation
+        case "vignetteAmount": return \.vignetteAmount
+        case "vignetteRoundness": return \.vignetteRoundness
+        case "vignetteSoftness": return \.vignetteSoftness
         default: return nil
         }
     }
@@ -212,6 +216,8 @@ public final class DevelopViewModel: ObservableObject {
 
     private static func identityValue(for keyPath: WritableKeyPath<EditState, Double>) -> Double {
         if keyPath == \EditState.temperature { return 6500 }
+        if keyPath == \EditState.vignetteRoundness { return 50 }
+        if keyPath == \EditState.vignetteSoftness { return 50 }
         return 0
     }
 

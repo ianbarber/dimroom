@@ -46,12 +46,34 @@ public enum DriveFilesAPI {
     }
 
     /// `GET /drive/v3/files` — look up an existing file inside `parentId`
-    /// whose `appProperties.contentHash` equals the given hash. The
-    /// uploader uses this for dedup: if one hit comes back, skip the
-    /// upload and reuse the existing file ID.
+    /// whose `appProperties.contentHash` equals the given hash. Kept as
+    /// the per-folder fallback for `DriveUploader` when `DedupScope.folder`
+    /// is selected; the default `.library` path uses
+    /// `findByContentHashAnywhereRequest` so re-imports under a different
+    /// capture date still dedup.
     public static func findByContentHashRequest(contentHash: String, parentId: String) -> URLRequest {
         var components = URLComponents(url: filesEndpoint, resolvingAgainstBaseURL: false)!
         let query = #"appProperties has { key='contentHash' and value='\#(escapeForDriveQuery(contentHash))' } and '\#(parentId)' in parents and trashed = false"#
+        components.queryItems = [
+            URLQueryItem(name: "q", value: query),
+            URLQueryItem(name: "fields", value: "files(id,name,appProperties)"),
+            URLQueryItem(name: "pageSize", value: "10"),
+            URLQueryItem(name: "spaces", value: "drive"),
+        ]
+        var request = URLRequest(url: components.url!)
+        request.httpMethod = "GET"
+        return request
+    }
+
+    /// `GET /drive/v3/files` — library-wide variant of
+    /// `findByContentHashRequest`. Drops the `'<parent>' in parents`
+    /// clause so a match anywhere under the app's Drive (same
+    /// `appProperties.contentHash`) deduplicates. Used by default so
+    /// re-importing a photo months after the original upload (or under a
+    /// different capture date) still short-circuits to the existing file.
+    public static func findByContentHashAnywhereRequest(contentHash: String) -> URLRequest {
+        var components = URLComponents(url: filesEndpoint, resolvingAgainstBaseURL: false)!
+        let query = #"appProperties has { key='contentHash' and value='\#(escapeForDriveQuery(contentHash))' } and trashed = false"#
         components.queryItems = [
             URLQueryItem(name: "q", value: query),
             URLQueryItem(name: "fields", value: "files(id,name,appProperties)"),

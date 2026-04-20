@@ -43,6 +43,22 @@ final class DriveFilesAPITests: XCTestCase {
         XCTAssertTrue(q.contains("'folder-id' in parents"))
     }
 
+    func testFindByContentHashAnywhereRequestShape() {
+        let req = DriveFilesAPI.findByContentHashAnywhereRequest(contentHash: "abc123")
+        XCTAssertEqual(req.httpMethod, "GET")
+        let components = URLComponents(url: req.url!, resolvingAgainstBaseURL: false)!
+        let query = Dictionary(
+            uniqueKeysWithValues: components.queryItems!.map { ($0.name, $0.value ?? "") }
+        )
+        XCTAssertEqual(query["fields"], "files(id,name,appProperties)")
+        XCTAssertEqual(query["spaces"], "drive")
+        XCTAssertEqual(query["pageSize"], "10")
+        let q = query["q"]!
+        XCTAssertTrue(q.contains("appProperties has { key='contentHash' and value='abc123' }"), "got: \(q)")
+        XCTAssertTrue(q.contains("trashed = false"), "got: \(q)")
+        XCTAssertFalse(q.contains("in parents"), "library-wide query must not scope by parent; got: \(q)")
+    }
+
     func testEscapesSingleQuotesInQueryValues() {
         let req = DriveFilesAPI.listFolderRequest(name: "foo'bar", parentId: "p")
         let components = URLComponents(url: req.url!, resolvingAgainstBaseURL: false)!

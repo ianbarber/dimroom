@@ -92,6 +92,41 @@ final class DevelopViewModelTests: XCTestCase {
         XCTAssertEqual(vm.editState.temperature, 6500)
     }
 
+    @MainActor
+    func testResetParameterRestoresIdentityForAllSliders() async throws {
+        let (vm, asset, _) = try await makeViewModelWithAsset(hash: "reset-all")
+        await vm.activate(assetId: asset.id)
+
+        let names = [
+            "exposure", "contrast", "highlights", "shadows", "whites", "blacks",
+            "temperature", "tint", "clarity", "vibrance", "saturation",
+        ]
+
+        for name in names {
+            guard let keyPath = DevelopViewModel.keyPath(forParameter: name) else {
+                XCTFail("No keypath for parameter '\(name)'")
+                continue
+            }
+
+            let identity: Double = (name == "temperature") ? 6500 : 0
+            let nudged: Double = (name == "temperature") ? 3500 : 17
+
+            vm.setParameter(keyPath, value: nudged)
+            XCTAssertEqual(
+                vm.editState[keyPath: keyPath],
+                nudged,
+                "Setter failed for '\(name)'"
+            )
+
+            vm.resetParameter(keyPath)
+            XCTAssertEqual(
+                vm.editState[keyPath: keyPath],
+                identity,
+                "resetParameter did not restore identity for '\(name)'"
+            )
+        }
+    }
+
     // MARK: - Auto-save debounce
 
     @MainActor

@@ -31,6 +31,7 @@ public enum Command: Codable, Sendable, Equatable {
     case export(destinationPath: String, format: String, applyEdits: Bool)
     case fetchOriginal(assetId: UUID)
     case setEditParameter(assetId: UUID, parameter: String, value: Double)
+    case resetEditParameter(assetId: UUID, parameter: String)
     case undo
     case redo
     case selectAssets(ids: [UUID])
@@ -93,6 +94,7 @@ public enum Command: Codable, Sendable, Equatable {
         case export
         case fetchOriginal
         case setEditParameter
+        case resetEditParameter
         case undo
         case redo
         case selectAssets
@@ -198,6 +200,10 @@ public enum Command: Codable, Sendable, Equatable {
             let parameter = try container.decode(String.self, forKey: .parameter)
             let value = try container.decode(Double.self, forKey: .value)
             self = .setEditParameter(assetId: assetId, parameter: parameter, value: value)
+        case .resetEditParameter:
+            let assetId = try container.decode(UUID.self, forKey: .assetId)
+            let parameter = try container.decode(String.self, forKey: .parameter)
+            self = .resetEditParameter(assetId: assetId, parameter: parameter)
         case .undo:
             self = .undo
         case .redo:
@@ -308,6 +314,10 @@ public enum Command: Codable, Sendable, Equatable {
             try container.encode(assetId, forKey: .assetId)
             try container.encode(parameter, forKey: .parameter)
             try container.encode(value, forKey: .value)
+        case .resetEditParameter(let assetId, let parameter):
+            try container.encode(CommandType.resetEditParameter, forKey: .type)
+            try container.encode(assetId, forKey: .assetId)
+            try container.encode(parameter, forKey: .parameter)
         case .undo:
             try container.encode(CommandType.undo, forKey: .type)
         case .redo:

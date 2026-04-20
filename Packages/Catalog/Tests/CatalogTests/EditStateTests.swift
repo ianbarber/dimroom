@@ -34,8 +34,12 @@ final class EditStateTests: XCTestCase {
         XCTAssertEqual(state.temperature, 6500)
         XCTAssertEqual(state.tint, 0)
         XCTAssertEqual(state.clarity, 0)
+        XCTAssertEqual(state.sharpening, 0)
         XCTAssertEqual(state.vibrance, 0)
         XCTAssertEqual(state.saturation, 0)
+        XCTAssertEqual(state.vignetteAmount, 0)
+        XCTAssertEqual(state.vignetteRoundness, 50)
+        XCTAssertEqual(state.vignetteSoftness, 50)
         XCTAssertNil(state.cropRect)
         XCTAssertNil(state.cropAngle)
     }
@@ -51,8 +55,12 @@ final class EditStateTests: XCTestCase {
             temperature: 5200,
             tint: -8,
             clarity: 25,
+            sharpening: 65,
             vibrance: 10,
             saturation: -5,
+            vignetteAmount: -40,
+            vignetteRoundness: 70,
+            vignetteSoftness: 30,
             cropRect: CGRect(x: 0.1, y: 0.2, width: 0.6, height: 0.5),
             cropAngle: 2.5
         )
@@ -63,6 +71,36 @@ final class EditStateTests: XCTestCase {
         let decoded = try JSONDecoder().decode(EditState.self, from: data)
 
         XCTAssertEqual(state, decoded)
+    }
+
+    func testLegacyEditStateJSONDecodesWithDefaults() throws {
+        // A pre-existing catalog row written before sharpening/vignette fields
+        // existed. The new keys are absent; decoder must fall back to identity
+        // defaults without throwing.
+        let legacy = """
+        {
+            "exposure": 1.5,
+            "contrast": 20,
+            "highlights": 0,
+            "shadows": 0,
+            "whites": 0,
+            "blacks": 0,
+            "temperature": 6500,
+            "tint": 0,
+            "clarity": 10,
+            "vibrance": 0,
+            "saturation": 0
+        }
+        """
+
+        let decoded = try JSONDecoder().decode(EditState.self, from: Data(legacy.utf8))
+        XCTAssertEqual(decoded.exposure, 1.5)
+        XCTAssertEqual(decoded.contrast, 20)
+        XCTAssertEqual(decoded.clarity, 10)
+        XCTAssertEqual(decoded.sharpening, 0)
+        XCTAssertEqual(decoded.vignetteAmount, 0)
+        XCTAssertEqual(decoded.vignetteRoundness, 50)
+        XCTAssertEqual(decoded.vignetteSoftness, 50)
     }
 
     func testIdentityEditStateRoundTrip() throws {
@@ -85,7 +123,9 @@ final class EditStateTests: XCTestCase {
 
         // Keys should be alphabetically ordered
         let keys = ["blacks", "clarity", "contrast", "exposure", "highlights",
-                     "saturation", "shadows", "temperature", "tint", "vibrance", "whites"]
+                     "saturation", "shadows", "sharpening", "temperature", "tint",
+                     "vibrance", "vignetteAmount", "vignetteRoundness", "vignetteSoftness",
+                     "whites"]
         var lastIndex = json.startIndex
         for key in keys {
             guard let range = json.range(of: "\"\(key)\"", range: lastIndex..<json.endIndex) else {

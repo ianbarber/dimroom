@@ -121,6 +121,32 @@ final class DevelopSnapshotTests: XCTestCase {
         }
     }
 
+    /// Develop view with non-identity sharpening + vignette settings. Exercises
+    /// the new Sharpening slider in Presence and the new Vignette group.
+    @MainActor
+    func test_develop_vignette_and_sharpening() async throws {
+        let vm = try await makeActivatedViewModel(hash: "snap-vig-sharp")
+
+        vm.setParameter(\.sharpening, value: 60)
+        vm.setParameter(\.vignetteAmount, value: -50)
+        vm.setParameter(\.vignetteRoundness, value: 70)
+        vm.setParameter(\.vignetteSoftness, value: 40)
+        // Give the debounced render time to publish.
+        try await Task.sleep(nanoseconds: 300_000_000)
+
+        let image = renderFixedPixelImage(for: DevelopView(viewModel: vm))
+
+        runAssertSnapshot {
+            assertSnapshot(
+                of: image,
+                as: .image(
+                    precision: Self.snapshotPrecision,
+                    perceptualPrecision: Self.snapshotPerceptualPrecision
+                )
+            )
+        }
+    }
+
     /// Develop view with no selected asset — placeholder state.
     @MainActor
     func test_develop_empty_placeholder() async throws {

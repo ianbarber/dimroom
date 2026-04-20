@@ -99,7 +99,8 @@ final class DevelopViewModelTests: XCTestCase {
 
         let names = [
             "exposure", "contrast", "highlights", "shadows", "whites", "blacks",
-            "temperature", "tint", "clarity", "vibrance", "saturation",
+            "temperature", "tint", "clarity", "sharpening", "vibrance", "saturation",
+            "vignetteAmount", "vignetteRoundness", "vignetteSoftness",
         ]
 
         for name in names {
@@ -108,7 +109,12 @@ final class DevelopViewModelTests: XCTestCase {
                 continue
             }
 
-            let identity: Double = (name == "temperature") ? 6500 : 0
+            let identity: Double
+            switch name {
+            case "temperature": identity = 6500
+            case "vignetteRoundness", "vignetteSoftness": identity = 50
+            default: identity = 0
+            }
             let nudged: Double = (name == "temperature") ? 3500 : 17
 
             vm.setParameter(keyPath, value: nudged)
@@ -295,10 +301,11 @@ final class DevelopViewModelTests: XCTestCase {
 
     // MARK: - Parameter name → keypath lookup
 
-    func testKeyPathLookupCoversAllElevenParameters() {
+    func testKeyPathLookupCoversAllParameters() {
         let names = [
             "exposure", "contrast", "highlights", "shadows", "whites", "blacks",
-            "temperature", "tint", "clarity", "vibrance", "saturation",
+            "temperature", "tint", "clarity", "sharpening", "vibrance", "saturation",
+            "vignetteAmount", "vignetteRoundness", "vignetteSoftness",
         ]
         for name in names {
             XCTAssertNotNil(

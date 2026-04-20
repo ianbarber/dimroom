@@ -74,4 +74,28 @@ final class RendererSnapshotTests: XCTestCase {
         )
         assertSnapshot(of: image, as: .image(precision: 0.99, perceptualPrecision: 0.98))
     }
+
+    func testSharpeningSnapshot() {
+        let source = makeColorImage()
+        let image = renderToNSImage(source: source, editState: EditState(sharpening: 80))
+        assertSnapshot(of: image, as: .image(precision: 0.99, perceptualPrecision: 0.98))
+    }
+
+    func testDarkVignetteSnapshot() {
+        let source = makeMidGreyImage()
+        let image = renderToNSImage(
+            source: source,
+            editState: EditState(vignetteAmount: -80, vignetteRoundness: 50, vignetteSoftness: 50)
+        )
+        assertSnapshot(of: image, as: .image(precision: 0.99, perceptualPrecision: 0.98))
+    }
+
+    func testLightVignetteSnapshot() {
+        let source = makeMidGreyImage()
+        let image = renderToNSImage(
+            source: source,
+            editState: EditState(vignetteAmount: 80, vignetteRoundness: 50, vignetteSoftness: 50)
+        )
+        assertSnapshot(of: image, as: .image(precision: 0.99, perceptualPrecision: 0.98))
+    }
 }

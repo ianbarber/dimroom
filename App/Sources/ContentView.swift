@@ -17,7 +17,6 @@ struct ContentView: View {
     /// Non-nil while the delete-confirmation dialog is presented.
     /// Carries the count so the dialog title reads e.g. "Delete 3 photos?".
     @State private var pendingDeleteCount: Int?
-    @State private var showHistogram: Bool = true
 
     private var currentMode: NavigationMode {
         switch router.route {
@@ -57,7 +56,7 @@ struct ContentView: View {
                 case .loupe:
                     LoupeView(viewModel: libraryViewModel)
                 case .develop:
-                    DevelopView(viewModel: developViewModel, showHistogram: $showHistogram)
+                    DevelopView(viewModel: developViewModel)
                 }
             }
             .frame(maxWidth: .infinity, maxHeight: .infinity)
@@ -211,7 +210,7 @@ struct ContentView: View {
         .onKeyPress(keys: ["h"], phases: .down) { keyPress in
             guard keyPress.modifiers.isEmpty else { return .ignored }
             guard router.route == .develop else { return .ignored }
-            showHistogram.toggle()
+            developViewModel.showHistogram.toggle()
             return .handled
         }
         // Cmd+A — select every visible row. Library only, matches Finder.

@@ -98,7 +98,8 @@ final class HarnessController: @unchecked Sendable {
                     isZoomed: libraryViewModel.isZoomed,
                     hasUndoToast: libraryViewModel.undoToast != nil,
                     downloadingAssetIds: Array(libraryViewModel.downloadingAssetIds),
-                    downloadProgressByAssetId: progressByString
+                    downloadProgressByAssetId: progressByString,
+                    showHistogram: developViewModel.showHistogram
                 )
             }
             let encoder = JSONEncoder()
@@ -197,6 +198,10 @@ final class HarnessController: @unchecked Sendable {
 
         case .zoomReset:
             await MainActor.run { libraryViewModel.pendingZoomCommand = .resetToFit }
+            return .ok()
+
+        case .toggleHistogram:
+            await MainActor.run { developViewModel.showHistogram.toggle() }
             return .ok()
 
         case .export(let destinationPath, let format, let applyEdits):

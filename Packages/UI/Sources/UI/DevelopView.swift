@@ -151,7 +151,7 @@ public struct DevelopView: View {
                 Slider(
                     value: Binding(
                         get: { cropViewModel.cropAngle },
-                        set: { cropViewModel.setAngle($0) }
+                        set: { viewModel.setCropAngleLive($0) }
                     ),
                     in: -45...45,
                     step: 0.1

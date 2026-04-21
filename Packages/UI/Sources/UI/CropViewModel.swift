@@ -61,13 +61,27 @@ public final class CropViewModel: ObservableObject {
     /// clamping to the 0…1 image bounds. The caller passes the handle
     /// `anchor` that must stay fixed (e.g. the opposite corner when
     /// dragging a handle).
-    public func updateRect(_ rect: CGRect, anchor: CGPoint) {
+    ///
+    /// `overrideRatio` lets the caller bypass `selectedPreset` for a
+    /// single drag — used by Shift-drag in `.free` mode to lock the
+    /// current rect's aspect ratio without changing the saved preset.
+    public func updateRect(_ rect: CGRect, anchor: CGPoint, overrideRatio: Double? = nil) {
+        let ratio = overrideRatio ?? selectedPreset.ratio(imageAspect: imageAspect)
         let constrained = CropGeometry.constrain(
             rect: rect,
-            to: selectedPreset.ratio(imageAspect: imageAspect),
+            to: ratio,
             anchor: anchor
         )
         cropRect = clampToUnit(constrained)
+    }
+
+    /// Reset the crop rect to the unit square (full frame) without
+    /// disturbing the active preset or the snapshot taken at `activate`,
+    /// so `cancel()` still reverts to whatever the user had before
+    /// entering crop mode. Driven by the double-click gesture inside the
+    /// crop overlay.
+    public func resetRect() {
+        cropRect = CGRect(x: 0, y: 0, width: 1, height: 1)
     }
 
     /// Translate the crop rect, clamping only to the 0…1 image bounds.

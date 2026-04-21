@@ -153,8 +153,88 @@ if [ "$CROP_ANGLE" != "10.0" ]; then
 fi
 echo "  OK: cropAngle == $CROP_ANGLE"
 
-echo "=== Screenshot ==="
+echo "=== setCrop — top-left display quadrant (Bug 1 regression test) ==="
+# Select the top-left quadrant in *display* space. A broken renderer
+# that doesn't flip Y would crop the bottom-left quadrant instead —
+# bug 1 from #156.
+SET_OUT3=$("$CLI_BIN" set-crop "$ASSET" \
+    --x 0.0 --y 0.0 --width 0.5 --height 0.5 --angle 0 \
+    --socket "$SOCKET")
+echo "$SET_OUT3"
+assert_json_field "setCrop top-left status" "$SET_OUT3" "status" "ok"
+sleep 1
+
+echo "=== Screenshot (crop applied, top-left quadrant) ==="
 mkdir -p "$SCREENSHOT_DIR"
+"$CLI_BIN" screenshot "$SCREENSHOT_DIR/crop-topleft-result.png" --socket "$SOCKET" || true
+
+echo "=== enter-crop again (Bug 2 regression test — re-enter crop mode) ==="
+"$CLI_BIN" enter-crop "$ASSET" --socket "$SOCKET" >/dev/null
+# Let render reschedule.
+sleep 1
+
+echo "=== Screenshot (re-entered crop — full frame + overlay) ==="
+"$CLI_BIN" screenshot "$SCREENSHOT_DIR/crop-reentered-overlay.png" --socket "$SOCKET" || true
+
+echo "=== set-crop-preset oneToOne → commit-crop → get-edit ==="
+"$CLI_BIN" set-crop-preset --preset oneToOne --socket "$SOCKET" >/dev/null
+"$CLI_BIN" commit-crop --socket "$SOCKET" >/dev/null
+sleep 1
+
+GET_OUT3=$("$CLI_BIN" get-edit "$ASSET" --socket "$SOCKET")
+echo "$GET_OUT3"
+assert_json_field "getEdit after oneToOne" "$GET_OUT3" "status" "ok"
+# The stored cropRect is in CI pixel space. A 1:1 square is cropWidth
+# == cropHeight; verify via Python rather than substring match.
+SQUARE_CHECK=$(printf '%s' "$GET_OUT3" | /usr/bin/python3 -c "
+import json, sys
+doc = json.loads(sys.stdin.read())
+r = doc['data'].get('cropRect')
+if not r:
+    print('no-crop')
+else:
+    # CGRect's default Codable encodes as a 2-element array
+    # [[x, y], [w, h]]; tolerate dictionary forms too just in case.
+    if isinstance(r, list):
+        w = r[1][0]
+        h = r[1][1]
+    elif 'width' in r and 'height' in r:
+        w, h = r['width'], r['height']
+    else:
+        w = r['size']['width']
+        h = r['size']['height']
+    print('square' if abs(w - h) < 0.5 else f'non-square w={w} h={h}')
+")
+if [ "$SQUARE_CHECK" != "square" ]; then
+    echo "ERROR: oneToOne preset did not produce a square crop — $SQUARE_CHECK"
+    exit 1
+fi
+echo "  OK: oneToOne preset produced a square crop"
+
+echo "=== enter-crop → reset-crop → commit-crop → get-edit (identity) ==="
+"$CLI_BIN" enter-crop "$ASSET" --socket "$SOCKET" >/dev/null
+sleep 1
+"$CLI_BIN" reset-crop --socket "$SOCKET" >/dev/null
+"$CLI_BIN" commit-crop --socket "$SOCKET" >/dev/null
+sleep 1
+
+GET_OUT4=$("$CLI_BIN" get-edit "$ASSET" --socket "$SOCKET")
+echo "$GET_OUT4"
+# Identity crop is canonicalised to nil by commitCrop, so cropRect
+# should be absent or null in the stored state.
+IDENTITY_CHECK=$(printf '%s' "$GET_OUT4" | /usr/bin/python3 -c "
+import json, sys
+doc = json.loads(sys.stdin.read())
+r = doc['data'].get('cropRect')
+print('absent' if r is None else f'present:{r}')
+")
+if [ "$IDENTITY_CHECK" != "absent" ]; then
+    echo "ERROR: reset-crop + commit-crop did not collapse to identity — $IDENTITY_CHECK"
+    exit 1
+fi
+echo "  OK: reset-crop collapsed cropRect to identity (null)"
+
+echo "=== Final screenshot ==="
 "$CLI_BIN" screenshot "$SCREENSHOT_DIR/crop-result.png" --socket "$SOCKET" || true
 
 echo "=== Quit ==="

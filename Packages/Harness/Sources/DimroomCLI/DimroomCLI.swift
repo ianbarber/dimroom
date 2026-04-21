@@ -43,6 +43,11 @@ struct DimroomCLI: ParsableCommand {
             PermanentlyDeleteAssets.self,
             SetScopeRecentlyDeleted.self,
             GetPreviewSignature.self,
+            EnterCrop.self,
+            CommitCrop.self,
+            CancelCrop.self,
+            SetCropPreset.self,
+            ResetCrop.self,
         ]
     )
 }
@@ -720,6 +725,85 @@ extension DimroomCLI {
 
         func run() throws {
             try runCommand(.setScopeRecentlyDeleted, socket: socket)
+        }
+    }
+
+    struct EnterCrop: ParsableCommand {
+        static let configuration = CommandConfiguration(
+            commandName: "enter-crop",
+            abstract: "Activate the interactive crop overlay on the given asset."
+        )
+
+        @Argument(help: "The UUID of the asset to enter crop mode on.")
+        var id: String
+
+        @Option(name: .long, help: "Path to the harness socket.")
+        var socket: String = HarnessServer.defaultSocketPath
+
+        func run() throws {
+            guard let uuid = UUID(uuidString: id) else {
+                throw ValidationError("Invalid UUID '\(id)'.")
+            }
+            try runCommand(.enterCropMode(assetId: uuid), socket: socket)
+        }
+    }
+
+    struct CommitCrop: ParsableCommand {
+        static let configuration = CommandConfiguration(
+            commandName: "commit-crop",
+            abstract: "Commit the active crop overlay's rect and angle to EditState."
+        )
+
+        @Option(name: .long, help: "Path to the harness socket.")
+        var socket: String = HarnessServer.defaultSocketPath
+
+        func run() throws {
+            try runCommand(.commitCrop, socket: socket)
+        }
+    }
+
+    struct CancelCrop: ParsableCommand {
+        static let configuration = CommandConfiguration(
+            commandName: "cancel-crop",
+            abstract: "Exit crop mode and revert to the pre-activate crop state."
+        )
+
+        @Option(name: .long, help: "Path to the harness socket.")
+        var socket: String = HarnessServer.defaultSocketPath
+
+        func run() throws {
+            try runCommand(.cancelCrop, socket: socket)
+        }
+    }
+
+    struct SetCropPreset: ParsableCommand {
+        static let configuration = CommandConfiguration(
+            commandName: "set-crop-preset",
+            abstract: "Select an aspect-ratio preset on the active crop overlay."
+        )
+
+        @Option(name: .long, help: "Preset name (free, original, oneToOne, fourToThree, threeToTwo, sixteenToNine, fiveToFour).")
+        var preset: String
+
+        @Option(name: .long, help: "Path to the harness socket.")
+        var socket: String = HarnessServer.defaultSocketPath
+
+        func run() throws {
+            try runCommand(.setCropPreset(name: preset), socket: socket)
+        }
+    }
+
+    struct ResetCrop: ParsableCommand {
+        static let configuration = CommandConfiguration(
+            commandName: "reset-crop",
+            abstract: "Reset the active crop overlay's rect back to the full frame."
+        )
+
+        @Option(name: .long, help: "Path to the harness socket.")
+        var socket: String = HarnessServer.defaultSocketPath
+
+        func run() throws {
+            try runCommand(.resetCrop, socket: socket)
         }
     }
 }

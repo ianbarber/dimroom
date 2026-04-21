@@ -247,6 +247,21 @@ final class HarnessController: @unchecked Sendable {
 
         case .getPreviewSignature(let assetId):
             return handleGetPreviewSignature(assetId: assetId)
+
+        case .enterCropMode(let assetId):
+            return await handleEnterCropMode(assetId: assetId)
+
+        case .commitCrop:
+            return await handleCommitCrop()
+
+        case .cancelCrop:
+            return await handleCancelCrop()
+
+        case .setCropPreset(let name):
+            return await handleSetCropPreset(name: name)
+
+        case .resetCrop:
+            return await handleResetCrop()
         }
     }
 
@@ -286,6 +301,60 @@ final class HarnessController: @unchecked Sendable {
     private static func sha256Hex(_ data: Data) -> String {
         let digest = SHA256.hash(data: data)
         return digest.map { String(format: "%02x", $0) }.joined()
+    }
+
+    // MARK: - Crop lifecycle
+
+    private func handleEnterCropMode(assetId: UUID) async -> Response {
+        guard catalog != nil else {
+            return .error("catalog not loaded")
+        }
+        let alreadyActive: Bool = await MainActor.run {
+            if developViewModel.currentAssetId != assetId {
+                router.route = .develop
+                return false
+            }
+            return true
+        }
+        if !alreadyActive {
+            await developViewModel.activate(assetId: assetId)
+        }
+        await MainActor.run {
+            developViewModel.enterCropMode()
+        }
+        return .ok()
+    }
+
+    private func handleCommitCrop() async -> Response {
+        await MainActor.run {
+            developViewModel.commitCropFromViewModel()
+        }
+        return .ok()
+    }
+
+    private func handleCancelCrop() async -> Response {
+        await MainActor.run {
+            developViewModel.cancelCrop()
+        }
+        return .ok()
+    }
+
+    private func handleSetCropPreset(name: String) async -> Response {
+        guard let preset = AspectRatioPreset(rawValue: name) else {
+            let valid = AspectRatioPreset.allCases.map(\.rawValue).joined(separator: ", ")
+            return .error("unknown preset '\(name)'; expected one of: \(valid)")
+        }
+        await MainActor.run {
+            developViewModel.cropViewModel.applyPreset(preset)
+        }
+        return .ok()
+    }
+
+    private func handleResetCrop() async -> Response {
+        await MainActor.run {
+            developViewModel.resetCrop()
+        }
+        return .ok()
     }
 
     // MARK: - Upload to Drive

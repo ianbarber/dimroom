@@ -100,6 +100,34 @@ final class CropOverlaySnapshotTests: XCTestCase {
         }
     }
 
+    /// Regression for #156 Bug 2: re-entering crop mode on an asset
+    /// that already has a crop must show the full frame with the
+    /// stored crop rectangle overlaid — not a full-bleed rect on the
+    /// cropped-out preview. Stored crop is 0.1…0.9, so the snapshot
+    /// should show an inner 80% region with 10% darkened margins on
+    /// every side.
+    @MainActor
+    func test_crop_overlay_shows_full_frame_with_existing_crop_overlaid() {
+        let vm = CropViewModel()
+        vm.activate(
+            cropRect: CGRect(x: 0.1, y: 0.1, width: 0.8, height: 0.8),
+            angle: 0,
+            imageAspect: 4.0 / 3.0
+        )
+
+        let image = renderFixedPixelImage(for: overlayOnBackdrop(viewModel: vm))
+
+        runAssertSnapshot {
+            assertSnapshot(
+                of: image,
+                as: .image(
+                    precision: Self.snapshotPrecision,
+                    perceptualPrecision: Self.snapshotPerceptualPrecision
+                )
+            )
+        }
+    }
+
     /// 1:1 crop centred with a +10° straighten angle. This snapshot
     /// doesn't rotate the overlay itself (rotation happens in the
     /// renderer) — it exists to ensure the overlay stays axis-aligned

@@ -445,6 +445,16 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
                 next: state
             ))
             libraryViewModel.reload()
+            // Keep the live DevelopViewModel in sync with the catalog
+            // write so a subsequent undo has a real starting value to
+            // animate from. Without this, VM and catalog diverge and
+            // undo's `reloadEditState` reads a state the VM is already
+            // at, so `replaySequence` bumps but no slider moves.
+            if developViewModel.currentAssetId == assetId {
+                Task { @MainActor in
+                    await developViewModel.reloadEditState(for: assetId)
+                }
+            }
         } catch {
             print("[Dimroom] pasteEditSettings failed: \(error)")
         }

@@ -147,6 +147,56 @@ assert_json_field_absent "getEdit cropAngle" "$GET_OUT" "data.cropAngle"
 echo "=== Screenshot ==="
 "$CLI_BIN" screenshot "$ARTIFACT_DIR/copypaste-result.png" --socket "$SOCKET" || true
 
+# ------------------------------------------------------------------
+# Paste while Develop is active → undo restores the live VM.
+#
+# Without the `reloadEditState` calls in `DimroomApp.pasteEditSettings`
+# and `HarnessController.handlePasteEdit`, the catalog is updated by the
+# paste but the live `DevelopViewModel` is not — so `get-edit`'s
+# VM-preferred branch returns the stale (pre-paste) exposure and the
+# subsequent undo can't animate from a real starting value. Both
+# assertions below would fail.
+# ------------------------------------------------------------------
+
+ASSET_C=$(printf '%s' "$LIST_OUT" | "$REPO_ROOT/bin/harness-json-extract" 'data[2].id')
+echo "  Asset C: $ASSET_C"
+
+echo "=== Activate Develop on asset C via set-edit-parameter exposure 0 ==="
+"$CLI_BIN" set-edit-parameter "$ASSET_C" exposure 0 --socket "$SOCKET" >/dev/null
+
+# Wait past the ~500 ms save debounce so the auto-save's editSave undo
+# entry lands before we push the paste's entry on top of it.
+sleep 2
+
+echo "=== Paste edit onto asset C (Develop active) ==="
+PASTE_C_OUT=$("$CLI_BIN" paste-edit "$ASSET_C" --socket "$SOCKET")
+echo "$PASTE_C_OUT"
+assert_json_field "pasteEdit C status" "$PASTE_C_OUT" "status" "ok"
+assert_json_field "pasteEdit C pasted" "$PASTE_C_OUT" "data.pasted" "true"
+
+sleep 1
+
+echo "=== get-edit C — VM should reflect pasted exposure 2.0 ==="
+GET_C_OUT=$("$CLI_BIN" get-edit "$ASSET_C" --socket "$SOCKET")
+echo "$GET_C_OUT"
+assert_json_number "getEdit C post-paste exposure" "$GET_C_OUT" "data.exposure" "2.0"
+
+"$CLI_BIN" screenshot "$ARTIFACT_DIR/copypaste-develop-after-paste.png" --socket "$SOCKET" >/dev/null || true
+
+echo "=== Undo paste on C ==="
+"$CLI_BIN" undo --socket "$SOCKET" >/dev/null
+
+# Slider animation runs for ~0.25 s; wait past that so the assertion
+# reads the settled VM state.
+sleep 1
+
+echo "=== get-edit C — exposure should be restored to 0 ==="
+GET_C_UNDO=$("$CLI_BIN" get-edit "$ASSET_C" --socket "$SOCKET")
+echo "$GET_C_UNDO"
+assert_json_number "getEdit C post-undo exposure" "$GET_C_UNDO" "data.exposure" "0"
+
+"$CLI_BIN" screenshot "$ARTIFACT_DIR/copypaste-develop-after-undo.png" --socket "$SOCKET" >/dev/null || true
+
 echo "=== Quit ==="
 "$CLI_BIN" quit --socket "$SOCKET" 2>&1 || true
 

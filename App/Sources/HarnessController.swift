@@ -605,6 +605,12 @@ final class HarnessController: @unchecked Sendable {
         do {
             _ = try catalog.saveEditState(state, for: assetId)
             await recordEditUndo(assetId: assetId, previous: previous, next: state)
+            // Keep the live DevelopViewModel in sync with the catalog
+            // write so a subsequent undo has a real starting value to
+            // animate from. Without this, VM and catalog diverge and
+            // undo's `reloadEditState` reads a state the VM is already
+            // at, so `replaySequence` bumps but no slider moves.
+            await developViewModel.reloadEditState(for: assetId)
             return .ok(data: .dictionary(["pasted": .bool(true)]))
         } catch {
             return .error("pasteEdit failed: \(error.localizedDescription)")

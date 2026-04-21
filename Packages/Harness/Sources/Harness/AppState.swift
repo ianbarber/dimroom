@@ -40,6 +40,11 @@ public struct AppState: Codable, Sendable, Equatable {
     /// non-string dictionary keys, and `data.downloadProgressByAssetId.<uuid>`
     /// is a much friendlier wire shape than a parallel array).
     public let downloadProgressByAssetId: [String: Double]
+    /// Whether the Develop histogram overlay is currently visible.
+    /// Mirrors `DevelopViewModel.showHistogram` so harness flows can
+    /// assert the `toggleHistogram` command flipped it. Defaults to
+    /// `true` to match the view model's startup state.
+    public let showHistogram: Bool
 
     public init(
         route: Route,
@@ -52,7 +57,8 @@ public struct AppState: Codable, Sendable, Equatable {
         isZoomed: Bool = false,
         hasUndoToast: Bool = false,
         downloadingAssetIds: [UUID] = [],
-        downloadProgressByAssetId: [String: Double] = [:]
+        downloadProgressByAssetId: [String: Double] = [:],
+        showHistogram: Bool = true
     ) {
         self.route = route
         self.assetCount = assetCount
@@ -65,5 +71,6 @@ public struct AppState: Codable, Sendable, Equatable {
         self.hasUndoToast = hasUndoToast
         self.downloadingAssetIds = downloadingAssetIds
         self.downloadProgressByAssetId = downloadProgressByAssetId
+        self.showHistogram = showHistogram
     }
 }

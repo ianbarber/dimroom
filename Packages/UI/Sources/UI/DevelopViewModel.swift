@@ -11,6 +11,12 @@ public final class DevelopViewModel: ObservableObject {
     @Published public private(set) var renderedImage: NSImage?
     @Published public private(set) var isRendering: Bool = false
     @Published public private(set) var histogram: HistogramData?
+    /// Whether the Develop histogram overlay is visible. Lives on the
+    /// view model (rather than as `@State` in `ContentView`) so the
+    /// harness `toggleHistogram` command can flip it through the same
+    /// path as the H key, and so `AppState.showHistogram` has a single
+    /// source of truth to read from.
+    @Published public var showHistogram: Bool = true
     /// Monotonic counter bumped whenever `reloadEditState()` refreshes
     /// `editState` from the catalog (i.e. an undo/redo replay replaced
     /// the current values). The Develop view keys its slider animation

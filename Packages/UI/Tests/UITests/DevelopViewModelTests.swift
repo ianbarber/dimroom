@@ -241,7 +241,7 @@ final class DevelopViewModelTests: XCTestCase {
         try await Task.sleep(nanoseconds: 800_000_000)
 
         XCTAssertTrue(stack.canUndo, "setParameter must push an undo entry after debounce")
-        XCTAssertEqual(stack.undoDescription, "Edit")
+        XCTAssertEqual(stack.undoDescription, "Exposure +1.25")
     }
 
     @MainActor

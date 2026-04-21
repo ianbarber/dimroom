@@ -23,8 +23,8 @@ public enum UndoAction: Equatable, Sendable {
             return to == 0 ? "Clear Rating" : "Set Rating \(to)"
         case .rotation:
             return "Rotate"
-        case .editSave:
-            return "Edit"
+        case .editSave(_, let previous, let next):
+            return editParameterDescription(previous: previous, next: next) ?? "Edit"
         case .softDelete:
             return "Delete"
         }

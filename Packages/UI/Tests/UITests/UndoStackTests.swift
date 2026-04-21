@@ -38,13 +38,55 @@ final class UndoStackTests: XCTestCase {
         XCTAssertEqual(action.description, "Rotate")
     }
 
-    func testEditSaveDescription() {
+    func testEditSaveIdentityDescription() {
         let action = UndoAction.editSave(
             assetId: sampleId,
             previous: nil,
             next: EditState()
         )
         XCTAssertEqual(action.description, "Edit")
+    }
+
+    func testEditSaveSingleParameterDescription() {
+        var next = EditState()
+        next.exposure = 2.0
+        let action = UndoAction.editSave(
+            assetId: sampleId,
+            previous: nil,
+            next: next
+        )
+        XCTAssertEqual(action.description, "Exposure +2.00")
+    }
+
+    func testEditSaveMultiParameterFallbackDescription() {
+        var next = EditState()
+        next.exposure = 1.0
+        next.contrast = 10
+        let action = UndoAction.editSave(
+            assetId: sampleId,
+            previous: nil,
+            next: next
+        )
+        XCTAssertEqual(action.description, "Edit")
+    }
+
+    @MainActor
+    func testUndoDescriptionReflectsSingleParameterLabelOnPush() throws {
+        let stack = try makeStack()
+        var next = EditState()
+        next.contrast = -15
+        stack.push(.editSave(assetId: sampleId, previous: nil, next: next))
+        XCTAssertEqual(stack.undoDescription, "Contrast -15")
+    }
+
+    @MainActor
+    func testUndoDescriptionFallsBackToEditForMultiParameterPush() throws {
+        let stack = try makeStack()
+        var next = EditState()
+        next.exposure = 1.0
+        next.saturation = 20
+        stack.push(.editSave(assetId: sampleId, previous: nil, next: next))
+        XCTAssertEqual(stack.undoDescription, "Edit")
     }
 
     func testSoftDeleteDescription() {
@@ -364,7 +406,7 @@ final class UndoStackTests: XCTestCase {
             stack.canRedo,
             "hydrate must not clear the redo stack"
         )
-        XCTAssertEqual(stack.undoDescription, "Edit")
+        XCTAssertEqual(stack.undoDescription, "Exposure +1.00")
     }
 
     @MainActor

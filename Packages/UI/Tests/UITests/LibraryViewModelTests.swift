@@ -194,6 +194,45 @@ final class LibraryViewModelTests: XCTestCase {
     }
 
     @MainActor
+    func testFocusMovesPrimaryWithoutAddingToSelection() async throws {
+        let catalog = try CatalogDatabase.inMemory()
+        let store = PreviewStore(cacheDirectory: tempCacheDir)
+        let vm = LibraryViewModel(catalog: catalog, previewStore: store)
+
+        let id = UUID()
+        vm.focus(id)
+
+        XCTAssertEqual(vm.primarySelectedAssetId, id)
+        XCTAssertTrue(vm.selectedAssetIds.isEmpty)
+    }
+
+    @MainActor
+    func testFocusPreservesExistingMultiSelection() async throws {
+        let catalog = try CatalogDatabase.inMemory()
+        let a = TestFixtures.makeAsset(hash: "focus-a")
+        let b = TestFixtures.makeAsset(hash: "focus-b")
+        let c = TestFixtures.makeAsset(hash: "focus-c")
+        try catalog.insertAsset(a)
+        try catalog.insertAsset(b)
+        try catalog.insertAsset(c)
+
+        let store = PreviewStore(cacheDirectory: tempCacheDir)
+        let vm = LibraryViewModel(catalog: catalog, previewStore: store)
+        await vm.reloadAndWait()
+
+        vm.select(a.id)
+        vm.toggleSelect(b.id)
+        vm.toggleSelect(c.id)
+        let before = vm.selectedAssetIds
+        XCTAssertEqual(before, [a.id, b.id, c.id])
+
+        vm.focus(a.id)
+
+        XCTAssertEqual(vm.primarySelectedAssetId, a.id)
+        XCTAssertEqual(vm.selectedAssetIds, before)
+    }
+
+    @MainActor
     func testReloadClearsSelectionWhenSelectedAssetVanishes() async throws {
         let catalog = try CatalogDatabase.inMemory()
         let a = TestFixtures.makeAsset(hash: "aa")

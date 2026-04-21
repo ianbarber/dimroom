@@ -52,7 +52,8 @@ struct ContentView: View {
                 case .library:
                     LibraryView(
                         viewModel: libraryViewModel,
-                        pendingDeleteCount: $pendingDeleteCount
+                        pendingDeleteCount: $pendingDeleteCount,
+                        onOpenLoupe: { _ in router.route = .loupe }
                     )
                 case .loupe:
                     LoupeView(viewModel: libraryViewModel)

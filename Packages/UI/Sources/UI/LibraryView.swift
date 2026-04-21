@@ -14,13 +14,21 @@ public struct LibraryView: View {
     /// the key handler at the app root can set it without the grid
     /// needing to be focused. Optional so previews / tests can ignore it.
     @Binding private var pendingDeleteCount: Int?
+    /// Navigate to Loupe for `assetId`. Invoked by the double-click
+    /// handler on a thumbnail — the view model has already moved the
+    /// primary selection to `assetId` by the time this fires. Defaulted
+    /// to a no-op so previews and snapshot tests don't need to care
+    /// about routing.
+    private let onOpenLoupe: (UUID) -> Void
 
     public init(
         viewModel: LibraryViewModel,
-        pendingDeleteCount: Binding<Int?> = .constant(nil)
+        pendingDeleteCount: Binding<Int?> = .constant(nil),
+        onOpenLoupe: @escaping (UUID) -> Void = { _ in }
     ) {
         self.viewModel = viewModel
         self._pendingDeleteCount = pendingDeleteCount
+        self.onOpenLoupe = onOpenLoupe
     }
 
     private static let cellSpacing: CGFloat = 8
@@ -172,6 +180,14 @@ public struct LibraryView: View {
                             rowVersion: viewModel.rowVersion
                         )
                         .id(row.id)
+                        // Double-tap must be registered before the
+                        // single-tap handler so SwiftUI's gesture
+                        // disambiguation routes a double-click to the
+                        // Loupe-open path instead of the select path.
+                        .onTapGesture(count: 2) {
+                            viewModel.focus(row.id)
+                            onOpenLoupe(row.id)
+                        }
                         .onTapGesture {
                             handleTap(on: row.id)
                         }

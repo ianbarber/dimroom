@@ -126,9 +126,10 @@ final class HistogramSnapshotTests: XCTestCase {
     @MainActor
     func test_develop_with_histogram_overlay() async throws {
         let vm = try await makeActivatedViewModel(hash: "snap-hist-on")
+        vm.showHistogram = true
 
         let image = renderFixedPixelImage(
-            for: DevelopView(viewModel: vm, showHistogram: .constant(true)),
+            for: DevelopView(viewModel: vm),
             size: Self.developFrameSize
         )
 
@@ -147,9 +148,10 @@ final class HistogramSnapshotTests: XCTestCase {
     @MainActor
     func test_develop_with_histogram_hidden() async throws {
         let vm = try await makeActivatedViewModel(hash: "snap-hist-off")
+        vm.showHistogram = false
 
         let image = renderFixedPixelImage(
-            for: DevelopView(viewModel: vm, showHistogram: .constant(false)),
+            for: DevelopView(viewModel: vm),
             size: Self.developFrameSize
         )
 

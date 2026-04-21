@@ -4,12 +4,10 @@ import SwiftUI
 public struct DevelopView: View {
     @ObservedObject private var viewModel: DevelopViewModel
     @ObservedObject private var cropViewModel: CropViewModel
-    @Binding private var showHistogram: Bool
 
-    public init(viewModel: DevelopViewModel, showHistogram: Binding<Bool> = .constant(true)) {
+    public init(viewModel: DevelopViewModel) {
         self.viewModel = viewModel
         self.cropViewModel = viewModel.cropViewModel
-        self._showHistogram = showHistogram
     }
 
     public var body: some View {
@@ -212,7 +210,7 @@ public struct DevelopView: View {
                     }
             }
 
-            if showHistogram, let data = viewModel.histogram {
+            if viewModel.showHistogram, let data = viewModel.histogram {
                 HistogramOverlayView(data: data)
                     .padding(12)
             }

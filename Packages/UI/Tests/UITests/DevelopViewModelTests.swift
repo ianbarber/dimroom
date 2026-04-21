@@ -526,6 +526,24 @@ final class DevelopViewModelTests: XCTestCase {
         XCTAssertNil(DevelopViewModel.keyPath(forParameter: "Exposure"))  // case-sensitive
     }
 
+    // MARK: - showHistogram
+
+    @MainActor
+    func testShowHistogramDefaultsToTrue() async throws {
+        let (vm, _, _) = try await makeViewModelWithAsset(hash: "histogram-default")
+        XCTAssertTrue(vm.showHistogram)
+    }
+
+    @MainActor
+    func testShowHistogramToggleFlipsPublishedValue() async throws {
+        let (vm, _, _) = try await makeViewModelWithAsset(hash: "histogram-toggle")
+        XCTAssertTrue(vm.showHistogram)
+        vm.showHistogram.toggle()
+        XCTAssertFalse(vm.showHistogram)
+        vm.showHistogram.toggle()
+        XCTAssertTrue(vm.showHistogram)
+    }
+
     // MARK: - Helper
 
     /// Build a viewmodel with an in-memory catalog and a single asset that

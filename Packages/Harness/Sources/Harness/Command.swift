@@ -28,6 +28,7 @@ public enum Command: Codable, Sendable, Equatable {
     case selectDown
     case zoomToggle
     case zoomReset
+    case toggleHistogram
     case export(destinationPath: String, format: String, applyEdits: Bool)
     case fetchOriginal(assetId: UUID)
     case setEditParameter(assetId: UUID, parameter: String, value: Double)
@@ -92,6 +93,7 @@ public enum Command: Codable, Sendable, Equatable {
         case selectDown
         case zoomToggle
         case zoomReset
+        case toggleHistogram
         case export
         case fetchOriginal
         case setEditParameter
@@ -189,6 +191,8 @@ public enum Command: Codable, Sendable, Equatable {
             self = .zoomToggle
         case .zoomReset:
             self = .zoomReset
+        case .toggleHistogram:
+            self = .toggleHistogram
         case .export:
             let destinationPath = try container.decode(String.self, forKey: .destinationPath)
             let format = try container.decode(String.self, forKey: .format)
@@ -306,6 +310,8 @@ public enum Command: Codable, Sendable, Equatable {
             try container.encode(CommandType.zoomToggle, forKey: .type)
         case .zoomReset:
             try container.encode(CommandType.zoomReset, forKey: .type)
+        case .toggleHistogram:
+            try container.encode(CommandType.toggleHistogram, forKey: .type)
         case .export(let destinationPath, let format, let applyEdits):
             try container.encode(CommandType.export, forKey: .type)
             try container.encode(destinationPath, forKey: .destinationPath)

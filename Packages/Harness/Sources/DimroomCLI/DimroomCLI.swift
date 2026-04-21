@@ -32,6 +32,7 @@ struct DimroomCLI: ParsableCommand {
             SelectDown.self,
             ZoomToggle.self,
             ZoomReset.self,
+            ToggleHistogram.self,
             Export.self,
             SetEditParameter.self,
             ResetEditParameter.self,
@@ -490,6 +491,20 @@ extension DimroomCLI {
 
         func run() throws {
             try runCommand(.zoomReset, socket: socket)
+        }
+    }
+
+    struct ToggleHistogram: ParsableCommand {
+        static let configuration = CommandConfiguration(
+            commandName: "toggle-histogram",
+            abstract: "Toggle the Develop histogram overlay visibility."
+        )
+
+        @Option(name: .long, help: "Path to the harness socket.")
+        var socket: String = HarnessServer.defaultSocketPath
+
+        func run() throws {
+            try runCommand(.toggleHistogram, socket: socket)
         }
     }
 

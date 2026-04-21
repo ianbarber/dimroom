@@ -505,7 +505,7 @@ final class CommandCodingTests: XCTestCase {
         let json = String(data: data, encoding: .utf8)!
         XCTAssertEqual(
             json,
-            #"{"assetCount":3,"downloadProgressByAssetId":{},"downloadingAssetIds":[],"hasUndoToast":false,"isZoomed":false,"minRating":3,"route":"library","scopeKind":"all","selectedAssetId":"12345678-1234-1234-1234-123456789012","selectedAssetIds":[]}"#
+            #"{"assetCount":3,"downloadProgressByAssetId":{},"downloadingAssetIds":[],"hasUndoToast":false,"isZoomed":false,"minRating":3,"route":"library","scopeKind":"all","selectedAssetId":"12345678-1234-1234-1234-123456789012","selectedAssetIds":[],"showHistogram":true}"#
         )
     }
 
@@ -514,15 +514,15 @@ final class CommandCodingTests: XCTestCase {
         // emitting them as `null`. Pin that shape so the harness wire
         // format is explicit about what consumers will see. `minRating`,
         // `isZoomed`, `scopeKind`, `selectedAssetIds`,
-        // `hasUndoToast`, `downloadingAssetIds`, and
-        // `downloadProgressByAssetId` are non-optional and must always
-        // be present.
+        // `hasUndoToast`, `downloadingAssetIds`,
+        // `downloadProgressByAssetId`, and `showHistogram` are
+        // non-optional and must always be present.
         let state = AppState(route: .library, assetCount: 0, selectedAssetId: nil)
         let data = try encoder.encode(state)
         let json = String(data: data, encoding: .utf8)!
         XCTAssertEqual(
             json,
-            #"{"assetCount":0,"downloadProgressByAssetId":{},"downloadingAssetIds":[],"hasUndoToast":false,"isZoomed":false,"minRating":0,"route":"library","scopeKind":"all","selectedAssetIds":[]}"#
+            #"{"assetCount":0,"downloadProgressByAssetId":{},"downloadingAssetIds":[],"hasUndoToast":false,"isZoomed":false,"minRating":0,"route":"library","scopeKind":"all","selectedAssetIds":[],"showHistogram":true}"#
         )
     }
 
@@ -540,7 +540,7 @@ final class CommandCodingTests: XCTestCase {
         let json = String(data: data, encoding: .utf8)!
         XCTAssertEqual(
             json,
-            #"{"assetCount":0,"downloadProgressByAssetId":{},"downloadingAssetIds":[],"hasUndoToast":false,"isZoomed":true,"minRating":0,"route":"loupe","scopeKind":"all","selectedAssetIds":[]}"#
+            #"{"assetCount":0,"downloadProgressByAssetId":{},"downloadingAssetIds":[],"hasUndoToast":false,"isZoomed":true,"minRating":0,"route":"loupe","scopeKind":"all","selectedAssetIds":[],"showHistogram":true}"#
         )
     }
 
@@ -571,7 +571,7 @@ final class CommandCodingTests: XCTestCase {
         let json = String(data: data, encoding: .utf8)!
         XCTAssertEqual(
             json,
-            #"{"assetCount":0,"downloadProgressByAssetId":{"12345678-1234-1234-1234-123456789012":0.5},"downloadingAssetIds":["12345678-1234-1234-1234-123456789012"],"hasUndoToast":false,"isZoomed":false,"minRating":0,"route":"loupe","scopeKind":"all","selectedAssetId":"12345678-1234-1234-1234-123456789012","selectedAssetIds":[]}"#
+            #"{"assetCount":0,"downloadProgressByAssetId":{"12345678-1234-1234-1234-123456789012":0.5},"downloadingAssetIds":["12345678-1234-1234-1234-123456789012"],"hasUndoToast":false,"isZoomed":false,"minRating":0,"route":"loupe","scopeKind":"all","selectedAssetId":"12345678-1234-1234-1234-123456789012","selectedAssetIds":[],"showHistogram":true}"#
         )
     }
 
@@ -765,6 +765,28 @@ final class CommandCodingTests: XCTestCase {
         let json = #"{"type":"zoomReset"}"#
         let command = try decoder.decode(Command.self, from: Data(json.utf8))
         XCTAssertEqual(command, .zoomReset)
+    }
+
+    // MARK: - toggleHistogram
+
+    func testToggleHistogramRoundTrip() throws {
+        let command = Command.toggleHistogram
+        let data = try encoder.encode(command)
+        let decoded = try decoder.decode(Command.self, from: data)
+        XCTAssertEqual(command, decoded)
+    }
+
+    func testToggleHistogramJSON() throws {
+        let command = Command.toggleHistogram
+        let data = try encoder.encode(command)
+        let json = String(data: data, encoding: .utf8)!
+        XCTAssertEqual(json, #"{"type":"toggleHistogram"}"#)
+    }
+
+    func testDecodeToggleHistogramFromJSON() throws {
+        let json = #"{"type":"toggleHistogram"}"#
+        let command = try decoder.decode(Command.self, from: Data(json.utf8))
+        XCTAssertEqual(command, .toggleHistogram)
     }
 
     // MARK: - undo / redo

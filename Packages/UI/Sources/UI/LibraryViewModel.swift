@@ -303,6 +303,15 @@ public final class LibraryViewModel: ObservableObject {
         primarySelectedAssetId = assetId
     }
 
+    /// Double-click: move the primary (which Loupe/Develop follow) to
+    /// `assetId` without disturbing the multi-selection. Used by the
+    /// library grid's double-tap handler so opening Loupe on one item
+    /// from a multi-selection keeps the rest selected for the user to
+    /// return to.
+    public func focus(_ assetId: UUID) {
+        primarySelectedAssetId = assetId
+    }
+
     /// Cmd+A: select every row currently in `rows`. Primary lands on the
     /// first visible row so the Loupe has a deterministic pick.
     public func selectAllVisible() {

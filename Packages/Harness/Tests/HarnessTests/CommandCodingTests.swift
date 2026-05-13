@@ -915,6 +915,42 @@ final class CommandCodingTests: XCTestCase {
         XCTAssertEqual(command, .uploadToDrive(assetId: expected))
     }
 
+    // MARK: - Drive auth commands
+
+    func testConnectDriveRoundTrip() throws {
+        let command = Command.connectDrive
+        let data = try encoder.encode(command)
+        let decoded = try decoder.decode(Command.self, from: data)
+        XCTAssertEqual(command, decoded)
+    }
+
+    func testConnectDriveJSON() throws {
+        let command = Command.connectDrive
+        let data = try encoder.encode(command)
+        let json = String(data: data, encoding: .utf8)!
+        XCTAssertEqual(json, #"{"type":"connectDrive"}"#)
+    }
+
+    func testDisconnectDriveJSON() throws {
+        let command = Command.disconnectDrive
+        let data = try encoder.encode(command)
+        let json = String(data: data, encoding: .utf8)!
+        XCTAssertEqual(json, #"{"type":"disconnectDrive"}"#)
+    }
+
+    func testDriveAuthStateJSON() throws {
+        let command = Command.driveAuthState
+        let data = try encoder.encode(command)
+        let json = String(data: data, encoding: .utf8)!
+        XCTAssertEqual(json, #"{"type":"driveAuthState"}"#)
+    }
+
+    func testDecodeDriveAuthStateFromJSON() throws {
+        let json = #"{"type":"driveAuthState"}"#
+        let command = try decoder.decode(Command.self, from: Data(json.utf8))
+        XCTAssertEqual(command, .driveAuthState)
+    }
+
     // MARK: - Route
 
     func testRouteAllCases() {

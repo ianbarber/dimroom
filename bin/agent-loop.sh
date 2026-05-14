@@ -250,7 +250,7 @@ check_ready_to_merge() {
 
     # Sanity check: state:ready-to-merge should have an approving review.
     local approved_at
-    approved_at=$(gh pr view "$pr" --json reviews 2>/dev/null | extract_approval_timestamp)
+    approved_at=$(gh pr view "$pr" --json reviews 2>/dev/null | extract_approval_timestamp || true)
     if [ -z "$approved_at" ]; then
       log "PR #$pr (issue #$issue) is state:ready-to-merge with no approving review — leaving label alone, please verify"
     fi

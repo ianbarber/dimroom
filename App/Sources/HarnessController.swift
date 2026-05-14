@@ -499,7 +499,8 @@ final class HarnessController: @unchecked Sendable {
             format: exportFormat,
             jpegQuality: 85,
             applyEdits: applyEdits,
-            destinationDirectory: destinationURL
+            destinationDirectory: destinationURL,
+            originalFetcher: originalsCoordinator
         )
 
         let exportedCount: Int

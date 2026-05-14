@@ -37,6 +37,11 @@ public final class ExportCoordinator: ObservableObject {
     @Published public private(set) var phase: Phase = .idle
     @Published public private(set) var currentItem: Int = 0
     @Published public private(set) var totalItems: Int = 0
+    /// Streaming download progress (0.0...1.0) for the asset currently
+    /// being fetched from Drive, or `nil` when the active asset's
+    /// bytes were already local. Reset to `nil` once the asset is
+    /// written so the next iteration starts clean.
+    @Published public private(set) var currentItemProgress: Double?
 
     public init() {}
 
@@ -80,11 +85,27 @@ public final class ExportCoordinator: ObservableObject {
         for asset in assets {
             var resolvedLocalPath = asset.localPath
             if resolvedLocalPath == nil, let fetcher = originalFetcher {
-                if let url = await fetcher.fetchOriginal(assetId: asset.id) {
+                let assetId = asset.id
+                let progress: @Sendable (Double) -> Void = { [weak self] fraction in
+                    Task { @MainActor [weak self] in
+                        guard let self else { return }
+                        // The export pipeline ticks one asset at a time,
+                        // so we only need to clamp monotonically within
+                        // the current asset's window. Resets to nil
+                        // happen below after the asset is written.
+                        let clamped = min(max(fraction, 0), 1)
+                        let existing = self.currentItemProgress ?? 0
+                        if clamped >= existing {
+                            self.currentItemProgress = clamped
+                        }
+                    }
+                }
+                if let url = await fetcher.fetchOriginal(assetId: assetId, progress: progress) {
                     resolvedLocalPath = url.path
                 }
             }
             guard let localPath = resolvedLocalPath else {
+                currentItemProgress = nil
                 currentItem += 1
                 await Task.yield()
                 continue
@@ -125,6 +146,7 @@ public final class ExportCoordinator: ObservableObject {
                 print("[ExportCoordinator] Failed to export \(asset.originalFilename): \(error)")
             }
 
+            currentItemProgress = nil
             currentItem += 1
             await Task.yield()
         }
@@ -137,6 +159,7 @@ public final class ExportCoordinator: ObservableObject {
         phase = .idle
         currentItem = 0
         totalItems = 0
+        currentItemProgress = nil
     }
 
     // MARK: - Test helpers
@@ -150,6 +173,12 @@ public final class ExportCoordinator: ObservableObject {
     func setProgressForTesting(current: Int, total: Int) {
         currentItem = current
         totalItems = total
+    }
+
+    /// Sets the per-asset download fraction for snapshot tests so the
+    /// "downloading original…" bar can be captured deterministically.
+    func setCurrentItemProgressForTesting(_ value: Double?) {
+        currentItemProgress = value
     }
 
     // MARK: - Private

@@ -915,6 +915,28 @@ final class CommandCodingTests: XCTestCase {
         XCTAssertEqual(command, .uploadToDrive(assetId: expected))
     }
 
+    // MARK: - publishCatalog
+
+    func testPublishCatalogRoundTrip() throws {
+        let command = Command.publishCatalog
+        let data = try encoder.encode(command)
+        let decoded = try decoder.decode(Command.self, from: data)
+        XCTAssertEqual(command, decoded)
+    }
+
+    func testPublishCatalogJSON() throws {
+        let command = Command.publishCatalog
+        let data = try encoder.encode(command)
+        let json = String(data: data, encoding: .utf8)!
+        XCTAssertEqual(json, #"{"type":"publishCatalog"}"#)
+    }
+
+    func testDecodePublishCatalogFromJSON() throws {
+        let json = #"{"type":"publishCatalog"}"#
+        let command = try decoder.decode(Command.self, from: Data(json.utf8))
+        XCTAssertEqual(command, .publishCatalog)
+    }
+
     // MARK: - Route
 
     func testRouteAllCases() {

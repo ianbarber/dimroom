@@ -138,6 +138,16 @@ public final class DevelopViewModel: ObservableObject {
         replaySequence &+= 1
         hasUnsavedChanges = false
         scheduleRender()
+        // Regenerate the cached thumb + preview so Library/Loupe reflect
+        // the undone/redone look. Fire-and-forget so the replay (which
+        // the caller `await`s) isn't blocked. PreviewStore is an actor
+        // so back-to-back regens from rapid undo/redo serialise cleanly.
+        let previewStore = self.previewStore
+        let catalog = self.catalog
+        Task.detached {
+            guard let asset = try? catalog.fetchAsset(id: assetId) else { return }
+            await previewStore.regenerateWithEdit(for: asset, editState: reloaded)
+        }
     }
 
     public func setParameter(_ keyPath: WritableKeyPath<EditState, Double>, value: Double) {

@@ -499,6 +499,56 @@ final class DevelopViewModelTests: XCTestCase {
         )
     }
 
+    /// `reloadEditState` is the path UndoStack drives on Cmd+Z while
+    /// Develop is live. After it replaces `editState` with the replayed
+    /// version, the cached thumb must be re-rendered to match — otherwise
+    /// returning to Library shows the post-edit bytes for the undone
+    /// state. Drive the edit-and-save first so the thumb reflects the
+    /// "after edit" look, then mimic the undo replay (catalog write to
+    /// identity + `reloadEditState`) and assert the cached bytes change
+    /// again.
+    @MainActor
+    func testReloadEditStateRegeneratesThumbnail() async throws {
+        let (vm, asset, catalog) = try await makeViewModelWithAsset(hash: "regen-thumb-onreload")
+        try TestFixtures.placeThumbnail(
+            for: asset,
+            cacheDirectory: tempCacheDir,
+            color: (r: 120, g: 120, b: 120)
+        )
+
+        await vm.activate(assetId: asset.id)
+
+        let thumbURL = tempCacheDir
+            .appendingPathComponent(String(asset.contentHash.prefix(2)), isDirectory: true)
+            .appendingPathComponent("\(asset.contentHash).thumb.jpg")
+
+        // Drive an edit + auto-save so the cached thumb reflects the
+        // "after edit" render. Wait past the debounce + regen so we
+        // record the post-edit sha as the baseline for the replay
+        // assertion.
+        vm.setParameter(\.exposure, value: 2.0)
+        try await Task.sleep(nanoseconds: 1_500_000_000)
+        let hashAfterEdit = try Self.sha256(of: thumbURL)
+
+        // Mimic the undo replay: UndoStack writes the previous state to
+        // the catalog, then calls reloadEditState. We need the catalog
+        // contents to differ from what's currently in vm.editState so
+        // reload actually changes anything.
+        _ = try catalog.saveEditState(EditState(), for: asset.id)
+        await vm.reloadEditState(for: asset.id)
+
+        // Detached regen fires inside reloadEditState; wait for it to
+        // write the new thumb bytes.
+        try await Task.sleep(nanoseconds: 1_500_000_000)
+
+        let hashAfterReload = try Self.sha256(of: thumbURL)
+        XCTAssertNotEqual(
+            hashAfterEdit,
+            hashAfterReload,
+            "Cached thumbnail bytes must change after reloadEditState — undo replay must regenerate"
+        )
+    }
+
     private static func sha256(of url: URL) throws -> String {
         let data = try Data(contentsOf: url)
         let digest = SHA256.hash(data: data)

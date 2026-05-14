@@ -39,6 +39,9 @@ let package = Package(
                 "Dimroom",
                 .product(name: "Catalog", package: "Catalog"),
                 .product(name: "DriveClient", package: "DriveClient"),
+                .product(name: "Harness", package: "Harness"),
+                .product(name: "Previews", package: "Previews"),
+                .product(name: "UI", package: "UI"),
             ],
             path: "Tests"
         ),

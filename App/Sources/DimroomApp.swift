@@ -84,16 +84,30 @@ struct DimroomApp: App {
 /// menu's responder chain, bypassing the focus bug that made the
 /// grid's `onKeyPress(.delete)` beep. Observes the view model and
 /// router so enablement tracks selection + mode.
-private struct DeleteMenuItem: View {
+///
+/// Module-internal (not `private`) so `App/Tests` can exercise the
+/// `isDisabled` predicate against synthetic view-model + router state
+/// — the dynamic-flip seam #208 carves out as a Layer A complement to
+/// PR #206's static menu-shape assertion.
+struct DeleteMenuItem: View {
     @ObservedObject var libraryViewModel: LibraryViewModel
     let router: AppRouter
+
+    /// Single source of truth feeding `.disabled(...)` in `body`.
+    /// Extracted so a regression that inverts the predicate (e.g.
+    /// swapping `isEmpty` for `!isEmpty`, or dropping the scope
+    /// clause) is caught by a Layer A test even without an active UI
+    /// cycle to flush `.commands` re-renders onto `NSMenuItem`.
+    var isDisabled: Bool {
+        libraryViewModel.selectedAssetIds.isEmpty || router.route != .library
+    }
 
     var body: some View {
         Button("Delete Selected") {
             NotificationCenter.default.post(name: .requestDeleteSelected, object: nil)
         }
         .keyboardShortcut(.delete, modifiers: [])
-        .disabled(libraryViewModel.selectedAssetIds.isEmpty || router.route != .library)
+        .disabled(isDisabled)
     }
 }
 

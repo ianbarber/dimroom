@@ -144,6 +144,39 @@ if [ "$SIG_BEFORE" = "$SIG_AFTER" ]; then
 fi
 echo "  OK: thumbnail bytes changed"
 
+# Issue #186 — generational JPEG loss check. A second save of the same
+# EditState must produce a byte-identical thumbnail. Under the original
+# bug, regen #2 would re-encode the result of regen #1 and the SHA would
+# drift on every cycle. Under the master/display tier fix, regen always
+# reads from the untouched master so the second pass is bit-stable.
+echo "=== navigate develop (second pass) ==="
+"$CLI_BIN" navigate develop --socket "$SOCKET" >/dev/null
+sleep 1
+
+echo "=== set-edit-parameter $ASSET_ID exposure 2.0 (second pass) ==="
+SET_OUT2=$("$CLI_BIN" set-edit-parameter "$ASSET_ID" exposure 2.0 --socket "$SOCKET")
+if ! echo "$SET_OUT2" | grep -q '"ok"'; then
+    echo "ERROR: set-edit-parameter (second pass) did not return ok"
+    exit 1
+fi
+sleep 2
+
+echo "=== get-preview-signature $ASSET_ID (after second regen) ==="
+SIG_AFTER_2_OUT=$("$CLI_BIN" get-preview-signature "$ASSET_ID" --socket "$SOCKET")
+echo "$SIG_AFTER_2_OUT"
+SIG_AFTER_2=$(printf '%s' "$SIG_AFTER_2_OUT" | "$REPO_ROOT/bin/harness-json-extract" 'data.sha256')
+if [ -z "$SIG_AFTER_2" ]; then
+    echo "ERROR: failed to extract second-regen sha256"
+    exit 1
+fi
+echo "  thumbnail sha256 after second regen: $SIG_AFTER_2"
+
+if [ "$SIG_AFTER" != "$SIG_AFTER_2" ]; then
+    echo "ERROR: regen #2 produced different bytes than regen #1 — generational JPEG loss (issue #186)"
+    exit 1
+fi
+echo "  OK: byte-identical across repeated regens (no generational loss)"
+
 echo "=== navigate loupe ==="
 "$CLI_BIN" navigate loupe --socket "$SOCKET" >/dev/null
 sleep 1

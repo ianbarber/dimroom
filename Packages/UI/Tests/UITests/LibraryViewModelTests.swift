@@ -922,6 +922,105 @@ final class LibraryViewModelTests: XCTestCase {
         XCTAssertFalse(vm.downloadingAssetIds.contains(assetId))
     }
 
+    /// Back-to-back re-fetch of the same asset must not let a late
+    /// progress tick from the *previous* fetch pollute the *next* fetch's
+    /// slot. The bug shape: fetch N's progress `Task` is queued; N
+    /// returns and its defer clears state; the UI immediately re-fetches
+    /// the same asset (N+1) which re-inserts the asset id into the
+    /// in-flight set; the queued Task from N runs and writes its (stale)
+    /// fraction into N+1's slot. The fetch-id gate added in this commit
+    /// makes the queued Task notice it no longer owns the slot and bail.
+    @MainActor
+    func testFetchOriginalIfNeededDoesNotPolluteRefetchWithStaleTick() async throws {
+        let catalog = try CatalogDatabase.inMemory()
+        let store = PreviewStore(cacheDirectory: tempCacheDir)
+        let vm = LibraryViewModel(catalog: catalog, previewStore: store)
+
+        let resultURL = tempCacheDir.appendingPathComponent("orig.jpg")
+        let fetcher = ControlledProgressFetcher(resultURL: resultURL)
+        vm.originalFetcher = fetcher
+        let assetId = UUID()
+
+        // Fetch N: kick off, wait for it to reach the fetcher, then
+        // resolve so its defer fully runs.
+        let firstTask = Task { @MainActor in
+            await vm.fetchOriginalIfNeeded(assetId: assetId)
+        }
+        await fetcher.waitForStart()
+        await fetcher.resolveNext()
+        _ = await firstTask.value
+
+        XCTAssertNil(
+            vm.downloadProgressByAssetId[assetId],
+            "fetch N's defer must clear its own progress entry"
+        )
+        XCTAssertFalse(vm.downloadingAssetIds.contains(assetId))
+
+        // Fetch N+1: same asset id, kick off and wait until it has
+        // reached the fetcher (and therefore inserted its own state).
+        // Do NOT resolve yet.
+        let secondTask = Task { @MainActor in
+            await vm.fetchOriginalIfNeeded(assetId: assetId)
+        }
+        await fetcher.waitForStart()
+        XCTAssertTrue(
+            vm.downloadingAssetIds.contains(assetId),
+            "N+1 must mark the asset as in-flight before the stale tick fires"
+        )
+
+        // Fire fetch N's captured progress closure with a high value.
+        // Without the fetch-id gate this would land at 1.0 in N+1's slot.
+        let staleClosure = await fetcher.capturedProgress(at: 0)
+        staleClosure?(1.0)
+        // Drain pending @MainActor tasks so the closure's Task runs.
+        await MainActor.run { }
+
+        XCTAssertNil(
+            vm.downloadProgressByAssetId[assetId],
+            "stale tick from fetch N must not populate N+1's progress slot"
+        )
+
+        // Tear down: resolve N+1 so its task can exit.
+        await fetcher.resolveNext()
+        _ = await secondTask.value
+        XCTAssertFalse(vm.downloadingAssetIds.contains(assetId))
+    }
+
+    /// Sanity guard against over-gating: a tick fired *during* a fetch
+    /// (same fetch-id) still lands in `downloadProgressByAssetId`. This
+    /// is the happy-path that `testFetchOriginalIfNeededPublishesProgress`
+    /// covers implicitly; here we exercise it through the controlled
+    /// fetcher so the id-match path is intentional, not incidental.
+    @MainActor
+    func testFetchOriginalIfNeededSameFetchTickLands() async throws {
+        let catalog = try CatalogDatabase.inMemory()
+        let store = PreviewStore(cacheDirectory: tempCacheDir)
+        let vm = LibraryViewModel(catalog: catalog, previewStore: store)
+
+        let resultURL = tempCacheDir.appendingPathComponent("orig.jpg")
+        let fetcher = ControlledProgressFetcher(resultURL: resultURL)
+        vm.originalFetcher = fetcher
+        let assetId = UUID()
+
+        let task = Task { @MainActor in
+            await vm.fetchOriginalIfNeeded(assetId: assetId)
+        }
+        await fetcher.waitForStart()
+
+        let progress = await fetcher.capturedProgress(at: 0)
+        progress?(0.42)
+        await MainActor.run { }
+
+        XCTAssertEqual(
+            vm.downloadProgressByAssetId[assetId],
+            0.42,
+            "tick fired during the same fetch must land in the progress slot"
+        )
+
+        await fetcher.resolveNext()
+        _ = await task.value
+    }
+
     @MainActor
     func testFetchOriginalIfNeededWithoutFetcherLeavesDictionaryEmpty() async throws {
         let catalog = try CatalogDatabase.inMemory()
@@ -1018,5 +1117,59 @@ private final class ProgressSnapshots: @unchecked Sendable {
     private(set) var values: [Double] = []
     func append(_ value: Double?) {
         if let value { values.append(value) }
+    }
+}
+
+/// `OriginalFetcher` stub that gives the test full control over each
+/// fetch's lifecycle: it captures every `progress` closure passed in,
+/// signals on start, and waits on a per-call continuation before
+/// returning. The test calls `waitForStart()` to synchronize on a fetch
+/// having reached the fetcher, `resolveNext()` (FIFO) to let the oldest
+/// in-flight fetch return, and `capturedProgress(at:)` to fire stale or
+/// in-band ticks against a specific call's closure.
+private actor ControlledProgressFetcher: OriginalFetcher {
+    private let resultURL: URL?
+    private var capturedClosures: [(@Sendable (Double) -> Void)?] = []
+    private var pendingResolves: [CheckedContinuation<Void, Never>] = []
+    private var pendingStarts: [CheckedContinuation<Void, Never>] = []
+    private var unconsumedStarts = 0
+
+    init(resultURL: URL?) {
+        self.resultURL = resultURL
+    }
+
+    func fetchOriginal(
+        assetId: UUID,
+        progress: (@Sendable (Double) -> Void)?
+    ) async -> URL? {
+        capturedClosures.append(progress)
+        if !pendingStarts.isEmpty {
+            pendingStarts.removeFirst().resume()
+        } else {
+            unconsumedStarts += 1
+        }
+        await withCheckedContinuation { (cont: CheckedContinuation<Void, Never>) in
+            pendingResolves.append(cont)
+        }
+        return resultURL
+    }
+
+    func waitForStart() async {
+        if unconsumedStarts > 0 {
+            unconsumedStarts -= 1
+            return
+        }
+        await withCheckedContinuation { (cont: CheckedContinuation<Void, Never>) in
+            pendingStarts.append(cont)
+        }
+    }
+
+    func capturedProgress(at index: Int) -> (@Sendable (Double) -> Void)? {
+        capturedClosures[index]
+    }
+
+    func resolveNext() {
+        guard !pendingResolves.isEmpty else { return }
+        pendingResolves.removeFirst().resume()
     }
 }

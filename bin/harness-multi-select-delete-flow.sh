@@ -6,6 +6,48 @@
 # 3-asset fixture folder, then drives the full delete/restore/permanent
 # delete loop through the CLI and asserts the view model + catalog
 # counts at each step.
+#
+# Edit-menu assertions (issue #183): after the import we also probe the
+# main menu via the `inspect-menu` harness command and confirm:
+#   1. an Edit menu item titled "Delete Selected" exists,
+#   2. its key equivalent is Backspace (KeyEquivalent.delete, which
+#      bridges to U+0008 in NSMenuItem.keyEquivalent — see the
+#      `assert_menu_item_key_equivalent_hex` note below) with no
+#      modifier mask, and
+#   3. its initial `isEnabled` value is `false` when nothing is selected
+#      (proves the `.disabled(libraryViewModel.selectedAssetIds.isEmpty
+#      || router.route != .library)` binding is wired up — if anyone
+#      dropped `.disabled(...)` the item would render enabled).
+# This closes the regression gap PR #179 left open (#134's plan
+# promised an `osascript`-driven Edit menu check that never landed).
+# We use the in-process `inspect-menu` command rather than driving
+# System Events via `osascript` because:
+#   - in-process inspection requires no Accessibility permission and
+#     therefore works headlessly in CI without an interactive grant;
+#   - it reads exactly the `NSApplication.mainMenu` SwiftUI populates
+#     from `.commands`, so the assertions can't be fooled by a stale
+#     Accessibility cache;
+#   - it is far faster and deterministic.
+#
+# What we deliberately do NOT assert: that the menu item flips from
+# disabled to enabled *after* a selection is made later in the flow.
+# SwiftUI re-renders its `.commands` tree (and pushes the new
+# `.disabled(...)` value onto NSMenuItem.isEnabled) only when the scene
+# is being updated by a real UI cycle. In the harness we run
+# headlessly without a foreground window, so the menu state SwiftUI
+# rendered at scene creation is the only one we can reliably read —
+# `submenu.update()` plus a runloop spin plus `NSApp.activate(...)`
+# were all tried and none of them cause SwiftUI to flush a fresh
+# command-tree render in this configuration. The data-side delete loop
+# below (selectAssets → deleteAssets → undo toast → recently-deleted
+# scope → restore → permanent delete) still exercises every path the
+# Backspace-driven menu action would hit, so a regression that broke
+# the actual delete dispatch would surface there. The screenshot
+# fallback suggested in #183 (writing the opened Edit menu to
+# .artifacts/.../shots/edit-menu.png for visual review) is not needed:
+# the static menu-shape assertions above already catch the two
+# regressions the issue calls out (DeleteMenuItem dropped from
+# `.commands`, or its `.keyboardShortcut(.delete)` removed).
 set -euo pipefail
 
 REPO_ROOT="$(cd "$(dirname "$0")/.." && pwd)"
@@ -48,6 +90,72 @@ assert_array_length() {
         exit 1
     fi
     echo "  OK: $label — len($field) == $expected"
+}
+
+# inspect-menu returns a list of {title, keyEquivalent, modifierMask,
+# isEnabled, isSeparator}. Find an item by title and compare one field
+# against an expected literal. Booleans/ints/strings all print verbatim.
+assert_menu_item_field() {
+    local label="$1" json="$2" item_title="$3" field="$4" expected="$5"
+    local actual
+    actual=$(printf '%s' "$json" | python3 -c "
+import json, sys
+resp = json.load(sys.stdin)
+items = resp.get('data', {}).get('items', [])
+for it in items:
+    if it.get('title') == sys.argv[1]:
+        v = it.get(sys.argv[2])
+        if isinstance(v, bool):
+            print('true' if v else 'false')
+        else:
+            print(v)
+        sys.exit(0)
+sys.exit(3)
+" "$item_title" "$field") || {
+        echo "ERROR: $label — menu item '$item_title' not found"
+        echo "Response: $json"
+        exit 1
+    }
+    if [ "$actual" != "$expected" ]; then
+        echo "ERROR: $label — expected '$item_title'.$field == $expected, got $actual"
+        echo "Response: $json"
+        exit 1
+    fi
+    echo "  OK: $label — '$item_title'.$field == $expected"
+}
+
+# Like assert_menu_item_field, but prints the keyEquivalent as a
+# hex codepoint so the assertion isn't sensitive to terminal /
+# JSON-escaping quirks. SwiftUI's KeyEquivalent.delete bridges to the
+# Mac "Delete" key (Backspace, U+0008) in NSMenuItem.keyEquivalent —
+# not the forward-delete character U+007F, despite the SwiftUI name.
+assert_menu_item_key_equivalent_hex() {
+    local label="$1" json="$2" item_title="$3" expected_hex="$4"
+    local actual
+    actual=$(printf '%s' "$json" | python3 -c "
+import json, sys
+resp = json.load(sys.stdin)
+items = resp.get('data', {}).get('items', [])
+for it in items:
+    if it.get('title') == sys.argv[1]:
+        ke = it.get('keyEquivalent', '')
+        if len(ke) != 1:
+            print('len=%d' % len(ke))
+        else:
+            print('%04X' % ord(ke))
+        sys.exit(0)
+sys.exit(3)
+" "$item_title") || {
+        echo "ERROR: $label — menu item '$item_title' not found"
+        echo "Response: $json"
+        exit 1
+    }
+    if [ "$actual" != "$expected_hex" ]; then
+        echo "ERROR: $label — expected '$item_title'.keyEquivalent codepoint == $expected_hex, got $actual"
+        echo "Response: $json"
+        exit 1
+    fi
+    echo "  OK: $label — '$item_title'.keyEquivalent codepoint == U+$expected_hex"
 }
 
 echo "=== Building App ==="
@@ -118,6 +226,18 @@ ID1=$(printf '%s' "$LIST_OUT" | "$REPO_ROOT/bin/harness-json-extract" 'data[0].i
 ID2=$(printf '%s' "$LIST_OUT" | "$REPO_ROOT/bin/harness-json-extract" 'data[1].id')
 echo "ID1=$ID1"
 echo "ID2=$ID2"
+
+# --- Edit-menu introspection (issue #183) ---
+# Empty selection: Delete Selected exists, Backspace shortcut, no modifiers,
+# disabled (selection is empty).
+echo "=== inspect-menu Edit (no selection — Delete Selected should be DISABLED) ==="
+MENU_OUT=$("$CLI_BIN" inspect-menu Edit --socket "$SOCKET")
+echo "$MENU_OUT"
+assert_json_field "inspect-menu status" "$MENU_OUT" "status" "ok"
+assert_menu_item_field "Delete Selected exists" "$MENU_OUT" "Delete Selected" "title" "Delete Selected"
+assert_menu_item_key_equivalent_hex "Delete Selected key" "$MENU_OUT" "Delete Selected" "0008"
+assert_menu_item_field "Delete Selected modifier mask" "$MENU_OUT" "Delete Selected" "modifierMask" "0"
+assert_menu_item_field "Delete Selected disabled" "$MENU_OUT" "Delete Selected" "isEnabled" "false"
 
 echo "=== selectAssets [ID1, ID2] ==="
 "$CLI_BIN" select-assets "$ID1" "$ID2" --socket "$SOCKET" > /dev/null

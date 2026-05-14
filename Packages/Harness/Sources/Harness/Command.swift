@@ -46,6 +46,7 @@ public enum Command: Codable, Sendable, Equatable {
     case cancelCrop
     case setCropPreset(name: String)
     case resetCrop
+    case inspectMenu(title: String)
 
     private enum CodingKeys: String, CodingKey {
         case type
@@ -71,6 +72,7 @@ public enum Command: Codable, Sendable, Equatable {
         case height
         case angle
         case name
+        case title
     }
 
     private enum CommandType: String, Codable {
@@ -117,6 +119,7 @@ public enum Command: Codable, Sendable, Equatable {
         case cancelCrop
         case setCropPreset
         case resetCrop
+        case inspectMenu
     }
 
     public init(from decoder: Decoder) throws {
@@ -255,6 +258,9 @@ public enum Command: Codable, Sendable, Equatable {
             self = .setCropPreset(name: name)
         case .resetCrop:
             self = .resetCrop
+        case .inspectMenu:
+            let title = try container.decode(String.self, forKey: .title)
+            self = .inspectMenu(title: title)
         }
     }
 
@@ -386,6 +392,9 @@ public enum Command: Codable, Sendable, Equatable {
             try container.encode(name, forKey: .name)
         case .resetCrop:
             try container.encode(CommandType.resetCrop, forKey: .type)
+        case .inspectMenu(let title):
+            try container.encode(CommandType.inspectMenu, forKey: .type)
+            try container.encode(title, forKey: .title)
         }
     }
 }

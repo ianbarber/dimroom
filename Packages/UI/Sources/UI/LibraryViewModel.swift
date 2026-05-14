@@ -401,6 +401,13 @@ public final class LibraryViewModel: ObservableObject {
     /// the UI's Delete/Backspace path and the harness' `deleteAssets`
     /// command.
     public func deleteSelected() async {
+        // In Recently Deleted, a generic Delete action has no sensible
+        // meaning — the rows are already soft-deleted, and the scope
+        // already exposes explicit Restore / Delete Permanently
+        // affordances. Belt-and-braces guard so a stray notification or
+        // direct call can't re-soft-delete trash rows and extend their
+        // retention window. See issue #181.
+        guard scope != .recentlyDeleted else { return }
         let ids = Array(selectedAssetIds)
         guard !ids.isEmpty else { return }
         await deleteAssets(ids: ids)
@@ -410,6 +417,11 @@ public final class LibraryViewModel: ObservableObject {
     /// `deleteSelected` but doesn't require the ids to be in
     /// `selectedAssetIds`.
     public func deleteAssets(ids: [UUID]) async {
+        // Same guard as `deleteSelected` — the harness reaches this
+        // entry point directly, so without it `delete-assets` could
+        // re-soft-delete trash rows and extend their retention. See
+        // issue #181.
+        guard scope != .recentlyDeleted else { return }
         guard !ids.isEmpty else { return }
         let deleted: [UUID]
         do {

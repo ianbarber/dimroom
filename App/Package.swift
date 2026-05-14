@@ -13,6 +13,7 @@ let package = Package(
         .package(path: "../Packages/Previews"),
         .package(path: "../Packages/UI"),
         .package(path: "../Packages/DriveClient"),
+        .package(path: "../Packages/SyncEngine"),
         .package(path: "../Packages/AppIcon"),
     ],
     targets: [
@@ -26,6 +27,7 @@ let package = Package(
                 .product(name: "Previews", package: "Previews"),
                 .product(name: "UI", package: "UI"),
                 .product(name: "DriveClient", package: "DriveClient"),
+                .product(name: "SyncEngine", package: "SyncEngine"),
                 .product(name: "AppIcon", package: "AppIcon"),
             ],
             path: "Sources",
@@ -39,6 +41,7 @@ let package = Package(
                 "Dimroom",
                 .product(name: "Catalog", package: "Catalog"),
                 .product(name: "DriveClient", package: "DriveClient"),
+                .product(name: "SyncEngine", package: "SyncEngine"),
             ],
             path: "Tests"
         ),

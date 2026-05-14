@@ -7,6 +7,7 @@ import Foundation
 import Harness
 import ImportKit
 import Previews
+import SyncEngine
 import UI
 
 /// Bridges harness commands to the app's state and AppKit operations.
@@ -23,6 +24,7 @@ final class HarnessController: @unchecked Sendable {
     private let driveUploader: (any DriveUploading)?
     private let originalsCoordinator: OriginalsCoordinator?
     private let undoStack: UndoStack?
+    private let catalogPublisher: CatalogPublisher?
     private var server: HarnessServer?
 
     init(
@@ -37,7 +39,8 @@ final class HarnessController: @unchecked Sendable {
         uploadCoordinator: UploadCoordinator,
         driveUploader: (any DriveUploading)? = nil,
         originalsCoordinator: OriginalsCoordinator? = nil,
-        undoStack: UndoStack? = nil
+        undoStack: UndoStack? = nil,
+        catalogPublisher: CatalogPublisher? = nil
     ) {
         self.router = router
         self.catalog = catalog
@@ -51,6 +54,7 @@ final class HarnessController: @unchecked Sendable {
         self.driveUploader = driveUploader
         self.originalsCoordinator = originalsCoordinator
         self.undoStack = undoStack
+        self.catalogPublisher = catalogPublisher
     }
 
     func start(socketPath: String = HarnessServer.defaultSocketPath) throws {
@@ -267,6 +271,9 @@ final class HarnessController: @unchecked Sendable {
 
         case .resetCrop:
             return await handleResetCrop()
+
+        case .publishCatalog:
+            return await handlePublishCatalog()
         }
     }
 
@@ -399,6 +406,33 @@ final class HarnessController: @unchecked Sendable {
         default:
             return .error("upload ended in unexpected phase")
         }
+    }
+
+    // MARK: - Publish catalog
+
+    private func handlePublishCatalog() async -> Response {
+        guard let catalogPublisher else {
+            return .error("catalog publisher not configured (drive not authenticated)")
+        }
+        do {
+            let outcome = try await catalogPublisher.publishNow()
+            return .ok(data: .dictionary([
+                "driveFileId": .string(outcome.driveFileId),
+                "uploadedBytes": .int(Int(outcome.uploadedBytes)),
+                "durationMs": .int(Self.durationToMs(outcome.duration)),
+                "wasCreate": .bool(outcome.wasCreate),
+            ]))
+        } catch SyncEngineError.notAuthenticated {
+            return .error("drive not authenticated")
+        } catch {
+            return .error("publishCatalog failed: \(error)")
+        }
+    }
+
+    private static func durationToMs(_ duration: Duration) -> Int {
+        let components = duration.components
+        let ms = components.seconds * 1_000 + components.attoseconds / 1_000_000_000_000_000
+        return Int(ms)
     }
 
     // MARK: - Undo / Redo

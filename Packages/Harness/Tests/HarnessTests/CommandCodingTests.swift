@@ -915,6 +915,33 @@ final class CommandCodingTests: XCTestCase {
         XCTAssertEqual(command, .uploadToDrive(assetId: expected))
     }
 
+    // MARK: - postMenuAction
+
+    func testPostMenuActionRoundTrip() throws {
+        for name in ["mode-library", "set-rating-3", "select-next", "toggle-histogram"] {
+            let command = Command.postMenuAction(name: name)
+            let data = try encoder.encode(command)
+            let decoded = try decoder.decode(Command.self, from: data)
+            XCTAssertEqual(command, decoded)
+        }
+    }
+
+    func testPostMenuActionJSON() throws {
+        let command = Command.postMenuAction(name: "set-rating-3")
+        let data = try encoder.encode(command)
+        let json = String(data: data, encoding: .utf8)!
+        XCTAssertEqual(
+            json,
+            #"{"name":"set-rating-3","type":"postMenuAction"}"#
+        )
+    }
+
+    func testDecodePostMenuActionFromJSON() throws {
+        let json = #"{"type":"postMenuAction","name":"mode-loupe"}"#
+        let command = try decoder.decode(Command.self, from: Data(json.utf8))
+        XCTAssertEqual(command, .postMenuAction(name: "mode-loupe"))
+    }
+
     // MARK: - Route
 
     func testRouteAllCases() {

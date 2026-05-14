@@ -46,6 +46,13 @@ public enum Command: Codable, Sendable, Equatable {
     case cancelCrop
     case setCropPreset(name: String)
     case resetCrop
+    /// Posts a `Notification.Name` matching `name` on the app's main
+    /// `NotificationCenter`. The app exposes a fixed whitelist of menu
+    /// actions (mode switch, ratings, zoom, histogram, arrow nav, etc.)
+    /// so harness flows can exercise menu-attached keyboard shortcuts
+    /// without synthesising NSEvents. Unknown names are rejected by the
+    /// handler at runtime.
+    case postMenuAction(name: String)
 
     private enum CodingKeys: String, CodingKey {
         case type
@@ -117,6 +124,7 @@ public enum Command: Codable, Sendable, Equatable {
         case cancelCrop
         case setCropPreset
         case resetCrop
+        case postMenuAction
     }
 
     public init(from decoder: Decoder) throws {
@@ -255,6 +263,9 @@ public enum Command: Codable, Sendable, Equatable {
             self = .setCropPreset(name: name)
         case .resetCrop:
             self = .resetCrop
+        case .postMenuAction:
+            let name = try container.decode(String.self, forKey: .name)
+            self = .postMenuAction(name: name)
         }
     }
 
@@ -386,6 +397,9 @@ public enum Command: Codable, Sendable, Equatable {
             try container.encode(name, forKey: .name)
         case .resetCrop:
             try container.encode(CommandType.resetCrop, forKey: .type)
+        case .postMenuAction(let name):
+            try container.encode(CommandType.postMenuAction, forKey: .type)
+            try container.encode(name, forKey: .name)
         }
     }
 }

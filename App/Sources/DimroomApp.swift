@@ -75,6 +75,33 @@ struct DimroomApp: App {
                     libraryViewModel: appDelegate.libraryViewModel,
                     router: appDelegate.router
                 )
+                SelectAllVisibleMenuItem(
+                    libraryViewModel: appDelegate.libraryViewModel,
+                    router: appDelegate.router
+                )
+            }
+            CommandMenu("View") {
+                ModeMenuItems(router: appDelegate.router)
+                Divider()
+                ZoomToggleMenuItem(router: appDelegate.router)
+                ZoomResetMenuItem(router: appDelegate.router)
+                Divider()
+                HistogramMenuItem(
+                    router: appDelegate.router,
+                    developViewModel: appDelegate.developViewModel
+                )
+            }
+            CommandMenu("Image") {
+                RotateMenuItems(libraryViewModel: appDelegate.libraryViewModel)
+            }
+            CommandMenu("Rating") {
+                RatingMenuItems(libraryViewModel: appDelegate.libraryViewModel)
+            }
+            CommandMenu("Navigate") {
+                NavigateMenuItems(
+                    libraryViewModel: appDelegate.libraryViewModel,
+                    router: appDelegate.router
+                )
             }
         }
     }
@@ -130,6 +157,195 @@ private struct UndoRedoMenuItems: View {
             return "Redo \(desc)"
         }
         return "Redo"
+    }
+}
+
+/// Lightroom-style mode switch — G/E/D as menu-attached key
+/// equivalents so the shortcut fires regardless of focus.
+private struct ModeMenuItems: View {
+    let router: AppRouter
+
+    var body: some View {
+        Button("Library") {
+            NotificationCenter.default.post(
+                name: MenuActionName.modeLibrary.notificationName,
+                object: nil
+            )
+        }
+        .keyboardShortcut("g", modifiers: [])
+
+        Button("Loupe") {
+            NotificationCenter.default.post(
+                name: MenuActionName.modeLoupe.notificationName,
+                object: nil
+            )
+        }
+        .keyboardShortcut("e", modifiers: [])
+
+        Button("Develop") {
+            NotificationCenter.default.post(
+                name: MenuActionName.modeDevelop.notificationName,
+                object: nil
+            )
+        }
+        .keyboardShortcut("d", modifiers: [])
+    }
+}
+
+private struct ZoomToggleMenuItem: View {
+    let router: AppRouter
+
+    var body: some View {
+        Button("Zoom Fit / 100%") {
+            NotificationCenter.default.post(
+                name: MenuActionName.zoomToggle.notificationName,
+                object: nil
+            )
+        }
+        .keyboardShortcut("z", modifiers: [])
+        .disabled(router.route != .loupe)
+    }
+}
+
+private struct ZoomResetMenuItem: View {
+    let router: AppRouter
+
+    var body: some View {
+        Button("Zoom to Fit") {
+            NotificationCenter.default.post(
+                name: MenuActionName.zoomReset.notificationName,
+                object: nil
+            )
+        }
+        .keyboardShortcut("0", modifiers: .command)
+        .disabled(router.route != .loupe)
+    }
+}
+
+private struct HistogramMenuItem: View {
+    let router: AppRouter
+    @ObservedObject var developViewModel: DevelopViewModel
+
+    var body: some View {
+        Button(developViewModel.showHistogram ? "Hide Histogram" : "Show Histogram") {
+            NotificationCenter.default.post(
+                name: MenuActionName.toggleHistogram.notificationName,
+                object: nil
+            )
+        }
+        .keyboardShortcut("h", modifiers: [])
+        .disabled(router.route != .develop)
+    }
+}
+
+private struct RotateMenuItems: View {
+    @ObservedObject var libraryViewModel: LibraryViewModel
+
+    var body: some View {
+        Button("Rotate Clockwise") {
+            NotificationCenter.default.post(
+                name: MenuActionName.rotateCW.notificationName,
+                object: nil
+            )
+        }
+        .keyboardShortcut("]", modifiers: .command)
+        .disabled(libraryViewModel.selectedAssetId == nil)
+
+        Button("Rotate Counter-Clockwise") {
+            NotificationCenter.default.post(
+                name: MenuActionName.rotateCCW.notificationName,
+                object: nil
+            )
+        }
+        .keyboardShortcut("[", modifiers: .command)
+        .disabled(libraryViewModel.selectedAssetId == nil)
+    }
+}
+
+private struct RatingMenuItems: View {
+    @ObservedObject var libraryViewModel: LibraryViewModel
+
+    var body: some View {
+        ForEach(1...5, id: \.self) { star in
+            Button("Set Rating \(star)") {
+                NotificationCenter.default.post(
+                    name: MenuActionName.setRating(star).notificationName,
+                    object: nil
+                )
+            }
+            .keyboardShortcut(KeyEquivalent(Character("\(star)")), modifiers: [])
+            .disabled(libraryViewModel.selectedAssetId == nil)
+        }
+
+        Divider()
+
+        Button("Clear Rating") {
+            NotificationCenter.default.post(
+                name: MenuActionName.clearRating.notificationName,
+                object: nil
+            )
+        }
+        .keyboardShortcut("0", modifiers: [])
+        .disabled(libraryViewModel.selectedAssetId == nil)
+    }
+}
+
+private struct NavigateMenuItems: View {
+    @ObservedObject var libraryViewModel: LibraryViewModel
+    let router: AppRouter
+
+    var body: some View {
+        Button("Previous") {
+            NotificationCenter.default.post(
+                name: MenuActionName.selectPrevious.notificationName,
+                object: nil
+            )
+        }
+        .keyboardShortcut(.leftArrow, modifiers: [])
+        .disabled(router.route != .library && router.route != .loupe)
+
+        Button("Next") {
+            NotificationCenter.default.post(
+                name: MenuActionName.selectNext.notificationName,
+                object: nil
+            )
+        }
+        .keyboardShortcut(.rightArrow, modifiers: [])
+        .disabled(router.route != .library && router.route != .loupe)
+
+        Button("Up") {
+            NotificationCenter.default.post(
+                name: MenuActionName.selectUp.notificationName,
+                object: nil
+            )
+        }
+        .keyboardShortcut(.upArrow, modifiers: [])
+        .disabled(router.route != .library)
+
+        Button("Down") {
+            NotificationCenter.default.post(
+                name: MenuActionName.selectDown.notificationName,
+                object: nil
+            )
+        }
+        .keyboardShortcut(.downArrow, modifiers: [])
+        .disabled(router.route != .library)
+    }
+}
+
+private struct SelectAllVisibleMenuItem: View {
+    @ObservedObject var libraryViewModel: LibraryViewModel
+    let router: AppRouter
+
+    var body: some View {
+        Button("Select All Visible") {
+            NotificationCenter.default.post(
+                name: MenuActionName.selectAllVisible.notificationName,
+                object: nil
+            )
+        }
+        .keyboardShortcut("a", modifiers: .command)
+        .disabled(router.route != .library)
     }
 }
 
@@ -593,6 +809,48 @@ private struct UnavailableOriginalsDownloader: OriginalsDownloader {
 extension Notification.Name {
     static let showExportSheet = Notification.Name("dimroom.showExportSheet")
     static let requestDeleteSelected = Notification.Name("dimroom.requestDeleteSelected")
+}
+
+/// Whitelist of menu-attached actions reachable from both the menu bar's
+/// keyboard shortcuts and the harness `postMenuAction` command. Defining
+/// names here once (rather than as bare strings) means the
+/// `HarnessController` and `ContentView` agree on the wire format and
+/// notification name without typo risk.
+enum MenuActionName: String, CaseIterable {
+    case modeLibrary = "mode-library"
+    case modeLoupe = "mode-loupe"
+    case modeDevelop = "mode-develop"
+    case setRating1 = "set-rating-1"
+    case setRating2 = "set-rating-2"
+    case setRating3 = "set-rating-3"
+    case setRating4 = "set-rating-4"
+    case setRating5 = "set-rating-5"
+    case clearRating = "clear-rating"
+    case rotateCW = "rotate-cw"
+    case rotateCCW = "rotate-ccw"
+    case zoomToggle = "zoom-toggle"
+    case zoomReset = "zoom-reset"
+    case toggleHistogram = "toggle-histogram"
+    case selectNext = "select-next"
+    case selectPrevious = "select-previous"
+    case selectUp = "select-up"
+    case selectDown = "select-down"
+    case selectAllVisible = "select-all-visible"
+
+    var notificationName: Notification.Name {
+        Notification.Name("dimroom.menuAction.\(rawValue)")
+    }
+
+    static func setRating(_ star: Int) -> MenuActionName {
+        switch star {
+        case 1: return .setRating1
+        case 2: return .setRating2
+        case 3: return .setRating3
+        case 4: return .setRating4
+        case 5: return .setRating5
+        default: fatalError("setRating only defined for 1...5, got \(star)")
+        }
+    }
 }
 
 private extension DevelopViewModel {

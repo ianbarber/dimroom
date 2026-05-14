@@ -267,7 +267,24 @@ final class HarnessController: @unchecked Sendable {
 
         case .resetCrop:
             return await handleResetCrop()
+
+        case .postMenuAction(let name):
+            return await handlePostMenuAction(name: name)
         }
+    }
+
+    private func handlePostMenuAction(name: String) async -> Response {
+        guard let action = MenuActionName(rawValue: name) else {
+            let valid = MenuActionName.allCases.map(\.rawValue).joined(separator: ", ")
+            return .error("unknown menu action '\(name)'; expected one of: \(valid)")
+        }
+        // Posting via the same notification path the menu uses proves
+        // the menu-to-action wiring end-to-end without the harness
+        // needing to synthesise NSEvents.
+        await MainActor.run {
+            NotificationCenter.default.post(name: action.notificationName, object: nil)
+        }
+        return .ok()
     }
 
     // MARK: - Preview signature

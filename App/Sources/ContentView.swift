@@ -109,117 +109,74 @@ struct ContentView: View {
         .onReceive(exportSheetPublisher) { _ in
             showExportSheet = true
         }
-        // Mode switch keys, Lightroom-style: G → Library, E → Loupe,
-        // D → Develop. Attached at the root so they fire regardless of
-        // which subview currently has focus.
+        // `.focusable()` keeps the root view eligible to receive the Esc
+        // key via `.onKeyPress(.escape)`. Other modifierless shortcuts
+        // (g/e/d, ratings, arrows, z, h, ⌘A, ⌘[ / ⌘]) used to live here
+        // too, but they silently no-opped at launch when focus hadn't
+        // landed on a child view — the same focus bug #134 fixed for
+        // Backspace. They are now menu-attached key equivalents that
+        // post notifications observed below; see `MenuActionName` in
+        // DimroomApp for the whitelist.
         .focusable()
         .focusEffectDisabled()
-        .onKeyPress(.init("g")) {
-            router.route = .library
-            return .handled
-        }
-        .onKeyPress(.init("e")) {
-            router.route = .loupe
-            return .handled
-        }
-        .onKeyPress(.init("d")) {
-            router.route = .develop
-            return .handled
-        }
         .onKeyPress(.escape) {
             router.goBack()
             return .handled
         }
-        .onKeyPress(keys: ["]"], phases: .down) { keyPress in
-            guard keyPress.modifiers == .command else { return .ignored }
-            guard let assetId = libraryViewModel.selectedAssetId else {
-                return .ignored
-            }
+        .onReceive(menuActionPublisher(.modeLibrary)) { _ in
+            router.route = .library
+        }
+        .onReceive(menuActionPublisher(.modeLoupe)) { _ in
+            router.route = .loupe
+        }
+        .onReceive(menuActionPublisher(.modeDevelop)) { _ in
+            router.route = .develop
+        }
+        .onReceive(menuActionPublisher(.rotateCW)) { _ in
+            guard let assetId = libraryViewModel.selectedAssetId else { return }
             Task { await libraryViewModel.rotate(assetId: assetId, clockwise: true) }
-            return .handled
         }
-        .onKeyPress(keys: ["["], phases: .down) { keyPress in
-            guard keyPress.modifiers == .command else { return .ignored }
-            guard let assetId = libraryViewModel.selectedAssetId else {
-                return .ignored
-            }
+        .onReceive(menuActionPublisher(.rotateCCW)) { _ in
+            guard let assetId = libraryViewModel.selectedAssetId else { return }
             Task { await libraryViewModel.rotate(assetId: assetId, clockwise: false) }
-            return .handled
         }
-        // Rating keys 1-5 (set) and 0 (clear). Active in both Library
-        // and Loupe — rating applies to the selected asset regardless
-        // of which view is showing.
-        .onKeyPress(keys: ["1", "2", "3", "4", "5"], phases: .down) { keyPress in
-            guard keyPress.modifiers.isEmpty else { return .ignored }
-            guard let assetId = libraryViewModel.selectedAssetId,
-                  let digit = Int(String(keyPress.characters)) else {
-                return .ignored
-            }
-            Task { await libraryViewModel.setRating(for: assetId, to: digit) }
-            return .handled
-        }
-        .onKeyPress(keys: ["0"], phases: .down) { keyPress in
-            // Plain 0 → clear rating. Cmd+0 → reset zoom (loupe only).
-            if keyPress.modifiers == .command {
-                guard router.route == .loupe else { return .ignored }
-                libraryViewModel.pendingZoomCommand = .resetToFit
-                return .handled
-            }
-            guard keyPress.modifiers.isEmpty else { return .ignored }
-            guard let assetId = libraryViewModel.selectedAssetId else {
-                return .ignored
-            }
-            Task { await libraryViewModel.setRating(for: assetId, to: 0) }
-            return .handled
-        }
-        // Arrow keys — navigate between assets in Library and Loupe.
-        // Left/Right move by one asset; Up/Down move by one grid row
-        // (Library only — no grid concept in Loupe).
-        .onKeyPress(.leftArrow) {
-            guard router.route == .library || router.route == .loupe else {
-                return .ignored
-            }
-            libraryViewModel.selectPrevious()
-            return .handled
-        }
-        .onKeyPress(.rightArrow) {
-            guard router.route == .library || router.route == .loupe else {
-                return .ignored
-            }
-            libraryViewModel.selectNext()
-            return .handled
-        }
-        .onKeyPress(.upArrow) {
-            guard router.route == .library else { return .ignored }
-            libraryViewModel.selectUp()
-            return .handled
-        }
-        .onKeyPress(.downArrow) {
-            guard router.route == .library else { return .ignored }
-            libraryViewModel.selectDown()
-            return .handled
-        }
-        // Z — toggle fit ↔ 100% zoom in Loupe.
-        .onKeyPress(keys: ["z"], phases: .down) { keyPress in
-            guard keyPress.modifiers.isEmpty else { return .ignored }
-            guard router.route == .loupe else { return .ignored }
+        .onReceive(menuActionPublisher(.setRating1)) { _ in applyRating(1) }
+        .onReceive(menuActionPublisher(.setRating2)) { _ in applyRating(2) }
+        .onReceive(menuActionPublisher(.setRating3)) { _ in applyRating(3) }
+        .onReceive(menuActionPublisher(.setRating4)) { _ in applyRating(4) }
+        .onReceive(menuActionPublisher(.setRating5)) { _ in applyRating(5) }
+        .onReceive(menuActionPublisher(.clearRating)) { _ in applyRating(0) }
+        .onReceive(menuActionPublisher(.zoomToggle)) { _ in
+            guard router.route == .loupe else { return }
             libraryViewModel.pendingZoomCommand = .toggleFitTo100
-            return .handled
         }
-        // H — toggle histogram visibility in Develop. Empty modifiers
-        // only, so Cmd+H (macOS hide app) isn't intercepted.
-        .onKeyPress(keys: ["h"], phases: .down) { keyPress in
-            guard keyPress.modifiers.isEmpty else { return .ignored }
-            guard router.route == .develop else { return .ignored }
+        .onReceive(menuActionPublisher(.zoomReset)) { _ in
+            guard router.route == .loupe else { return }
+            libraryViewModel.pendingZoomCommand = .resetToFit
+        }
+        .onReceive(menuActionPublisher(.toggleHistogram)) { _ in
+            guard router.route == .develop else { return }
             developViewModel.showHistogram.toggle()
-            return .handled
         }
-        // Cmd+A — select every visible row. Library only, matches Finder.
-        .onKeyPress(keys: ["a"], phases: .down) { keyPress in
-            guard keyPress.modifiers == .command else { return .ignored }
-            guard router.route == .library else { return .ignored }
+        .onReceive(menuActionPublisher(.selectPrevious)) { _ in
+            guard router.route == .library || router.route == .loupe else { return }
+            libraryViewModel.selectPrevious()
+        }
+        .onReceive(menuActionPublisher(.selectNext)) { _ in
+            guard router.route == .library || router.route == .loupe else { return }
+            libraryViewModel.selectNext()
+        }
+        .onReceive(menuActionPublisher(.selectUp)) { _ in
+            guard router.route == .library else { return }
+            libraryViewModel.selectUp()
+        }
+        .onReceive(menuActionPublisher(.selectDown)) { _ in
+            guard router.route == .library else { return }
+            libraryViewModel.selectDown()
+        }
+        .onReceive(menuActionPublisher(.selectAllVisible)) { _ in
+            guard router.route == .library else { return }
             libraryViewModel.selectAllVisible()
-            return .handled
         }
         // Delete is dispatched from the Edit → Delete Selected menu
         // item (keyboardShortcut .delete). Routing it through a
@@ -241,6 +198,15 @@ struct ContentView: View {
                 developViewModel.deactivate()
             }
         }
+    }
+
+    private func applyRating(_ rating: Int) {
+        guard let assetId = libraryViewModel.selectedAssetId else { return }
+        Task { await libraryViewModel.setRating(for: assetId, to: rating) }
+    }
+
+    private func menuActionPublisher(_ action: MenuActionName) -> NotificationCenter.Publisher {
+        NotificationCenter.default.publisher(for: action.notificationName)
     }
 
     /// The export sheet is triggered by File → Export… (Cmd+Shift+E) via

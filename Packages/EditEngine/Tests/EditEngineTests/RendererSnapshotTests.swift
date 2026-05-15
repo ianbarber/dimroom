@@ -117,7 +117,11 @@ final class RendererSnapshotTests: XCTestCase {
     }
 
     func testHSLSaturationGreenSnapshot() {
-        let source = makeColorImage()
+        // Source must contain green pixels for the green-band saturation to
+        // produce a visible effect; `makeColorImage` (red + blue) leaves the
+        // snapshot indistinguishable from identity. A pure-green sample
+        // exercises the band's actual desaturation.
+        let source = makeSolidColorImage(r: 30, g: 200, b: 30)
         var sat = EditState.hslIdentity
         sat[3] = -80 // Green band
         let image = renderToNSImage(source: source, editState: EditState(hslSaturation: sat))

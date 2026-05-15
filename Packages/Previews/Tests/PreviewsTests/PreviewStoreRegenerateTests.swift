@@ -53,64 +53,75 @@ final class PreviewStoreRegenerateTests: XCTestCase {
         return digest.map { String(format: "%02x", $0) }.joined()
     }
 
+    private func masterURL(for asset: Asset, kind: PreviewKind) -> URL {
+        CachePaths.fileURL(for: asset, kind: kind, tier: .master, in: cacheDir)
+    }
+
+    private func displayURL(for asset: Asset, kind: PreviewKind) -> URL {
+        CachePaths.fileURL(for: asset, kind: kind, tier: .display, in: cacheDir)
+    }
+
     // MARK: - Tests
 
-    func testRegenerateWithEditOverwritesCachedFiles() async throws {
+    func testRegenerateWithEditWritesDisplayTierAndLeavesMasterAlone() async throws {
         let store = PreviewStore(cacheDirectory: cacheDir)
         let asset = makeAsset(hash: "regenoverwrite000000a")
         let source = try makeSource()
-        let set = try await store.generate(for: asset, sourceURL: source)
+        _ = try await store.generate(for: asset, sourceURL: source)
 
-        let thumbBefore = try sha256(of: set.thumbnail)
-        let previewBefore = try sha256(of: set.preview)
+        let masterThumb = masterURL(for: asset, kind: .thumbnail)
+        let masterPreview = masterURL(for: asset, kind: .preview)
+        let displayThumb = displayURL(for: asset, kind: .thumbnail)
+        let displayPreview = displayURL(for: asset, kind: .preview)
+
+        let masterThumbBefore = try sha256(of: masterThumb)
+        let masterPreviewBefore = try sha256(of: masterPreview)
+        XCTAssertFalse(FileManager.default.fileExists(atPath: displayThumb.path))
+        XCTAssertFalse(FileManager.default.fileExists(atPath: displayPreview.path))
 
         var state = EditState()
         state.exposure = 2.0
         await store.regenerateWithEdit(for: asset, editState: state)
 
-        XCTAssertTrue(FileManager.default.fileExists(atPath: set.thumbnail.path))
-        XCTAssertTrue(FileManager.default.fileExists(atPath: set.preview.path))
+        // Display files now exist with edited bytes.
+        XCTAssertTrue(FileManager.default.fileExists(atPath: displayThumb.path))
+        XCTAssertTrue(FileManager.default.fileExists(atPath: displayPreview.path))
+        XCTAssertNotEqual(
+            try sha256(of: displayThumb),
+            masterThumbBefore,
+            "Display thumbnail must differ from master after a non-identity edit"
+        )
+        XCTAssertNotEqual(
+            try sha256(of: displayPreview),
+            masterPreviewBefore,
+            "Display preview must differ from master after a non-identity edit"
+        )
 
-        let thumbAfter = try sha256(of: set.thumbnail)
-        let previewAfter = try sha256(of: set.preview)
-
-        XCTAssertNotEqual(thumbBefore, thumbAfter, "Thumbnail bytes must change after regenerate with non-identity edit")
-        XCTAssertNotEqual(previewBefore, previewAfter, "Preview bytes must change after regenerate with non-identity edit")
+        // Master files are byte-identical to before — they're the source
+        // of truth for future regens and must never be rewritten.
+        XCTAssertEqual(try sha256(of: masterThumb), masterThumbBefore)
+        XCTAssertEqual(try sha256(of: masterPreview), masterPreviewBefore)
     }
 
-    func testRegenerateWithIdentityStateKeepsVisuallyEquivalentOutput() async throws {
+    func testRegenerateWithIdentityStateLeavesMasterPristine() async throws {
         let store = PreviewStore(cacheDirectory: cacheDir)
         let asset = makeAsset(hash: "regenidentity000000ab")
         let source = try makeSource()
-        let set = try await store.generate(for: asset, sourceURL: source)
+        _ = try await store.generate(for: asset, sourceURL: source)
 
-        guard let beforeSize = FixtureFactory.pixelSize(of: set.thumbnail) else {
-            return XCTFail("missing thumbnail size")
-        }
-        let beforeAvg = FixtureFactory.averageColor(
-            of: set.thumbnail,
-            in: CGRect(origin: .zero, size: beforeSize)
-        )
+        let masterThumb = masterURL(for: asset, kind: .thumbnail)
+        let masterThumbBefore = try sha256(of: masterThumb)
 
         await store.regenerateWithEdit(for: asset, editState: EditState())
 
-        XCTAssertTrue(FileManager.default.fileExists(atPath: set.thumbnail.path))
-        guard let afterSize = FixtureFactory.pixelSize(of: set.thumbnail) else {
-            return XCTFail("missing thumbnail size after regenerate")
-        }
-        XCTAssertEqual(max(afterSize.width, afterSize.height), 256, accuracy: 1)
-
-        // Mean colour should be close to the original; JPEG re-encode
-        // introduces small deltas but the overall average must track.
-        if let beforeAvg,
-           let afterAvg = FixtureFactory.averageColor(
-               of: set.thumbnail,
-               in: CGRect(origin: .zero, size: afterSize)
-           ) {
-            XCTAssertEqual(beforeAvg.red, afterAvg.red, accuracy: 0.1)
-            XCTAssertEqual(beforeAvg.green, afterAvg.green, accuracy: 0.1)
-            XCTAssertEqual(beforeAvg.blue, afterAvg.blue, accuracy: 0.1)
-        }
+        XCTAssertTrue(FileManager.default.fileExists(atPath: masterThumb.path))
+        XCTAssertEqual(try sha256(of: masterThumb), masterThumbBefore)
+        XCTAssertFalse(
+            FileManager.default.fileExists(atPath: displayURL(for: asset, kind: .thumbnail).path)
+        )
+        XCTAssertFalse(
+            FileManager.default.fileExists(atPath: displayURL(for: asset, kind: .preview).path)
+        )
     }
 
     func testRegenerateWithMissingPreviewIsNoOp() async throws {
@@ -169,5 +180,162 @@ final class PreviewStoreRegenerateTests: XCTestCase {
         await store.regenerateWithEdit(for: asset, editState: state)
 
         XCTAssertTrue(received.isEmpty, "No signal should fire when there is no preview to regenerate")
+    }
+
+    // MARK: - Issue #186 — generational loss
+
+    /// Repeated regens with the same non-identity edit must produce
+    /// byte-identical display JPEGs, proving each call reads from the
+    /// (unchanged) master rather than from the previously rendered
+    /// display tier.
+    func testRegenerateIsIdempotentAcrossRepeatedCalls() async throws {
+        let store = PreviewStore(cacheDirectory: cacheDir)
+        let asset = makeAsset(hash: "regenidempotent00aaff")
+        let source = try makeSource()
+        _ = try await store.generate(for: asset, sourceURL: source)
+
+        var state = EditState()
+        state.exposure = 1.5
+        state.contrast = 20
+
+        await store.regenerateWithEdit(for: asset, editState: state)
+        let firstThumbSHA = try sha256(of: displayURL(for: asset, kind: .thumbnail))
+        let firstPreviewSHA = try sha256(of: displayURL(for: asset, kind: .preview))
+
+        for _ in 0..<5 {
+            await store.regenerateWithEdit(for: asset, editState: state)
+            XCTAssertEqual(
+                try sha256(of: displayURL(for: asset, kind: .thumbnail)),
+                firstThumbSHA,
+                "Repeated regen must produce byte-identical display thumbnail"
+            )
+            XCTAssertEqual(
+                try sha256(of: displayURL(for: asset, kind: .preview)),
+                firstPreviewSHA,
+                "Repeated regen must produce byte-identical display preview"
+            )
+        }
+    }
+
+    /// Master files are the canonical source of truth — a non-identity
+    /// regen must not mutate them. Catches the bug where regen reads its
+    /// own previous output as the source (issue #186).
+    func testRegenerateDoesNotModifyMasterFiles() async throws {
+        let store = PreviewStore(cacheDirectory: cacheDir)
+        let asset = makeAsset(hash: "regenmasterintact00aa")
+        let source = try makeSource()
+        _ = try await store.generate(for: asset, sourceURL: source)
+
+        let masterThumb = masterURL(for: asset, kind: .thumbnail)
+        let masterPreview = masterURL(for: asset, kind: .preview)
+        let masterThumbSHA = try sha256(of: masterThumb)
+        let masterPreviewSHA = try sha256(of: masterPreview)
+
+        var state = EditState()
+        state.exposure = 2.5
+
+        for _ in 0..<3 {
+            await store.regenerateWithEdit(for: asset, editState: state)
+            XCTAssertEqual(try sha256(of: masterThumb), masterThumbSHA)
+            XCTAssertEqual(try sha256(of: masterPreview), masterPreviewSHA)
+        }
+    }
+
+    /// A second crop must operate against the full-resolution master, not
+    /// against the smaller display JPEG produced by the first crop —
+    /// otherwise re-cropping a previously-cropped image silently degrades
+    /// resolution on every iteration (the crop-shrinks-the-source case
+    /// from issue #186).
+    func testRegenerateAfterCropReadsMasterNotDisplay() async throws {
+        let store = PreviewStore(cacheDirectory: cacheDir)
+        let asset = makeAsset(hash: "regencropfrommastr00")
+        // Source must be big enough that the 2048px master is strictly
+        // larger than the first-crop display, otherwise the bug can't
+        // produce observable shrinkage.
+        let source = try makeSource(width: 4000, height: 3000)
+        _ = try await store.generate(for: asset, sourceURL: source)
+
+        let masterPreview = masterURL(for: asset, kind: .preview)
+        let masterSize = try XCTUnwrap(FixtureFactory.pixelSize(of: masterPreview))
+        XCTAssertEqual(max(masterSize.width, masterSize.height), 2048, accuracy: 1)
+
+        // First crop: centered 50% × 50%.
+        var firstCrop = EditState()
+        firstCrop.cropRect = CGRect(
+            x: masterSize.width * 0.25,
+            y: masterSize.height * 0.25,
+            width: masterSize.width * 0.5,
+            height: masterSize.height * 0.5
+        )
+        await store.regenerateWithEdit(for: asset, editState: firstCrop)
+
+        let displayPreview = displayURL(for: asset, kind: .preview)
+        let firstSize = try XCTUnwrap(FixtureFactory.pixelSize(of: displayPreview))
+
+        // Second crop: a *larger* centered region (75% × 75%). Under the
+        // pre-#186 bug the second regen would read the smaller first-crop
+        // display as source and end up smaller still; with the fix it
+        // reads the 2048px master and ends up larger than the first crop.
+        var secondCrop = EditState()
+        secondCrop.cropRect = CGRect(
+            x: masterSize.width * 0.125,
+            y: masterSize.height * 0.125,
+            width: masterSize.width * 0.75,
+            height: masterSize.height * 0.75
+        )
+        await store.regenerateWithEdit(for: asset, editState: secondCrop)
+
+        let secondSize = try XCTUnwrap(FixtureFactory.pixelSize(of: displayPreview))
+        XCTAssertGreaterThan(
+            secondSize.width,
+            firstSize.width,
+            "Second (larger) crop must operate on the 2048px master — got \(secondSize) after first \(firstSize)"
+        )
+    }
+
+    /// After a non-identity regen has written display files, a fresh
+    /// identity regen must remove them so `thumbnailURL` / `previewURL`
+    /// resolve back to master.
+    func testRegenerateWithIdentityEditDeletesDisplayFiles() async throws {
+        let store = PreviewStore(cacheDirectory: cacheDir)
+        let asset = makeAsset(hash: "regenidresetdisp00aa")
+        let source = try makeSource()
+        _ = try await store.generate(for: asset, sourceURL: source)
+
+        var state = EditState()
+        state.exposure = 1.0
+        await store.regenerateWithEdit(for: asset, editState: state)
+        XCTAssertTrue(FileManager.default.fileExists(atPath: displayURL(for: asset, kind: .thumbnail).path))
+        XCTAssertTrue(FileManager.default.fileExists(atPath: displayURL(for: asset, kind: .preview).path))
+
+        await store.regenerateWithEdit(for: asset, editState: EditState())
+
+        XCTAssertFalse(FileManager.default.fileExists(atPath: displayURL(for: asset, kind: .thumbnail).path))
+        XCTAssertFalse(FileManager.default.fileExists(atPath: displayURL(for: asset, kind: .preview).path))
+
+        XCTAssertEqual(store.thumbnailURL(for: asset), masterURL(for: asset, kind: .thumbnail))
+        XCTAssertEqual(store.previewURL(for: asset), masterURL(for: asset, kind: .preview))
+    }
+
+    /// Lookup contract: with no display files, `previewURL` returns the
+    /// master; after a non-identity regen it returns the display tier.
+    /// The `master*URL` accessors always return master regardless.
+    func testPreviewURLFallsBackToMasterWhenNoDisplay() async throws {
+        let store = PreviewStore(cacheDirectory: cacheDir)
+        let asset = makeAsset(hash: "previewfallback0000a")
+        let source = try makeSource()
+        _ = try await store.generate(for: asset, sourceURL: source)
+
+        XCTAssertEqual(store.previewURL(for: asset), masterURL(for: asset, kind: .preview))
+        XCTAssertEqual(store.thumbnailURL(for: asset), masterURL(for: asset, kind: .thumbnail))
+
+        var state = EditState()
+        state.exposure = 0.75
+        await store.regenerateWithEdit(for: asset, editState: state)
+
+        XCTAssertEqual(store.previewURL(for: asset), displayURL(for: asset, kind: .preview))
+        XCTAssertEqual(store.thumbnailURL(for: asset), displayURL(for: asset, kind: .thumbnail))
+        XCTAssertEqual(store.masterPreviewURL(for: asset), masterURL(for: asset, kind: .preview))
+        XCTAssertEqual(store.masterThumbnailURL(for: asset), masterURL(for: asset, kind: .thumbnail))
     }
 }

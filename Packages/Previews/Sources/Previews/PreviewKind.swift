@@ -28,3 +28,30 @@ public enum PreviewKind: String, CaseIterable, Sendable {
         }
     }
 }
+
+/// Which generation tier a cache file belongs to.
+///
+/// `.master` is written exactly once per asset, from the original, by
+/// `PreviewStore.generate(for:sourceURL:)`. It is never overwritten by
+/// later edits — every `regenerateWithEdit` call reads from this tier, so
+/// repeated saves don't accumulate JPEG generation loss (issue #186).
+///
+/// `.display` is written by `regenerateWithEdit`. It carries the visible
+/// edited look that Library + Loupe show. When `EditState` is identity
+/// the display tier is deleted so lookups fall back to master.
+public enum PreviewTier: Sendable {
+    case master
+    case display
+
+    /// Filename infix between `<contentHash>` and the kind tag. Master
+    /// keeps the existing `<hash>.thumb.jpg` / `<hash>.preview.jpg` layout
+    /// so caches written before the tier split remain valid; display
+    /// adds `.edit.` giving `<hash>.edit.thumb.jpg` /
+    /// `<hash>.edit.preview.jpg`.
+    var filenameInfix: String {
+        switch self {
+        case .master: return ""
+        case .display: return "edit."
+        }
+    }
+}

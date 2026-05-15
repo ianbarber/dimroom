@@ -13,7 +13,20 @@ struct ContentView: View {
     @ObservedObject var uploadCoordinator: UploadCoordinator
     @ObservedObject var undoStack: UndoStack
     let catalog: CatalogDatabase?
+    /// Fetcher used by the export flow to pull originals from Drive when
+    /// an asset has been evicted from the local cache. `nil` outside the
+    /// fully-wired production app (e.g. early-init before
+    /// `applicationDidFinishLaunching` finishes).
+    let originalFetcher: (any OriginalFetcher)?
     @State private var showExportSheet = false
+    /// True while the "Export all N photos?" confirmation is on screen.
+    /// Set when File → Export is triggered with no selection / filter
+    /// against the full library; a yes advances to `showExportSheet`.
+    @State private var showExportConfirmation = false
+    /// Set when the coordinator reaches `.done` or `.failed`. Drives a
+    /// post-export alert summarising what happened. Cleared by the user
+    /// dismissing the alert.
+    @State private var exportAlert: ExportAlertPayload?
     /// Non-nil while the delete-confirmation dialog is presented.
     /// Carries the count so the dialog title reads e.g. "Delete 3 photos?".
     @State private var pendingDeleteCount: Int?
@@ -87,7 +100,7 @@ struct ContentView: View {
             )
             ExportSheetView(
                 assetCount: scopedAssets.count,
-                onExport: { [catalog] destinationURL, format, jpegQuality, applyEdits in
+                onExport: { [catalog, originalFetcher] destinationURL, format, jpegQuality, applyEdits in
                     showExportSheet = false
                     guard let catalog else { return }
                     Task {
@@ -97,7 +110,8 @@ struct ContentView: View {
                             format: format,
                             jpegQuality: jpegQuality,
                             applyEdits: applyEdits,
-                            destinationDirectory: destinationURL
+                            destinationDirectory: destinationURL,
+                            originalFetcher: originalFetcher
                         )
                     }
                 },
@@ -106,120 +120,137 @@ struct ContentView: View {
                 }
             )
         }
-        .onReceive(exportSheetPublisher) { _ in
-            showExportSheet = true
+        .confirmationDialog(
+            "Export all \(libraryViewModel.rows.count) photos?",
+            isPresented: $showExportConfirmation,
+            titleVisibility: .visible
+        ) {
+            Button("Export") {
+                showExportSheet = true
+            }
+            Button("Cancel", role: .cancel) {}
+        } message: {
+            Text("No selection or filter is active. This will export every photo in your library.")
         }
-        // Mode switch keys, Lightroom-style: G → Library, E → Loupe,
-        // D → Develop. Attached at the root so they fire regardless of
-        // which subview currently has focus.
+        .alert(
+            exportAlert?.title ?? "",
+            isPresented: Binding(
+                get: { exportAlert != nil },
+                set: { newValue in
+                    if !newValue {
+                        exportAlert = nil
+                        exportCoordinator.reset()
+                    }
+                }
+            ),
+            presenting: exportAlert
+        ) { _ in
+            Button("OK", role: .cancel) {}
+        } message: { payload in
+            Text(payload.message)
+        }
+        .onReceive(exportSheetPublisher) { _ in
+            let shouldPrompt = ExportConfirmationPolicy.shouldPrompt(
+                scope: libraryViewModel.scope,
+                minRating: libraryViewModel.minRating,
+                selectionEmpty: libraryViewModel.selectedAssetIds.isEmpty,
+                rowCount: libraryViewModel.rows.count
+            )
+            if shouldPrompt {
+                showExportConfirmation = true
+            } else {
+                showExportSheet = true
+            }
+        }
+        .onChange(of: exportCoordinator.phase) { _, newPhase in
+            switch newPhase {
+            case .done(let exported, let skipped, let failures):
+                let built = ExportCompletionMessage.forCompletion(
+                    exported: exported,
+                    skipped: skipped,
+                    failures: failures
+                )
+                exportAlert = ExportAlertPayload(
+                    title: built.title,
+                    message: built.body
+                )
+            case .failed(let message):
+                exportAlert = ExportAlertPayload(
+                    title: "Export failed",
+                    message: message
+                )
+            case .idle, .exporting:
+                break
+            }
+        }
+        // `.focusable()` keeps the root view eligible to receive the Esc
+        // key via `.onKeyPress(.escape)`. Other modifierless shortcuts
+        // (g/e/d, ratings, arrows, z, h, ⌘A, ⌘[ / ⌘]) used to live here
+        // too, but they silently no-opped at launch when focus hadn't
+        // landed on a child view — the same focus bug #134 fixed for
+        // Backspace. They are now menu-attached key equivalents that
+        // post notifications observed below; see `MenuActionName` in
+        // DimroomApp for the whitelist.
         .focusable()
         .focusEffectDisabled()
-        .onKeyPress(.init("g")) {
-            router.route = .library
-            return .handled
-        }
-        .onKeyPress(.init("e")) {
-            router.route = .loupe
-            return .handled
-        }
-        .onKeyPress(.init("d")) {
-            router.route = .develop
-            return .handled
-        }
         .onKeyPress(.escape) {
             router.goBack()
             return .handled
         }
-        .onKeyPress(keys: ["]"], phases: .down) { keyPress in
-            guard keyPress.modifiers == .command else { return .ignored }
-            guard let assetId = libraryViewModel.selectedAssetId else {
-                return .ignored
-            }
+        .onReceive(menuActionPublisher(.modeLibrary)) { _ in
+            router.route = .library
+        }
+        .onReceive(menuActionPublisher(.modeLoupe)) { _ in
+            router.route = .loupe
+        }
+        .onReceive(menuActionPublisher(.modeDevelop)) { _ in
+            router.route = .develop
+        }
+        .onReceive(menuActionPublisher(.rotateCW)) { _ in
+            guard let assetId = libraryViewModel.selectedAssetId else { return }
             Task { await libraryViewModel.rotate(assetId: assetId, clockwise: true) }
-            return .handled
         }
-        .onKeyPress(keys: ["["], phases: .down) { keyPress in
-            guard keyPress.modifiers == .command else { return .ignored }
-            guard let assetId = libraryViewModel.selectedAssetId else {
-                return .ignored
-            }
+        .onReceive(menuActionPublisher(.rotateCCW)) { _ in
+            guard let assetId = libraryViewModel.selectedAssetId else { return }
             Task { await libraryViewModel.rotate(assetId: assetId, clockwise: false) }
-            return .handled
         }
-        // Rating keys 1-5 (set) and 0 (clear). Active in both Library
-        // and Loupe — rating applies to the selected asset regardless
-        // of which view is showing.
-        .onKeyPress(keys: ["1", "2", "3", "4", "5"], phases: .down) { keyPress in
-            guard keyPress.modifiers.isEmpty else { return .ignored }
-            guard let assetId = libraryViewModel.selectedAssetId,
-                  let digit = Int(String(keyPress.characters)) else {
-                return .ignored
-            }
-            Task { await libraryViewModel.setRating(for: assetId, to: digit) }
-            return .handled
-        }
-        .onKeyPress(keys: ["0"], phases: .down) { keyPress in
-            // Plain 0 → clear rating. Cmd+0 → reset zoom (loupe only).
-            if keyPress.modifiers == .command {
-                guard router.route == .loupe else { return .ignored }
-                libraryViewModel.pendingZoomCommand = .resetToFit
-                return .handled
-            }
-            guard keyPress.modifiers.isEmpty else { return .ignored }
-            guard let assetId = libraryViewModel.selectedAssetId else {
-                return .ignored
-            }
-            Task { await libraryViewModel.setRating(for: assetId, to: 0) }
-            return .handled
-        }
-        // Arrow keys — navigate between assets in Library and Loupe.
-        // Left/Right move by one asset; Up/Down move by one grid row
-        // (Library only — no grid concept in Loupe).
-        .onKeyPress(.leftArrow) {
-            guard router.route == .library || router.route == .loupe else {
-                return .ignored
-            }
-            libraryViewModel.selectPrevious()
-            return .handled
-        }
-        .onKeyPress(.rightArrow) {
-            guard router.route == .library || router.route == .loupe else {
-                return .ignored
-            }
-            libraryViewModel.selectNext()
-            return .handled
-        }
-        .onKeyPress(.upArrow) {
-            guard router.route == .library else { return .ignored }
-            libraryViewModel.selectUp()
-            return .handled
-        }
-        .onKeyPress(.downArrow) {
-            guard router.route == .library else { return .ignored }
-            libraryViewModel.selectDown()
-            return .handled
-        }
-        // Z — toggle fit ↔ 100% zoom in Loupe.
-        .onKeyPress(keys: ["z"], phases: .down) { keyPress in
-            guard keyPress.modifiers.isEmpty else { return .ignored }
-            guard router.route == .loupe else { return .ignored }
+        .onReceive(menuActionPublisher(.setRating1)) { _ in applyRating(1) }
+        .onReceive(menuActionPublisher(.setRating2)) { _ in applyRating(2) }
+        .onReceive(menuActionPublisher(.setRating3)) { _ in applyRating(3) }
+        .onReceive(menuActionPublisher(.setRating4)) { _ in applyRating(4) }
+        .onReceive(menuActionPublisher(.setRating5)) { _ in applyRating(5) }
+        .onReceive(menuActionPublisher(.clearRating)) { _ in applyRating(0) }
+        .onReceive(menuActionPublisher(.zoomToggle)) { _ in
+            guard router.route == .loupe else { return }
             libraryViewModel.pendingZoomCommand = .toggleFitTo100
-            return .handled
         }
-        // H — toggle histogram visibility in Develop. Empty modifiers
-        // only, so Cmd+H (macOS hide app) isn't intercepted.
-        .onKeyPress(keys: ["h"], phases: .down) { keyPress in
-            guard keyPress.modifiers.isEmpty else { return .ignored }
-            guard router.route == .develop else { return .ignored }
+        .onReceive(menuActionPublisher(.zoomReset)) { _ in
+            guard router.route == .loupe else { return }
+            libraryViewModel.pendingZoomCommand = .resetToFit
+        }
+        .onReceive(menuActionPublisher(.toggleHistogram)) { _ in
+            guard router.route == .develop else { return }
             developViewModel.showHistogram.toggle()
-            return .handled
         }
-        // Cmd+A — select every visible row. Library only, matches Finder.
-        .onKeyPress(keys: ["a"], phases: .down) { keyPress in
-            guard keyPress.modifiers == .command else { return .ignored }
-            guard router.route == .library else { return .ignored }
+        .onReceive(menuActionPublisher(.selectPrevious)) { _ in
+            guard router.route == .library || router.route == .loupe else { return }
+            libraryViewModel.selectPrevious()
+        }
+        .onReceive(menuActionPublisher(.selectNext)) { _ in
+            guard router.route == .library || router.route == .loupe else { return }
+            libraryViewModel.selectNext()
+        }
+        .onReceive(menuActionPublisher(.selectUp)) { _ in
+            guard router.route == .library else { return }
+            libraryViewModel.selectUp()
+        }
+        .onReceive(menuActionPublisher(.selectDown)) { _ in
+            guard router.route == .library else { return }
+            libraryViewModel.selectDown()
+        }
+        .onReceive(menuActionPublisher(.selectAllVisible)) { _ in
+            guard router.route == .library else { return }
             libraryViewModel.selectAllVisible()
-            return .handled
         }
         // Delete is dispatched from the Edit → Delete Selected menu
         // item (keyboardShortcut .delete). Routing it through a
@@ -243,6 +274,15 @@ struct ContentView: View {
         }
     }
 
+    private func applyRating(_ rating: Int) {
+        guard let assetId = libraryViewModel.selectedAssetId else { return }
+        Task { await libraryViewModel.setRating(for: assetId, to: rating) }
+    }
+
+    private func menuActionPublisher(_ action: MenuActionName) -> NotificationCenter.Publisher {
+        NotificationCenter.default.publisher(for: action.notificationName)
+    }
+
     /// The export sheet is triggered by File → Export… (Cmd+Shift+E) via
     /// a notification from the menu command in DimroomApp.
     private var exportSheetPublisher: NotificationCenter.Publisher {
@@ -253,4 +293,14 @@ struct ContentView: View {
     private var deleteSelectedPublisher: NotificationCenter.Publisher {
         NotificationCenter.default.publisher(for: .requestDeleteSelected)
     }
+}
+
+/// Carries the copy for the post-export alert. The body is built by
+/// `ExportCompletionMessage.forCompletion(...)` in the UI package and
+/// wrapped here so SwiftUI's `.alert(presenting:)` has an `Identifiable`
+/// value to drive dismissal.
+struct ExportAlertPayload: Identifiable {
+    let id = UUID()
+    let title: String
+    let message: String
 }

@@ -465,13 +465,116 @@ final class DevelopViewModelTests: XCTestCase {
 
     // MARK: - Thumbnail regeneration after save
 
-    /// After the auto-save debounce fires, the cached thumbnail must be
-    /// (re)written via EditEngine — that's how Library/Loupe pick up the
-    /// edited look. Placing a pre-existing thumbnail proves the bytes
-    /// actually change rather than getting populated for the first time.
+    /// After the auto-save debounce fires, regen writes a **display-tier**
+    /// thumbnail with the edited bytes — that's how Library/Loupe pick up
+    /// the edited look. The master thumbnail must stay byte-identical so
+    /// future regens still source from unedited pixels (issue #186).
     @MainActor
-    func testAutoSaveRegeneratesThumbnail() async throws {
+    func testAutoSaveRegeneratesDisplayThumbnailWithoutTouchingMaster() async throws {
         let (vm, asset, _) = try await makeViewModelWithAsset(hash: "regen-thumb-afteredit")
+        try TestFixtures.placeThumbnail(
+            for: asset,
+            cacheDirectory: tempCacheDir,
+            color: (r: 120, g: 120, b: 120)
+        )
+
+        await vm.activate(assetId: asset.id)
+
+        let shard = tempCacheDir
+            .appendingPathComponent(String(asset.contentHash.prefix(2)), isDirectory: true)
+        let masterThumbURL = shard.appendingPathComponent("\(asset.contentHash).thumb.jpg")
+        let displayThumbURL = shard.appendingPathComponent("\(asset.contentHash).edit.thumb.jpg")
+
+        let masterBefore = try Self.sha256(of: masterThumbURL)
+        XCTAssertFalse(
+            FileManager.default.fileExists(atPath: displayThumbURL.path),
+            "Display thumbnail must not exist before any edit"
+        )
+
+        vm.setParameter(\.exposure, value: 2.0)
+
+        // Debounce is 500ms; wait 1.5s for the save + async regenerate
+        // to land.
+        try await Task.sleep(nanoseconds: 1_500_000_000)
+
+        XCTAssertTrue(
+            FileManager.default.fileExists(atPath: displayThumbURL.path),
+            "Display thumbnail must be written after auto-save"
+        )
+        let displayAfter = try Self.sha256(of: displayThumbURL)
+        XCTAssertNotEqual(
+            displayAfter,
+            masterBefore,
+            "Display thumbnail bytes must differ from pre-existing master"
+        )
+
+        let masterAfter = try Self.sha256(of: masterThumbURL)
+        XCTAssertEqual(
+            masterAfter,
+            masterBefore,
+            "Master thumbnail must be byte-identical — regen must never overwrite it (issue #186)"
+        )
+    }
+
+    /// Issue #186: when display-tier preview files exist (because a
+    /// previous regen wrote them), Develop must still drive its render
+    /// pipeline from the master preview. Otherwise the saved
+    /// `EditState` is applied on top of an already-edited display JPEG
+    /// and the look compounds on every entry into Develop.
+    ///
+    /// Distinct master/display dimensions let us prove which file was
+    /// loaded by inspecting `sourceImageSize`.
+    @MainActor
+    func testActivateReadsMasterPreviewEvenWhenDisplayFilesExist() async throws {
+        let catalog = try CatalogDatabase.inMemory()
+        let asset = TestFixtures.makeAsset(hash: "regen-master-read")
+        try catalog.insertAsset(asset)
+        // Master: 800×600. Display: 400×300 — deliberately smaller so a
+        // bug that reads display instead of master shows up as a smaller
+        // `sourceImageSize`.
+        try TestFixtures.placePreview(
+            for: asset,
+            cacheDirectory: tempCacheDir,
+            color: (r: 120, g: 120, b: 120),
+            width: 800,
+            height: 600
+        )
+        try TestFixtures.placeDisplayPreview(
+            for: asset,
+            cacheDirectory: tempCacheDir,
+            color: (r: 220, g: 220, b: 220),
+            width: 400,
+            height: 300
+        )
+        var saved = EditState()
+        saved.exposure = 1.0
+        _ = try catalog.saveEditState(saved, for: asset.id)
+
+        let store = PreviewStore(cacheDirectory: tempCacheDir)
+        let vm = DevelopViewModel(catalog: catalog, previewStore: store)
+
+        await vm.activate(assetId: asset.id)
+
+        let size = try XCTUnwrap(vm.sourceImageSize)
+        XCTAssertEqual(
+            size.width,
+            800,
+            "Develop must load the master preview (800×600), not the display preview (400×300)"
+        )
+        XCTAssertEqual(size.height, 600)
+    }
+
+    /// `reloadEditState` is the path UndoStack drives on Cmd+Z while
+    /// Develop is live. After it replaces `editState` with the replayed
+    /// version, the cached thumb must be re-rendered to match — otherwise
+    /// returning to Library shows the post-edit bytes for the undone
+    /// state. Drive the edit-and-save first so the thumb reflects the
+    /// "after edit" look, then mimic the undo replay (catalog write to
+    /// identity + `reloadEditState`) and assert the cached bytes change
+    /// again.
+    @MainActor
+    func testReloadEditStateRegeneratesThumbnail() async throws {
+        let (vm, asset, catalog) = try await makeViewModelWithAsset(hash: "regen-thumb-onreload")
         try TestFixtures.placeThumbnail(
             for: asset,
             cacheDirectory: tempCacheDir,
@@ -483,19 +586,31 @@ final class DevelopViewModelTests: XCTestCase {
         let thumbURL = tempCacheDir
             .appendingPathComponent(String(asset.contentHash.prefix(2)), isDirectory: true)
             .appendingPathComponent("\(asset.contentHash).thumb.jpg")
-        let hashBefore = try Self.sha256(of: thumbURL)
 
+        // Drive an edit + auto-save so the cached thumb reflects the
+        // "after edit" render. Wait past the debounce + regen so we
+        // record the post-edit sha as the baseline for the replay
+        // assertion.
         vm.setParameter(\.exposure, value: 2.0)
+        try await Task.sleep(nanoseconds: 1_500_000_000)
+        let hashAfterEdit = try Self.sha256(of: thumbURL)
 
-        // Debounce is 500ms; wait 1.5s for the save + async regenerate
-        // to land.
+        // Mimic the undo replay: UndoStack writes the previous state to
+        // the catalog, then calls reloadEditState. We need the catalog
+        // contents to differ from what's currently in vm.editState so
+        // reload actually changes anything.
+        _ = try catalog.saveEditState(EditState(), for: asset.id)
+        await vm.reloadEditState(for: asset.id)
+
+        // Detached regen fires inside reloadEditState; wait for it to
+        // write the new thumb bytes.
         try await Task.sleep(nanoseconds: 1_500_000_000)
 
-        let hashAfter = try Self.sha256(of: thumbURL)
+        let hashAfterReload = try Self.sha256(of: thumbURL)
         XCTAssertNotEqual(
-            hashBefore,
-            hashAfter,
-            "Cached thumbnail bytes must change after auto-save completes"
+            hashAfterEdit,
+            hashAfterReload,
+            "Cached thumbnail bytes must change after reloadEditState — undo replay must regenerate"
         )
     }
 
@@ -544,6 +659,147 @@ final class DevelopViewModelTests: XCTestCase {
         XCTAssertTrue(vm.showHistogram)
     }
 
+    // MARK: - Original fetch on activate
+
+    /// Asset has a present localPath → no fetch, no download flag. This
+    /// is the digital-camera-import path; we must not pull bytes from
+    /// Drive on every Develop entry for files already on disk.
+    @MainActor
+    func testActivateWithLocalPathDoesNotFetch() async throws {
+        let catalog = try CatalogDatabase.inMemory()
+        // Stage a real file on disk so the localPath check passes.
+        let originalsDir = tempCacheDir.appendingPathComponent("originals", isDirectory: true)
+        try FileManager.default.createDirectory(at: originalsDir, withIntermediateDirectories: true)
+        let originalURL = originalsDir.appendingPathComponent("local.jpg")
+        try Data().write(to: originalURL)
+
+        var asset = TestFixtures.makeAsset(hash: "has-local")
+        asset.localPath = originalURL.path
+        asset.driveFileId = "drive-id"
+        try catalog.insertAsset(asset)
+        try TestFixtures.placePreview(for: asset, cacheDirectory: tempCacheDir, color: (1, 2, 3))
+        let store = PreviewStore(cacheDirectory: tempCacheDir)
+
+        let fetcher = CountingFetcher()
+        let vm = DevelopViewModel(catalog: catalog, previewStore: store, originalFetcher: fetcher)
+
+        await vm.activate(assetId: asset.id)
+        try await Task.sleep(nanoseconds: 100_000_000)
+
+        XCTAssertFalse(vm.isDownloadingOriginal)
+        XCTAssertNil(vm.downloadProgress)
+        let calls = await fetcher.callCount
+        XCTAssertEqual(
+            calls,
+            0,
+            "activate must not invoke the fetcher when localPath is present on disk"
+        )
+    }
+
+    /// Drive-only asset (localPath nil, driveFileId set) → activate kicks
+    /// off a fetch, flips `isDownloadingOriginal`, propagates ticks via
+    /// `downloadProgress`, then clears the flag once the fetcher returns.
+    @MainActor
+    func testActivateWithDriveOnlyAssetTriggersFetchAndDownloadingFlag() async throws {
+        let catalog = try CatalogDatabase.inMemory()
+        var asset = TestFixtures.makeAsset(hash: "drive-only")
+        asset.driveFileId = "drive-id"
+        try catalog.insertAsset(asset)
+        try TestFixtures.placePreview(for: asset, cacheDirectory: tempCacheDir, color: (1, 2, 3))
+        let store = PreviewStore(cacheDirectory: tempCacheDir)
+
+        let release = AsyncBarrier()
+        let fetcher = ProgressFetcher(tick: 0.4, release: release)
+        let vm = DevelopViewModel(catalog: catalog, previewStore: store, originalFetcher: fetcher)
+
+        await vm.activate(assetId: asset.id)
+        // Give the spawned download task and its progress callback a
+        // chance to flip the @Published flags on the main actor.
+        try await Task.sleep(nanoseconds: 200_000_000)
+
+        XCTAssertTrue(vm.isDownloadingOriginal)
+        XCTAssertEqual(vm.downloadProgress ?? 0, 0.4, accuracy: 0.001)
+
+        await release.signal()
+        // Allow the fetcher to return and the finally-block to run.
+        try await Task.sleep(nanoseconds: 200_000_000)
+
+        XCTAssertFalse(vm.isDownloadingOriginal)
+        XCTAssertNil(vm.downloadProgress)
+    }
+
+    /// Fetcher returns nil (Drive unreachable). The flag must clear so
+    /// the UI re-enables and degrades gracefully to preview-only.
+    @MainActor
+    func testActivateWithFetchFailureDegradesGracefully() async throws {
+        let catalog = try CatalogDatabase.inMemory()
+        var asset = TestFixtures.makeAsset(hash: "fetch-fail")
+        asset.driveFileId = "drive-id"
+        try catalog.insertAsset(asset)
+        try TestFixtures.placePreview(for: asset, cacheDirectory: tempCacheDir, color: (1, 2, 3))
+        let store = PreviewStore(cacheDirectory: tempCacheDir)
+
+        let fetcher = FailingFetcher()
+        let vm = DevelopViewModel(catalog: catalog, previewStore: store, originalFetcher: fetcher)
+
+        await vm.activate(assetId: asset.id)
+        try await Task.sleep(nanoseconds: 200_000_000)
+
+        XCTAssertFalse(vm.isDownloadingOriginal)
+        XCTAssertNil(vm.downloadProgress)
+        XCTAssertEqual(vm.currentAssetId, asset.id)
+    }
+
+    /// `deactivate()` while a fetch is in flight must cancel the task
+    /// and clear both flags so a subsequent activate starts from a
+    /// clean state.
+    @MainActor
+    func testDeactivateClearsDownloadState() async throws {
+        let catalog = try CatalogDatabase.inMemory()
+        var asset = TestFixtures.makeAsset(hash: "deact-download")
+        asset.driveFileId = "drive-id"
+        try catalog.insertAsset(asset)
+        try TestFixtures.placePreview(for: asset, cacheDirectory: tempCacheDir, color: (1, 2, 3))
+        let store = PreviewStore(cacheDirectory: tempCacheDir)
+
+        let release = AsyncBarrier()
+        let fetcher = ProgressFetcher(tick: 0.2, release: release)
+        let vm = DevelopViewModel(catalog: catalog, previewStore: store, originalFetcher: fetcher)
+
+        await vm.activate(assetId: asset.id)
+        try await Task.sleep(nanoseconds: 200_000_000)
+        XCTAssertTrue(vm.isDownloadingOriginal)
+
+        vm.deactivate()
+
+        XCTAssertFalse(vm.isDownloadingOriginal)
+        XCTAssertNil(vm.downloadProgress)
+        XCTAssertNil(vm.currentAssetId)
+        await release.signal()
+    }
+
+    /// No driveFileId and no localPath → asset isn't Drive-backed yet
+    /// (e.g. pre-upload). The fetcher must not be invoked because
+    /// there's nothing to fetch.
+    @MainActor
+    func testActivateWithoutDriveFileIdDoesNotFetch() async throws {
+        let catalog = try CatalogDatabase.inMemory()
+        let asset = TestFixtures.makeAsset(hash: "no-drive")
+        try catalog.insertAsset(asset)
+        try TestFixtures.placePreview(for: asset, cacheDirectory: tempCacheDir, color: (1, 2, 3))
+        let store = PreviewStore(cacheDirectory: tempCacheDir)
+
+        let fetcher = CountingFetcher()
+        let vm = DevelopViewModel(catalog: catalog, previewStore: store, originalFetcher: fetcher)
+
+        await vm.activate(assetId: asset.id)
+        try await Task.sleep(nanoseconds: 100_000_000)
+
+        XCTAssertFalse(vm.isDownloadingOriginal)
+        let calls = await fetcher.callCount
+        XCTAssertEqual(calls, 0)
+    }
+
     // MARK: - Helper
 
     /// Build a viewmodel with an in-memory catalog and a single asset that
@@ -565,5 +821,75 @@ final class DevelopViewModelTests: XCTestCase {
         let store = PreviewStore(cacheDirectory: tempCacheDir)
         let vm = DevelopViewModel(catalog: catalog, previewStore: store)
         return (vm, asset, catalog)
+    }
+}
+
+/// Counts `fetchOriginal` invocations so tests can prove no fetch
+/// happens for already-local assets.
+private actor CountingFetcher: OriginalFetcher {
+    private(set) var callCount = 0
+
+    func fetchOriginal(
+        assetId: UUID,
+        progress: (@Sendable (Double) -> Void)?
+    ) async -> URL? {
+        callCount += 1
+        return nil
+    }
+}
+
+/// Fetcher that emits a single progress tick, suspends on `release`,
+/// then returns `nil`. Used to inspect intermediate `isDownloadingOriginal`
+/// state while a download is "in flight".
+private actor ProgressFetcher: OriginalFetcher {
+    private let tick: Double
+    private let release: AsyncBarrier
+
+    init(tick: Double, release: AsyncBarrier) {
+        self.tick = tick
+        self.release = release
+    }
+
+    func fetchOriginal(
+        assetId: UUID,
+        progress: (@Sendable (Double) -> Void)?
+    ) async -> URL? {
+        progress?(tick)
+        await MainActor.run { }
+        await release.wait()
+        return nil
+    }
+}
+
+/// Returns nil immediately to simulate Drive-unreachable.
+private actor FailingFetcher: OriginalFetcher {
+    func fetchOriginal(
+        assetId: UUID,
+        progress: (@Sendable (Double) -> Void)?
+    ) async -> URL? {
+        nil
+    }
+}
+
+/// One-shot async barrier. Mirrors the helper used by LoupeSnapshotTests
+/// for the same "freeze the fetcher mid-download" pattern.
+private actor AsyncBarrier {
+    private var hasSignalled = false
+    private var continuations: [CheckedContinuation<Void, Never>] = []
+
+    func wait() async {
+        if hasSignalled { return }
+        await withCheckedContinuation { continuation in
+            continuations.append(continuation)
+        }
+    }
+
+    func signal() {
+        guard !hasSignalled else { return }
+        hasSignalled = true
+        for continuation in continuations {
+            continuation.resume()
+        }
+        continuations.removeAll()
     }
 }

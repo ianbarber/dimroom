@@ -129,4 +129,42 @@ final class ExportSheetSnapshotTests: XCTestCase {
             )
         }
     }
+
+    // MARK: - Completion alert body
+
+    /// Snapshots the composed alert body for a partial-success export
+    /// via a plain `Text` wrapper. SwiftUI `.alert` modifiers aren't
+    /// snapshot-friendly, so this locks in the copy that the App wraps
+    /// in an alert payload.
+    @MainActor
+    func test_export_alert_with_skips() async throws {
+        let message = ExportCompletionMessage.forCompletion(
+            exported: 2,
+            skipped: 1,
+            failures: ["IMG_0003.jpg: no local copy available"]
+        )
+        let view = VStack(alignment: .leading, spacing: 6) {
+            Text(message.title)
+                .font(.headline)
+            Text(message.body)
+                .font(.body)
+        }
+        .padding(20)
+        .frame(width: 360, alignment: .leading)
+
+        let image = renderFixedPixelImage(
+            for: view,
+            size: CGSize(width: 360, height: 140)
+        )
+
+        runAssertSnapshot {
+            assertSnapshot(
+                of: image,
+                as: .image(
+                    precision: Self.snapshotPrecision,
+                    perceptualPrecision: Self.snapshotPerceptualPrecision
+                )
+            )
+        }
+    }
 }

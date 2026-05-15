@@ -27,6 +27,17 @@ public struct ExportProgressView: View {
             Text(label)
                 .font(.headline)
                 .foregroundStyle(.white)
+
+            if let downloadProgress = coordinator.currentItemProgress {
+                VStack(spacing: 6) {
+                    ProgressView(value: min(max(downloadProgress, 0), 1))
+                        .progressViewStyle(.linear)
+                        .frame(width: 240)
+                    Text("Downloading original…")
+                        .font(.caption)
+                        .foregroundStyle(.white.opacity(0.8))
+                }
+            }
         }
         .padding(40)
         .background(.black.opacity(0.75), in: RoundedRectangle(cornerRadius: 12))

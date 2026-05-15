@@ -57,6 +57,7 @@ public struct DevelopView: View {
         }
         .frame(width: 280)
         .background(Color(white: 0.1))
+        .disabled(viewModel.isDownloadingOriginal)
     }
 
     /// Tone + White Balance + Presence slider stack. Animated on
@@ -213,6 +214,12 @@ public struct DevelopView: View {
             if viewModel.showHistogram, let data = viewModel.histogram {
                 HistogramOverlayView(data: data)
                     .padding(12)
+            }
+
+            if viewModel.isDownloadingOriginal {
+                DownloadIndicatorView(progress: viewModel.downloadProgress)
+                    .padding(12)
+                    .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topTrailing)
             }
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity)

@@ -72,7 +72,10 @@ public final class DevelopViewModel: ObservableObject {
         guard let assetId else { return }
         guard let asset = try? catalog.fetchAsset(id: assetId) else { return }
 
-        let previewURL = previewStore.previewURL(for: asset)
+        // Drive the Develop pipeline from the master preview so the saved
+        // `EditState` is applied once over unedited pixels, not over an
+        // already-edited display JPEG (issue #186).
+        let previewURL = previewStore.masterPreviewURL(for: asset)
         guard let url = previewURL,
               let source = CIImage(contentsOf: url) else {
             currentAssetId = assetId

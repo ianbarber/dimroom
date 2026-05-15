@@ -97,6 +97,8 @@ EXPORT_OUT=$("$CLI_BIN" export "$EXPORT_DIR" --format jpeg --socket "$SOCKET")
 echo "$EXPORT_OUT"
 assert_json_field "first export status" "$EXPORT_OUT" "status" "ok"
 assert_json_field "first export exportedCount" "$EXPORT_OUT" "data.exportedCount" "3"
+assert_json_field "first export skippedCount" "$EXPORT_OUT" "data.skippedCount" "0"
+assert_json_field "first export failedCount" "$EXPORT_OUT" "data.failedCount" "0"
 
 echo "=== Verify 3 JPEG files exist ==="
 JPG_COUNT=$(find "$EXPORT_DIR" -name "*.jpg" | wc -l | tr -d ' ')
@@ -112,6 +114,8 @@ EXPORT_OUT2=$("$CLI_BIN" export "$EXPORT_DIR" --format jpeg --socket "$SOCKET")
 echo "$EXPORT_OUT2"
 assert_json_field "second export status" "$EXPORT_OUT2" "status" "ok"
 assert_json_field "second export exportedCount" "$EXPORT_OUT2" "data.exportedCount" "3"
+assert_json_field "second export skippedCount" "$EXPORT_OUT2" "data.skippedCount" "0"
+assert_json_field "second export failedCount" "$EXPORT_OUT2" "data.failedCount" "0"
 
 echo "=== Verify 6 JPEG files exist (3 original + 3 with _1 suffix) ==="
 JPG_COUNT2=$(find "$EXPORT_DIR" -name "*.jpg" | wc -l | tr -d ' ')

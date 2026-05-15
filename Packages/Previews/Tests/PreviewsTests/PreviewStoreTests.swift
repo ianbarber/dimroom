@@ -212,11 +212,22 @@ final class PreviewStoreTests: XCTestCase {
         let dir = CachePaths.directory(for: hash, in: root)
         XCTAssertEqual(dir.path, "/tmp/previewcache/ab")
 
-        let thumb = CachePaths.fileURL(for: hash, kind: .thumbnail, in: root)
-        XCTAssertEqual(thumb.path, "/tmp/previewcache/ab/ab12cd34ef56.thumb.jpg")
+        // Master tier keeps the pre-tier filename layout — caches that
+        // existed before the master/display split (issue #186) stay
+        // readable without a migration.
+        let masterThumb = CachePaths.fileURL(for: hash, kind: .thumbnail, tier: .master, in: root)
+        XCTAssertEqual(masterThumb.path, "/tmp/previewcache/ab/ab12cd34ef56.thumb.jpg")
 
-        let preview = CachePaths.fileURL(for: hash, kind: .preview, in: root)
-        XCTAssertEqual(preview.path, "/tmp/previewcache/ab/ab12cd34ef56.preview.jpg")
+        let masterPreview = CachePaths.fileURL(for: hash, kind: .preview, tier: .master, in: root)
+        XCTAssertEqual(masterPreview.path, "/tmp/previewcache/ab/ab12cd34ef56.preview.jpg")
+
+        // Display tier files get `.edit.` infix so they're distinct
+        // siblings of the master tier in the same shard directory.
+        let displayThumb = CachePaths.fileURL(for: hash, kind: .thumbnail, tier: .display, in: root)
+        XCTAssertEqual(displayThumb.path, "/tmp/previewcache/ab/ab12cd34ef56.edit.thumb.jpg")
+
+        let displayPreview = CachePaths.fileURL(for: hash, kind: .preview, tier: .display, in: root)
+        XCTAssertEqual(displayPreview.path, "/tmp/previewcache/ab/ab12cd34ef56.edit.preview.jpg")
     }
 
     // MARK: - Errors

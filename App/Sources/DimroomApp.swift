@@ -40,9 +40,11 @@ struct DimroomApp: App {
 
                 Divider()
 
-                Button("Connect Google Drive...") {
-                    appDelegate.connectGoogleDriveFromMenu()
-                }
+                DriveMenuItems(
+                    state: appDelegate.driveAuthState,
+                    onConnect: { appDelegate.connectGoogleDriveFromMenu() },
+                    onDisconnect: { appDelegate.disconnectGoogleDriveFromMenu() }
+                )
 
                 Button("Upload Selected to Drive") {
                     appDelegate.uploadSelectedToDriveFromMenu()
@@ -120,7 +122,41 @@ private struct DeleteMenuItem: View {
             NotificationCenter.default.post(name: .requestDeleteSelected, object: nil)
         }
         .keyboardShortcut(.delete, modifiers: [])
-        .disabled(libraryViewModel.selectedAssetIds.isEmpty || router.route != .library)
+        .disabled(
+            libraryViewModel.selectedAssetIds.isEmpty
+                || router.route != .library
+                || libraryViewModel.scope == .recentlyDeleted
+        )
+    }
+}
+
+/// Mirrors `UndoRedoMenuItems`: observes `DriveAuthState` so the menu
+/// flips between "Connect Google Drive…", "Connecting…", and
+/// "Disconnect Google Drive (email)" as the auth status changes. This
+/// is the fix for #166 — before this view existed, the menu only knew
+/// the static "Connect Google Drive…" string and ignored auth events.
+private struct DriveMenuItems: View {
+    @ObservedObject var state: DriveAuthState
+    let onConnect: () -> Void
+    let onDisconnect: () -> Void
+
+    var body: some View {
+        switch state.status {
+        case .disconnected:
+            Button("Connect Google Drive...") { onConnect() }
+        case .connecting:
+            Button("Connecting to Google Drive…") { }
+                .disabled(true)
+        case .connected(let email):
+            Button(disconnectTitle(email: email)) { onDisconnect() }
+        }
+    }
+
+    private func disconnectTitle(email: String?) -> String {
+        if let email, !email.isEmpty {
+            return "Disconnect Google Drive (\(email))"
+        }
+        return "Disconnect Google Drive"
     }
 }
 
@@ -369,6 +405,12 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     /// undo writes go against the same backing store the UI reads from.
     private(set) var undoStack: UndoStack = UndoStack.empty()
     private(set) var catalog: CatalogDatabase?
+    /// Observable wrapper around the Drive client's auth state. Created
+    /// eagerly with a no-op stub so the SwiftUI `.commands` builder — which
+    /// reads it before `applicationDidFinishLaunching` runs — has a real
+    /// `ObservableObject` to bind to. Reconfigured with the resolved
+    /// `DriveClient` in `applicationDidFinishLaunching` and then hydrated.
+    private(set) var driveAuthState: DriveAuthState = DriveAuthState(client: UnconfiguredDriveAuth())
     private var previewStore: PreviewStore?
     private var originalsDirectory: URL?
     private var harnessController: HarnessController?
@@ -426,6 +468,14 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
 
         let resolvedDriveClient = resolveDriveClient()
         self.driveClient = resolvedDriveClient
+        if let resolvedDriveClient {
+            driveAuthState.configure(client: resolvedDriveClient)
+            // Hydrate from the stored refresh token so the menu reflects
+            // the connected state on launch without a re-auth round-trip.
+            Task { @MainActor in
+                await driveAuthState.hydrate()
+            }
+        }
 
         if let resolvedCatalog {
             let cacheDir = resolveOriginalsCacheDirectory(from: args)
@@ -499,7 +549,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             uploadCoordinator: uploadCoordinator,
             driveUploader: driveUploader,
             originalsCoordinator: originalsCoordinator,
-            undoStack: undoStack
+            undoStack: undoStack,
+            driveAuthState: driveAuthState
         )
         do {
             try controller.start(socketPath: socketPath)
@@ -568,7 +619,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     // MARK: - Drive menu actions
 
     func connectGoogleDriveFromMenu() {
-        guard let driveClient else {
+        guard driveClient != nil else {
             let alert = NSAlert()
             alert.messageText = "Drive Not Configured"
             alert.informativeText = "Set DIMROOM_GOOGLE_CLIENT_ID or create ~/Library/Application Support/dimroom/oauth.json."
@@ -577,15 +628,20 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             return
         }
         Task { @MainActor in
-            do {
-                try await driveClient.authenticate()
-            } catch {
+            await driveAuthState.connect()
+            if let message = driveAuthState.lastErrorMessage {
                 let alert = NSAlert()
                 alert.messageText = "Drive Authentication Failed"
-                alert.informativeText = error.localizedDescription
+                alert.informativeText = message
                 alert.alertStyle = .critical
                 alert.runModal()
             }
+        }
+    }
+
+    func disconnectGoogleDriveFromMenu() {
+        Task { @MainActor in
+            await driveAuthState.disconnect()
         }
     }
 
@@ -786,6 +842,18 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             return nil
         }
     }
+}
+
+/// Placeholder authenticator used to construct `DriveAuthState` before
+/// the real `DriveClient` is resolved (i.e. before
+/// `applicationDidFinishLaunching` runs). Always reports unauthenticated;
+/// any auth call fails so the UI surfaces "Drive Not Configured" via
+/// the alert path. Replaced by the real client in `configure(client:)`.
+private struct UnconfiguredDriveAuth: DriveAuthenticating {
+    var isAuthenticated: Bool { get async { false } }
+    func authenticate() async throws { throw DriveClientError.clientIDNotConfigured }
+    func deauthenticate() async throws {}
+    func fetchAccountEmail() async throws -> String? { nil }
 }
 
 /// Downloader used when Drive credentials aren't configured. Always

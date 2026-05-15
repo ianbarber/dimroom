@@ -49,6 +49,9 @@ struct DimroomCLI: ParsableCommand {
             CancelCrop.self,
             SetCropPreset.self,
             ResetCrop.self,
+            ConnectDrive.self,
+            DisconnectDrive.self,
+            DriveAuthStateCmd.self,
             PostMenuAction.self,
         ]
     )
@@ -820,6 +823,48 @@ extension DimroomCLI {
 
         func run() throws {
             try runCommand(.resetCrop, socket: socket)
+        }
+    }
+
+    struct ConnectDrive: ParsableCommand {
+        static let configuration = CommandConfiguration(
+            commandName: "connect-drive",
+            abstract: "Trigger the Google Drive OAuth connect flow (same path as the menu)."
+        )
+
+        @Option(name: .long, help: "Path to the harness socket.")
+        var socket: String = HarnessServer.defaultSocketPath
+
+        func run() throws {
+            try runCommand(.connectDrive, socket: socket)
+        }
+    }
+
+    struct DisconnectDrive: ParsableCommand {
+        static let configuration = CommandConfiguration(
+            commandName: "disconnect-drive",
+            abstract: "Clear the stored Drive refresh token and revert the UI to disconnected."
+        )
+
+        @Option(name: .long, help: "Path to the harness socket.")
+        var socket: String = HarnessServer.defaultSocketPath
+
+        func run() throws {
+            try runCommand(.disconnectDrive, socket: socket)
+        }
+    }
+
+    struct DriveAuthStateCmd: ParsableCommand {
+        static let configuration = CommandConfiguration(
+            commandName: "drive-auth-state",
+            abstract: "Return the current Drive auth status (disconnected/connecting/connected) and email."
+        )
+
+        @Option(name: .long, help: "Path to the harness socket.")
+        var socket: String = HarnessServer.defaultSocketPath
+
+        func run() throws {
+            try runCommand(.driveAuthState, socket: socket)
         }
     }
 

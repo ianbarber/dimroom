@@ -17,6 +17,21 @@ import UniformTypeIdentifiers
 /// The cache directory is injectable so tests can operate in a temporary
 /// directory and real callers can pass their
 /// `~/Library/Application Support/Dimroom/previews` URL.
+///
+/// ## Tiered layout
+///
+/// Each asset has two on-disk tiers (issue #186):
+///
+/// - **Master** (`<hash>.thumb.jpg` / `<hash>.preview.jpg`) — written
+///   exactly once from the original by `generate(...)`. Never overwritten
+///   by edits. This is what `regenerateWithEdit` reads from, so repeated
+///   regens are byte-identical and don't accumulate JPEG loss.
+/// - **Display** (`<hash>.edit.thumb.jpg` / `<hash>.edit.preview.jpg`) —
+///   written by `regenerateWithEdit` when `EditState` is non-identity.
+///   Deleted when `EditState` is identity, so a reset-to-zero edit
+///   surfaces the unedited master cleanly. Library + Loupe see display
+///   files first via `thumbnailURL(for:)` / `previewURL(for:)`, which
+///   transparently fall back to master.
 public actor PreviewStore {
     private let cacheDirectory: URL
     private let context: CIContext
@@ -70,10 +85,10 @@ public actor PreviewStore {
 
     // MARK: - Public API
 
-    /// Return the cached thumbnail URL for `asset`, or `nil` if no
-    /// thumbnail has been generated yet. This is a pure filesystem check;
-    /// nonisolated so it can be called from any context without awaiting
-    /// the actor.
+    /// Return the cached thumbnail URL for `asset`, preferring the
+    /// display tier so callers see the edited look, falling back to
+    /// master, returning `nil` if neither exists. Pure filesystem check;
+    /// nonisolated so it can be called without awaiting the actor.
     public nonisolated func thumbnailURL(for asset: Asset) -> URL? {
         cachedURL(for: asset, kind: .thumbnail)
     }
@@ -82,36 +97,59 @@ public actor PreviewStore {
         cachedURL(for: asset, kind: .preview)
     }
 
-    private nonisolated func cachedURL(for asset: Asset, kind: PreviewKind) -> URL? {
-        let url = CachePaths.fileURL(for: asset, kind: kind, in: cacheDirectory)
+    /// Return the cached **master** thumbnail URL — the file written by
+    /// `generate`, ignoring any display-tier override. Returns `nil` if
+    /// `generate` has never run for this asset. Used by Develop, which
+    /// must drive its render pipeline from unedited pixels so the saved
+    /// `EditState` isn't double-applied (issue #186).
+    public nonisolated func masterThumbnailURL(for asset: Asset) -> URL? {
+        let url = CachePaths.fileURL(for: asset, kind: .thumbnail, tier: .master, in: cacheDirectory)
         return FileManager.default.fileExists(atPath: url.path) ? url : nil
     }
 
-    /// Remove any cached thumbnail and preview JPEGs for `asset`. After
-    /// this call both `thumbnailURL(for:)` and `previewURL(for:)` return
-    /// `nil` until the next `generate` call regenerates them. Missing
-    /// files are ignored — this is a best-effort cleanup, not an
-    /// assertion that the cache was populated.
+    public nonisolated func masterPreviewURL(for asset: Asset) -> URL? {
+        let url = CachePaths.fileURL(for: asset, kind: .preview, tier: .master, in: cacheDirectory)
+        return FileManager.default.fileExists(atPath: url.path) ? url : nil
+    }
+
+    private nonisolated func cachedURL(for asset: Asset, kind: PreviewKind) -> URL? {
+        let display = CachePaths.fileURL(for: asset, kind: kind, tier: .display, in: cacheDirectory)
+        if FileManager.default.fileExists(atPath: display.path) {
+            return display
+        }
+        let master = CachePaths.fileURL(for: asset, kind: kind, tier: .master, in: cacheDirectory)
+        return FileManager.default.fileExists(atPath: master.path) ? master : nil
+    }
+
+    /// Remove all cached thumbnail/preview JPEGs for `asset` across both
+    /// tiers. After this call both URL accessors return `nil` until the
+    /// next `generate` (and optional `regenerateWithEdit`) call rebuilds
+    /// the cache. Missing files are ignored — this is a best-effort
+    /// cleanup, not an assertion that the cache was populated.
     ///
     /// Used by `LibraryViewModel.rotate` to force a synchronous
     /// regeneration after `Asset.rotation` changes, because `generate`
-    /// short-circuits when both cached files already exist on disk.
+    /// short-circuits when both cached master files already exist.
     public func invalidate(for asset: Asset) {
         for kind in PreviewKind.allCases {
-            let url = CachePaths.fileURL(for: asset, kind: kind, in: cacheDirectory)
-            if fileManager.fileExists(atPath: url.path) {
-                try? fileManager.removeItem(at: url)
+            for tier: PreviewTier in [.master, .display] {
+                let url = CachePaths.fileURL(for: asset, kind: kind, tier: tier, in: cacheDirectory)
+                if fileManager.fileExists(atPath: url.path) {
+                    try? fileManager.removeItem(at: url)
+                }
             }
         }
     }
 
-    /// Produce both preview sizes for `asset` from its original at
-    /// `sourceURL`. Idempotent: if both files already exist on disk the
-    /// call returns immediately without decoding.
+    /// Produce both master preview sizes for `asset` from its original at
+    /// `sourceURL`. Idempotent: if both master files already exist on
+    /// disk the call returns immediately without decoding. Does not
+    /// touch display-tier files — those are only written by
+    /// `regenerateWithEdit`.
     @discardableResult
     public func generate(for asset: Asset, sourceURL: URL) async throws -> PreviewSet {
-        let thumbURL = CachePaths.fileURL(for: asset, kind: .thumbnail, in: cacheDirectory)
-        let previewURL = CachePaths.fileURL(for: asset, kind: .preview, in: cacheDirectory)
+        let thumbURL = CachePaths.fileURL(for: asset, kind: .thumbnail, tier: .master, in: cacheDirectory)
+        let previewURL = CachePaths.fileURL(for: asset, kind: .preview, tier: .master, in: cacheDirectory)
 
         if fileManager.fileExists(atPath: thumbURL.path),
            fileManager.fileExists(atPath: previewURL.path) {
@@ -126,7 +164,7 @@ public actor PreviewStore {
         let rotated = applyRotation(to: decoded, rotation: asset.rotation)
 
         for kind in PreviewKind.allCases {
-            let target = CachePaths.fileURL(for: asset, kind: kind, in: cacheDirectory)
+            let target = CachePaths.fileURL(for: asset, kind: kind, tier: .master, in: cacheDirectory)
             let scaled = scale(rotated, longEdge: kind.maxEdge)
             try writeJPEG(scaled, to: target)
         }
@@ -134,29 +172,50 @@ public actor PreviewStore {
         return PreviewSet(thumbnail: thumbURL, preview: previewURL)
     }
 
-    /// Re-render `asset`'s cached thumbnail and preview JPEGs by applying
-    /// `editState` to the existing 2048px preview. No-op when the preview
-    /// cache has not been populated yet — the next `generate` call will
-    /// include a full edit render, so there is nothing to update here.
+    /// Re-render `asset`'s display-tier thumbnail and preview by applying
+    /// `editState` to the **master** preview. The master files are never
+    /// touched, so this call is idempotent — running it repeatedly with
+    /// the same `editState` produces byte-identical display JPEGs and
+    /// doesn't accumulate JPEG generation loss (issue #186).
     ///
-    /// Uses the already-decoded preview JPEG as the source rather than
-    /// the original file, because originals may live only in Drive (see
-    /// CLAUDE.md hard rule 3). This matches `DevelopViewModel.activate`,
-    /// which already drives the interactive render from the preview.
+    /// When `editState` is identity, both display files are deleted (if
+    /// present) so the URL accessors fall back to master, and the signal
+    /// fires so Library reloads its grid back to the unedited bytes.
+    ///
+    /// No-op when the master preview hasn't been generated yet — the
+    /// next `generate` call will lay down the master, and a subsequent
+    /// `regenerateWithEdit` call will produce a display tier from it.
     ///
     /// Emits `asset.id` on `previewRegenerated` on success so observers
     /// can reload.
     public func regenerateWithEdit(for asset: Asset, editState: EditState) async {
-        let previewURL = CachePaths.fileURL(for: asset, kind: .preview, in: cacheDirectory)
-        guard fileManager.fileExists(atPath: previewURL.path),
-              let source = CIImage(contentsOf: previewURL) else {
+        let masterPreviewURL = CachePaths.fileURL(
+            for: asset, kind: .preview, tier: .master, in: cacheDirectory
+        )
+        guard fileManager.fileExists(atPath: masterPreviewURL.path),
+              let source = CIImage(contentsOf: masterPreviewURL) else {
+            return
+        }
+
+        if editState == EditState() {
+            for kind in PreviewKind.allCases {
+                let displayURL = CachePaths.fileURL(
+                    for: asset, kind: kind, tier: .display, in: cacheDirectory
+                )
+                if fileManager.fileExists(atPath: displayURL.path) {
+                    try? fileManager.removeItem(at: displayURL)
+                }
+            }
+            regeneratedSubject.send(asset.id)
             return
         }
 
         let rendered = Renderer.render(source: source, editState: editState)
 
         for kind in PreviewKind.allCases {
-            let target = CachePaths.fileURL(for: asset, kind: kind, in: cacheDirectory)
+            let target = CachePaths.fileURL(
+                for: asset, kind: kind, tier: .display, in: cacheDirectory
+            )
             let scaled = scale(rendered, longEdge: kind.maxEdge)
             do {
                 try writeJPEG(scaled, to: target)

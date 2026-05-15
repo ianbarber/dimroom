@@ -19,21 +19,29 @@ enum CachePaths {
         directory(for: asset.contentHash, in: root)
     }
 
-    /// The JPEG URL for one preview kind of one asset.
+    /// The JPEG URL for one preview kind + tier of one asset. Master files
+    /// keep the pre-tier filename layout (`<hash>.thumb.jpg`) so caches
+    /// written before issue #186 land remain valid; display files get
+    /// `.edit.` inserted, producing `<hash>.edit.thumb.jpg`.
     static func fileURL(
         for contentHash: String,
         kind: PreviewKind,
+        tier: PreviewTier,
         in root: URL
     ) -> URL {
         directory(for: contentHash, in: root)
-            .appendingPathComponent("\(contentHash).\(kind.tag).jpg", isDirectory: false)
+            .appendingPathComponent(
+                "\(contentHash).\(tier.filenameInfix)\(kind.tag).jpg",
+                isDirectory: false
+            )
     }
 
     static func fileURL(
         for asset: Asset,
         kind: PreviewKind,
+        tier: PreviewTier,
         in root: URL
     ) -> URL {
-        fileURL(for: asset.contentHash, kind: kind, in: root)
+        fileURL(for: asset.contentHash, kind: kind, tier: tier, in: root)
     }
 }

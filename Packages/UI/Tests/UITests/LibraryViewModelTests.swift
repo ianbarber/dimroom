@@ -481,6 +481,67 @@ final class LibraryViewModelTests: XCTestCase {
         XCTAssertEqual(vm.recentSessions.count, 2)
     }
 
+    // MARK: - Delete is a no-op in Recently Deleted
+
+    /// Backspace / Edit → Delete Selected in the `.recentlyDeleted`
+    /// scope must not re-soft-delete trash rows (which would extend the
+    /// 30-day retention window) and must not push a misleading undo
+    /// toast. Regression for #181.
+    @MainActor
+    func testDeleteSelectedIsNoOpInRecentlyDeletedScope() async throws {
+        let catalog = try CatalogDatabase.inMemory()
+        let asset = TestFixtures.makeAsset(hash: "trash-noop")
+        try catalog.insertAsset(asset)
+        // Soft-delete directly through the catalog so the asset lands in
+        // the trash without going through the VM's delete path (which
+        // would consume the assertion we want to make).
+        try catalog.deleteAsset(id: asset.id)
+        let original = try XCTUnwrap(catalog.fetchAsset(byHash: "trash-noop"))
+        let originalDeletedAt = try XCTUnwrap(original.deletedAt)
+
+        let store = PreviewStore(cacheDirectory: tempCacheDir)
+        let vm = LibraryViewModel(catalog: catalog, previewStore: store)
+        await vm.setScope(.recentlyDeleted)
+        XCTAssertEqual(vm.rows.map(\.id), [asset.id])
+
+        vm.select(asset.id)
+        await vm.deleteSelected()
+
+        XCTAssertNil(vm.undoToast, "Delete in trash must not show an undo toast")
+        XCTAssertEqual(vm.rows.count, 1, "Trash row must still be present")
+        let after = try XCTUnwrap(catalog.fetchAsset(byHash: "trash-noop"))
+        XCTAssertEqual(
+            after.deletedAt,
+            originalDeletedAt,
+            "deletedAt must not be advanced by a no-op delete in trash"
+        )
+    }
+
+    /// Same invariant via the harness entry point: `deleteAssets(ids:)`
+    /// is what `HarnessController` reaches for the `delete-assets`
+    /// command, so guarding only `deleteSelected` would leave the
+    /// scriptable path uncovered.
+    @MainActor
+    func testDeleteAssetsIsNoOpInRecentlyDeletedScope() async throws {
+        let catalog = try CatalogDatabase.inMemory()
+        let asset = TestFixtures.makeAsset(hash: "trash-noop-harness")
+        try catalog.insertAsset(asset)
+        try catalog.deleteAsset(id: asset.id)
+        let original = try XCTUnwrap(catalog.fetchAsset(byHash: "trash-noop-harness"))
+        let originalDeletedAt = try XCTUnwrap(original.deletedAt)
+
+        let store = PreviewStore(cacheDirectory: tempCacheDir)
+        let vm = LibraryViewModel(catalog: catalog, previewStore: store)
+        await vm.setScope(.recentlyDeleted)
+
+        await vm.deleteAssets(ids: [asset.id])
+
+        XCTAssertNil(vm.undoToast)
+        XCTAssertEqual(vm.rows.count, 1)
+        let after = try XCTUnwrap(catalog.fetchAsset(byHash: "trash-noop-harness"))
+        XCTAssertEqual(after.deletedAt, originalDeletedAt)
+    }
+
     // MARK: - Rotation
 
     /// Cycles the rotation value four times and asserts it lands on

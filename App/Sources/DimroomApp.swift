@@ -95,7 +95,11 @@ private struct DeleteMenuItem: View {
             NotificationCenter.default.post(name: .requestDeleteSelected, object: nil)
         }
         .keyboardShortcut(.delete, modifiers: [])
-        .disabled(libraryViewModel.selectedAssetIds.isEmpty || router.route != .library)
+        .disabled(
+            libraryViewModel.selectedAssetIds.isEmpty
+                || router.route != .library
+                || libraryViewModel.scope == .recentlyDeleted
+        )
     }
 }
 

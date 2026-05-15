@@ -23,6 +23,7 @@ final class HarnessController: @unchecked Sendable {
     private let driveUploader: (any DriveUploading)?
     private let originalsCoordinator: OriginalsCoordinator?
     private let undoStack: UndoStack?
+    private let driveAuthState: DriveAuthState?
     private var server: HarnessServer?
 
     init(
@@ -37,7 +38,8 @@ final class HarnessController: @unchecked Sendable {
         uploadCoordinator: UploadCoordinator,
         driveUploader: (any DriveUploading)? = nil,
         originalsCoordinator: OriginalsCoordinator? = nil,
-        undoStack: UndoStack? = nil
+        undoStack: UndoStack? = nil,
+        driveAuthState: DriveAuthState? = nil
     ) {
         self.router = router
         self.catalog = catalog
@@ -51,6 +53,7 @@ final class HarnessController: @unchecked Sendable {
         self.driveUploader = driveUploader
         self.originalsCoordinator = originalsCoordinator
         self.undoStack = undoStack
+        self.driveAuthState = driveAuthState
     }
 
     func start(socketPath: String = HarnessServer.defaultSocketPath) throws {
@@ -267,7 +270,60 @@ final class HarnessController: @unchecked Sendable {
 
         case .resetCrop:
             return await handleResetCrop()
+
+        case .connectDrive:
+            return await handleConnectDrive()
+
+        case .disconnectDrive:
+            return await handleDisconnectDrive()
+
+        case .driveAuthState:
+            return await handleDriveAuthState()
         }
+    }
+
+    // MARK: - Drive auth
+
+    private func handleConnectDrive() async -> Response {
+        guard let driveAuthState else {
+            return .error("drive auth state not configured (OAuth credentials missing?)")
+        }
+        await driveAuthState.connect()
+        return await handleDriveAuthState()
+    }
+
+    private func handleDisconnectDrive() async -> Response {
+        guard let driveAuthState else {
+            return .error("drive auth state not configured")
+        }
+        await driveAuthState.disconnect()
+        return await handleDriveAuthState()
+    }
+
+    private func handleDriveAuthState() async -> Response {
+        guard let driveAuthState else {
+            return .ok(data: .dictionary([
+                "status": .string("disconnected"),
+                "configured": .bool(false),
+            ]))
+        }
+        let snapshot: (status: String, email: String?) = await MainActor.run {
+            switch driveAuthState.status {
+            case .disconnected: return ("disconnected", nil)
+            case .connecting: return ("connecting", nil)
+            case .connected(let email): return ("connected", email)
+            }
+        }
+        var payload: [String: AnyCodableValue] = [
+            "status": .string(snapshot.status),
+            "configured": .bool(true),
+        ]
+        if let email = snapshot.email {
+            payload["email"] = .string(email)
+        } else {
+            payload["email"] = .null
+        }
+        return .ok(data: .dictionary(payload))
     }
 
     // MARK: - Preview signature

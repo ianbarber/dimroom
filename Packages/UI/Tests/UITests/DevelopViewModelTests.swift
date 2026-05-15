@@ -566,12 +566,15 @@ final class DevelopViewModelTests: XCTestCase {
 
     /// `reloadEditState` is the path UndoStack drives on Cmd+Z while
     /// Develop is live. After it replaces `editState` with the replayed
-    /// version, the cached thumb must be re-rendered to match — otherwise
-    /// returning to Library shows the post-edit bytes for the undone
-    /// state. Drive the edit-and-save first so the thumb reflects the
-    /// "after edit" look, then mimic the undo replay (catalog write to
-    /// identity + `reloadEditState`) and assert the cached bytes change
-    /// again.
+    /// version, the **display-tier** thumb (`<hash>.edit.thumb.jpg`)
+    /// must be re-rendered to match — otherwise returning to Library
+    /// shows the post-edit bytes for the undone state. Since PR #209
+    /// split the cache into master + display tiers, regen never touches
+    /// the master (issue #186); it writes display when `EditState` is
+    /// non-identity and deletes display when it's identity. This test
+    /// drives an edit + auto-save to lay down a display thumb, then
+    /// mimics the undo-to-identity replay and asserts the display thumb
+    /// has been removed.
     @MainActor
     func testReloadEditStateRegeneratesThumbnail() async throws {
         let (vm, asset, catalog) = try await makeViewModelWithAsset(hash: "regen-thumb-onreload")
@@ -583,34 +586,41 @@ final class DevelopViewModelTests: XCTestCase {
 
         await vm.activate(assetId: asset.id)
 
-        let thumbURL = tempCacheDir
+        let displayThumbURL = tempCacheDir
             .appendingPathComponent(String(asset.contentHash.prefix(2)), isDirectory: true)
-            .appendingPathComponent("\(asset.contentHash).thumb.jpg")
+            .appendingPathComponent("\(asset.contentHash).edit.thumb.jpg")
 
-        // Drive an edit + auto-save so the cached thumb reflects the
-        // "after edit" render. Wait past the debounce + regen so we
-        // record the post-edit sha as the baseline for the replay
-        // assertion.
+        XCTAssertFalse(
+            FileManager.default.fileExists(atPath: displayThumbURL.path),
+            "Display thumbnail must not exist before any edit"
+        )
+
+        // Drive an edit + auto-save so the display thumb is written
+        // with the "after edit" render. Wait past the debounce + regen.
         vm.setParameter(\.exposure, value: 2.0)
         try await Task.sleep(nanoseconds: 1_500_000_000)
-        let hashAfterEdit = try Self.sha256(of: thumbURL)
 
-        // Mimic the undo replay: UndoStack writes the previous state to
-        // the catalog, then calls reloadEditState. We need the catalog
-        // contents to differ from what's currently in vm.editState so
-        // reload actually changes anything.
+        XCTAssertTrue(
+            FileManager.default.fileExists(atPath: displayThumbURL.path),
+            "Display thumbnail must be written after auto-save lays down the edited look"
+        )
+
+        // Mimic the undo-to-identity replay: UndoStack writes the
+        // previous (identity) state to the catalog, then calls
+        // reloadEditState. The detached regen inside reloadEditState
+        // hits the identity branch of PreviewStore.regenerateWithEdit,
+        // which deletes the display tier so Library reverts to the
+        // unedited master.
         _ = try catalog.saveEditState(EditState(), for: asset.id)
         await vm.reloadEditState(for: asset.id)
 
-        // Detached regen fires inside reloadEditState; wait for it to
-        // write the new thumb bytes.
+        // Detached regen fires inside reloadEditState; wait for the
+        // delete to land.
         try await Task.sleep(nanoseconds: 1_500_000_000)
 
-        let hashAfterReload = try Self.sha256(of: thumbURL)
-        XCTAssertNotEqual(
-            hashAfterEdit,
-            hashAfterReload,
-            "Cached thumbnail bytes must change after reloadEditState — undo replay must regenerate"
+        XCTAssertFalse(
+            FileManager.default.fileExists(atPath: displayThumbURL.path),
+            "Display thumbnail must be deleted after reloadEditState replays identity — undo must clear the edited cache"
         )
     }
 

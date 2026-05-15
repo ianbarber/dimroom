@@ -741,6 +741,127 @@ final class DevelopViewModelTests: XCTestCase {
         )
     }
 
+    /// Undo/redo replay path: `UndoStack.apply` writes the previous
+    /// `EditState` to the catalog and then calls `reloadEditState` on
+    /// the VM. If the master JPEG has been evicted in the meantime, the
+    /// detached regen inside `reloadEditState` must transparently fetch
+    /// the original, rebuild the master, and re-render the display tier
+    /// — same recovery path #213 added for `deactivate` / `scheduleSave`,
+    /// now applied to the third (and last) `regenerateWithEdit` call site.
+    @MainActor
+    func testReloadEditStateRebuildsMasterWhenEvicted() async throws {
+        let (vm, asset, catalog) = try await makeViewModelWithAsset(hash: "reload-recover-master")
+
+        let shard = tempCacheDir
+            .appendingPathComponent(String(asset.contentHash.prefix(2)), isDirectory: true)
+        let masterPreviewURL = shard.appendingPathComponent("\(asset.contentHash).preview.jpg")
+        let displayPreviewURL = shard.appendingPathComponent("\(asset.contentHash).edit.preview.jpg")
+
+        let originalsDir = tempCacheDir.appendingPathComponent("originals", isDirectory: true)
+        try FileManager.default.createDirectory(at: originalsDir, withIntermediateDirectories: true)
+        let originalURL = originalsDir.appendingPathComponent("\(asset.contentHash).jpg")
+        try TestFixtures.writeSolidJPEG(
+            width: 800, height: 600,
+            color: (r: 200, g: 50, b: 50),
+            to: originalURL
+        )
+
+        let fetcher = RecoveryFetcher(originalURL: originalURL)
+        vm.attach(originalFetcher: fetcher)
+
+        await vm.activate(assetId: asset.id)
+
+        // First edit: produces a display tier from the placed master.
+        vm.setParameter(\.exposure, value: 2.0)
+        try await Task.sleep(nanoseconds: 1_500_000_000)
+        XCTAssertTrue(
+            FileManager.default.fileExists(atPath: displayPreviewURL.path),
+            "Display preview must exist after the initial edit + save"
+        )
+        let displayBytesBeforeEviction = try Self.sha256(of: displayPreviewURL)
+
+        // Mimic the undo-replay sequence: UndoStack writes the previous
+        // EditState to the catalog directly, then calls reloadEditState
+        // on the VM. We catalog-write a *different* state so the
+        // post-regen display bytes have to differ from pre-eviction.
+        var replayedState = EditState()
+        replayedState.exposure = 1.0
+        _ = try catalog.saveEditState(replayedState, for: asset.id)
+
+        // Evict the master while leaving the display tier intact — the
+        // latent state today's `regenerateWithEdit` couldn't escape on
+        // its own.
+        try FileManager.default.removeItem(at: masterPreviewURL)
+        XCTAssertFalse(FileManager.default.fileExists(atPath: masterPreviewURL.path))
+
+        await vm.reloadEditState(for: asset.id)
+        try await Task.sleep(nanoseconds: 1_500_000_000)
+
+        XCTAssertTrue(
+            FileManager.default.fileExists(atPath: masterPreviewURL.path),
+            "Master preview must be rebuilt by the recovery fetch on the reload path"
+        )
+        XCTAssertTrue(
+            FileManager.default.fileExists(atPath: displayPreviewURL.path),
+            "Display preview must still exist after the rebuild + regen"
+        )
+        let displayBytesAfterRecovery = try Self.sha256(of: displayPreviewURL)
+        XCTAssertNotEqual(
+            displayBytesBeforeEviction,
+            displayBytesAfterRecovery,
+            "Display preview must be rewritten with the replayed EditState — not stale exposure=2.0 bytes"
+        )
+
+        let calls = await fetcher.callCount
+        XCTAssertEqual(
+            calls,
+            1,
+            "Recovery must invoke the fetcher exactly once for the missing master"
+        )
+    }
+
+    /// Graceful-degradation counterpart for the reload path: when no
+    /// fetcher is wired (offline / pre-Drive-auth), an evicted-master
+    /// reload must fall through to `regenerateWithEdit`'s own
+    /// missing-master no-op — the existing silent floor stays the floor.
+    @MainActor
+    func testReloadEditStateDegradesGracefullyWhenFetcherUnavailable() async throws {
+        let (vm, asset, catalog) = try await makeViewModelWithAsset(hash: "reload-recover-no-fetcher")
+
+        let shard = tempCacheDir
+            .appendingPathComponent(String(asset.contentHash.prefix(2)), isDirectory: true)
+        let masterPreviewURL = shard.appendingPathComponent("\(asset.contentHash).preview.jpg")
+        let displayPreviewURL = shard.appendingPathComponent("\(asset.contentHash).edit.preview.jpg")
+
+        // Note: no fetcher attached — the VM's `originalFetcher` stays nil.
+
+        await vm.activate(assetId: asset.id)
+        vm.setParameter(\.exposure, value: 2.0)
+        try await Task.sleep(nanoseconds: 1_500_000_000)
+        XCTAssertTrue(FileManager.default.fileExists(atPath: displayPreviewURL.path))
+        let displayBytesBefore = try Self.sha256(of: displayPreviewURL)
+
+        var replayedState = EditState()
+        replayedState.exposure = 1.0
+        _ = try catalog.saveEditState(replayedState, for: asset.id)
+
+        try FileManager.default.removeItem(at: masterPreviewURL)
+
+        await vm.reloadEditState(for: asset.id)
+        try await Task.sleep(nanoseconds: 1_500_000_000)
+
+        XCTAssertFalse(
+            FileManager.default.fileExists(atPath: masterPreviewURL.path),
+            "Without a fetcher, the master must not be rebuilt — recovery only kicks in when a fetcher is wired"
+        )
+        let displayBytesAfter = try Self.sha256(of: displayPreviewURL)
+        XCTAssertEqual(
+            displayBytesBefore,
+            displayBytesAfter,
+            "Display preview must be untouched (silent no-op) when no recovery path exists"
+        )
+    }
+
     private static func sha256(of url: URL) throws -> String {
         let data = try Data(contentsOf: url)
         let digest = SHA256.hash(data: data)

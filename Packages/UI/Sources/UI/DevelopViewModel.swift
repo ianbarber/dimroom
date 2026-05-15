@@ -182,9 +182,15 @@ public final class DevelopViewModel: ObservableObject {
         // so back-to-back regens from rapid undo/redo serialise cleanly.
         let previewStore = self.previewStore
         let catalog = self.catalog
+        let originalFetcher = self.originalFetcher
         Task.detached {
             guard let asset = try? catalog.fetchAsset(id: assetId) else { return }
-            await previewStore.regenerateWithEdit(for: asset, editState: reloaded)
+            await Self.regenerateWithMasterRecovery(
+                asset: asset,
+                editState: reloaded,
+                previewStore: previewStore,
+                originalFetcher: originalFetcher
+            )
         }
     }
 

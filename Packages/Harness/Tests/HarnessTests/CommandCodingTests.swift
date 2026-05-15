@@ -505,7 +505,7 @@ final class CommandCodingTests: XCTestCase {
         let json = String(data: data, encoding: .utf8)!
         XCTAssertEqual(
             json,
-            #"{"assetCount":3,"downloadProgressByAssetId":{},"downloadingAssetIds":[],"hasUndoToast":false,"isZoomed":false,"minRating":3,"route":"library","scopeKind":"all","selectedAssetId":"12345678-1234-1234-1234-123456789012","selectedAssetIds":[],"showHistogram":true}"#
+            #"{"assetCount":3,"developIsDownloadingOriginal":false,"downloadProgressByAssetId":{},"downloadingAssetIds":[],"hasUndoToast":false,"isZoomed":false,"minRating":3,"route":"library","scopeKind":"all","selectedAssetId":"12345678-1234-1234-1234-123456789012","selectedAssetIds":[],"showHistogram":true}"#
         )
     }
 
@@ -515,14 +515,15 @@ final class CommandCodingTests: XCTestCase {
         // format is explicit about what consumers will see. `minRating`,
         // `isZoomed`, `scopeKind`, `selectedAssetIds`,
         // `hasUndoToast`, `downloadingAssetIds`,
-        // `downloadProgressByAssetId`, and `showHistogram` are
-        // non-optional and must always be present.
+        // `downloadProgressByAssetId`, `showHistogram`, and
+        // `developIsDownloadingOriginal` are non-optional and must
+        // always be present.
         let state = AppState(route: .library, assetCount: 0, selectedAssetId: nil)
         let data = try encoder.encode(state)
         let json = String(data: data, encoding: .utf8)!
         XCTAssertEqual(
             json,
-            #"{"assetCount":0,"downloadProgressByAssetId":{},"downloadingAssetIds":[],"hasUndoToast":false,"isZoomed":false,"minRating":0,"route":"library","scopeKind":"all","selectedAssetIds":[],"showHistogram":true}"#
+            #"{"assetCount":0,"developIsDownloadingOriginal":false,"downloadProgressByAssetId":{},"downloadingAssetIds":[],"hasUndoToast":false,"isZoomed":false,"minRating":0,"route":"library","scopeKind":"all","selectedAssetIds":[],"showHistogram":true}"#
         )
     }
 
@@ -540,7 +541,7 @@ final class CommandCodingTests: XCTestCase {
         let json = String(data: data, encoding: .utf8)!
         XCTAssertEqual(
             json,
-            #"{"assetCount":0,"downloadProgressByAssetId":{},"downloadingAssetIds":[],"hasUndoToast":false,"isZoomed":true,"minRating":0,"route":"loupe","scopeKind":"all","selectedAssetIds":[],"showHistogram":true}"#
+            #"{"assetCount":0,"developIsDownloadingOriginal":false,"downloadProgressByAssetId":{},"downloadingAssetIds":[],"hasUndoToast":false,"isZoomed":true,"minRating":0,"route":"loupe","scopeKind":"all","selectedAssetIds":[],"showHistogram":true}"#
         )
     }
 
@@ -571,8 +572,53 @@ final class CommandCodingTests: XCTestCase {
         let json = String(data: data, encoding: .utf8)!
         XCTAssertEqual(
             json,
-            #"{"assetCount":0,"downloadProgressByAssetId":{"12345678-1234-1234-1234-123456789012":0.5},"downloadingAssetIds":["12345678-1234-1234-1234-123456789012"],"hasUndoToast":false,"isZoomed":false,"minRating":0,"route":"loupe","scopeKind":"all","selectedAssetId":"12345678-1234-1234-1234-123456789012","selectedAssetIds":[],"showHistogram":true}"#
+            #"{"assetCount":0,"developIsDownloadingOriginal":false,"downloadProgressByAssetId":{"12345678-1234-1234-1234-123456789012":0.5},"downloadingAssetIds":["12345678-1234-1234-1234-123456789012"],"hasUndoToast":false,"isZoomed":false,"minRating":0,"route":"loupe","scopeKind":"all","selectedAssetId":"12345678-1234-1234-1234-123456789012","selectedAssetIds":[],"showHistogram":true}"#
         )
+    }
+
+    func testAppStateRoundTripWithDevelopDownloadFields() throws {
+        let state = AppState(
+            route: .develop,
+            developIsDownloadingOriginal: true,
+            developDownloadProgress: 0.33
+        )
+        let data = try encoder.encode(state)
+        let decoded = try decoder.decode(AppState.self, from: data)
+        XCTAssertEqual(state, decoded)
+        XCTAssertTrue(decoded.developIsDownloadingOriginal)
+        XCTAssertEqual(decoded.developDownloadProgress, 0.33)
+    }
+
+    func testAppStateJSONShapeWithDevelopDownloadFields() throws {
+        let state = AppState(
+            route: .develop,
+            developIsDownloadingOriginal: true,
+            developDownloadProgress: 0.25
+        )
+        let data = try encoder.encode(state)
+        let json = String(data: data, encoding: .utf8)!
+        XCTAssertEqual(
+            json,
+            #"{"assetCount":0,"developDownloadProgress":0.25,"developIsDownloadingOriginal":true,"downloadProgressByAssetId":{},"downloadingAssetIds":[],"hasUndoToast":false,"isZoomed":false,"minRating":0,"route":"develop","scopeKind":"all","selectedAssetIds":[],"showHistogram":true}"#
+        )
+    }
+
+    func testAppStateOmitsDevelopDownloadProgressWhenNil() throws {
+        // Mirrors `selectedAssetId` — nil optionals are omitted rather
+        // than emitted as `null`, so flows must distinguish "absent"
+        // from "present and 0". Pinned because the regression #204 was
+        // about progress *staying* set; a future refactor that switches
+        // to `Double = 0` instead of `Double? = nil` would silently
+        // change the wire format.
+        let state = AppState(
+            route: .develop,
+            developIsDownloadingOriginal: false,
+            developDownloadProgress: nil
+        )
+        let data = try encoder.encode(state)
+        let json = String(data: data, encoding: .utf8)!
+        XCTAssertFalse(json.contains("developDownloadProgress"))
+        XCTAssertTrue(json.contains(#""developIsDownloadingOriginal":false"#))
     }
 
     func testAppStateRoundTripWithMultiSelection() throws {
@@ -1018,6 +1064,28 @@ final class CommandCodingTests: XCTestCase {
         let json = #"{"type":"postMenuAction","name":"mode-loupe"}"#
         let command = try decoder.decode(Command.self, from: Data(json.utf8))
         XCTAssertEqual(command, .postMenuAction(name: "mode-loupe"))
+    }
+
+    // MARK: - releaseHeldDownloads
+
+    func testReleaseHeldDownloadsRoundTrip() throws {
+        let command = Command.releaseHeldDownloads
+        let data = try encoder.encode(command)
+        let decoded = try decoder.decode(Command.self, from: data)
+        XCTAssertEqual(command, decoded)
+    }
+
+    func testReleaseHeldDownloadsJSON() throws {
+        let command = Command.releaseHeldDownloads
+        let data = try encoder.encode(command)
+        let json = String(data: data, encoding: .utf8)!
+        XCTAssertEqual(json, #"{"type":"releaseHeldDownloads"}"#)
+    }
+
+    func testDecodeReleaseHeldDownloadsFromJSON() throws {
+        let json = #"{"type":"releaseHeldDownloads"}"#
+        let command = try decoder.decode(Command.self, from: Data(json.utf8))
+        XCTAssertEqual(command, .releaseHeldDownloads)
     }
 
     // MARK: - Route

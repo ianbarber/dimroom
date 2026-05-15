@@ -1,4 +1,5 @@
 import Catalog
+import EditEngine
 import SwiftUI
 
 public struct DevelopView: View {
@@ -92,8 +93,22 @@ public struct DevelopView: View {
                 slider("Roundness", keyPath: \.vignetteRoundness, range: 0...100, step: 1, identity: 50)
                 slider("Softness", keyPath: \.vignetteSoftness, range: 0...100, step: 1, identity: 50)
             }
+
+            hslSection
         }
         .animation(.easeOut(duration: 0.25), value: viewModel.replaySequence)
+    }
+
+    private var hslSection: some View {
+        HSLPanelView(
+            value: { axis, index in viewModel.hslValue(axis: axis, rangeIndex: index) },
+            setValue: { axis, index, value in
+                viewModel.setHSLParameter(axis: axis, rangeIndex: index, value: value)
+            },
+            reset: { axis, index in
+                viewModel.resetHSLParameter(axis: axis, rangeIndex: index)
+            }
+        )
     }
 
     private var cropToggle: some View {

@@ -122,4 +122,35 @@ final class EditStateDescriptionTests: XCTestCase {
             "Tint -12"
         )
     }
+
+    func testHSLHueSingleBandReportsRangeName() {
+        let previous = EditState()
+        var next = EditState()
+        next.hueShift[0] = 12 // Red
+        XCTAssertEqual(
+            editParameterDescription(previous: previous, next: next),
+            "Hue (Red) +12"
+        )
+    }
+
+    func testHSLSaturationSingleBandReportsRangeName() {
+        let previous = EditState()
+        var next = EditState()
+        next.hslSaturation[3] = -50 // Green
+        XCTAssertEqual(
+            editParameterDescription(previous: previous, next: next),
+            "Saturation (Green) -50"
+        )
+    }
+
+    func testHSLMultipleBandsRollUpToGenericHSL() {
+        let previous = EditState()
+        var next = EditState()
+        next.hueShift[0] = 10
+        next.hueShift[3] = -10
+        XCTAssertEqual(
+            editParameterDescription(previous: previous, next: next),
+            "HSL"
+        )
+    }
 }

@@ -51,6 +51,11 @@ public enum Command: Codable, Sendable, Equatable {
     case connectDrive
     case disconnectDrive
     case driveAuthState
+    /// Test hook that injects the same `DriveAuthState` transition the
+    /// real refresh-failure stream observer would, without requiring a
+    /// revoked-token round-trip against Google. Used by Layer C flows
+    /// that exercise the stale-token recovery path (issue #195).
+    case simulateDriveAuthFailure
     /// Posts a `Notification.Name` matching `name` on the app's main
     /// `NotificationCenter`. The app exposes a fixed whitelist of menu
     /// actions (mode switch, ratings, zoom, histogram, arrow nav, etc.)
@@ -135,6 +140,7 @@ public enum Command: Codable, Sendable, Equatable {
         case connectDrive
         case disconnectDrive
         case driveAuthState
+        case simulateDriveAuthFailure
         case postMenuAction
     }
 
@@ -285,6 +291,8 @@ public enum Command: Codable, Sendable, Equatable {
             self = .disconnectDrive
         case .driveAuthState:
             self = .driveAuthState
+        case .simulateDriveAuthFailure:
+            self = .simulateDriveAuthFailure
         case .postMenuAction:
             let name = try container.decode(String.self, forKey: .name)
             self = .postMenuAction(name: name)
@@ -430,6 +438,8 @@ public enum Command: Codable, Sendable, Equatable {
             try container.encode(CommandType.disconnectDrive, forKey: .type)
         case .driveAuthState:
             try container.encode(CommandType.driveAuthState, forKey: .type)
+        case .simulateDriveAuthFailure:
+            try container.encode(CommandType.simulateDriveAuthFailure, forKey: .type)
         case .postMenuAction(let name):
             try container.encode(CommandType.postMenuAction, forKey: .type)
             try container.encode(name, forKey: .name)

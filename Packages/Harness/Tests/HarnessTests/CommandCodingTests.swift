@@ -973,6 +973,26 @@ final class CommandCodingTests: XCTestCase {
         XCTAssertEqual(command, .driveAuthState)
     }
 
+    func testSimulateDriveAuthFailureRoundTrip() throws {
+        let command = Command.simulateDriveAuthFailure
+        let data = try encoder.encode(command)
+        let decoded = try decoder.decode(Command.self, from: data)
+        XCTAssertEqual(command, decoded)
+    }
+
+    func testSimulateDriveAuthFailureJSON() throws {
+        let command = Command.simulateDriveAuthFailure
+        let data = try encoder.encode(command)
+        let json = String(data: data, encoding: .utf8)!
+        XCTAssertEqual(json, #"{"type":"simulateDriveAuthFailure"}"#)
+    }
+
+    func testDecodeSimulateDriveAuthFailureFromJSON() throws {
+        let json = #"{"type":"simulateDriveAuthFailure"}"#
+        let command = try decoder.decode(Command.self, from: Data(json.utf8))
+        XCTAssertEqual(command, .simulateDriveAuthFailure)
+    }
+
     // MARK: - postMenuAction
 
     func testPostMenuActionRoundTrip() throws {

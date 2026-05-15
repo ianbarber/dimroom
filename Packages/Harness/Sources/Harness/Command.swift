@@ -33,6 +33,13 @@ public enum Command: Codable, Sendable, Equatable {
     case fetchOriginal(assetId: UUID)
     case setEditParameter(assetId: UUID, parameter: String, value: Double)
     case resetEditParameter(assetId: UUID, parameter: String)
+    /// Set a single index of an array-valued edit parameter (e.g.
+    /// `hueShift`, `hslSaturation`, `hslLuminance`). Separate from
+    /// `setEditParameter` because the keypath surface only addresses
+    /// scalar `Double` fields; an array index needs an explicit `index`
+    /// payload to stay statically typed.
+    case setEditArrayParameter(assetId: UUID, parameter: String, index: Int, value: Double)
+    case resetEditArrayParameter(assetId: UUID, parameter: String, index: Int)
     case undo
     case redo
     case selectAssets(ids: [UUID])
@@ -82,6 +89,7 @@ public enum Command: Codable, Sendable, Equatable {
         case applyEdits
         case parameter
         case value
+        case index
         case x
         case y
         case width
@@ -122,6 +130,8 @@ public enum Command: Codable, Sendable, Equatable {
         case fetchOriginal
         case setEditParameter
         case resetEditParameter
+        case setEditArrayParameter
+        case resetEditArrayParameter
         case undo
         case redo
         case selectAssets
@@ -246,6 +256,17 @@ public enum Command: Codable, Sendable, Equatable {
             let assetId = try container.decode(UUID.self, forKey: .assetId)
             let parameter = try container.decode(String.self, forKey: .parameter)
             self = .resetEditParameter(assetId: assetId, parameter: parameter)
+        case .setEditArrayParameter:
+            let assetId = try container.decode(UUID.self, forKey: .assetId)
+            let parameter = try container.decode(String.self, forKey: .parameter)
+            let index = try container.decode(Int.self, forKey: .index)
+            let value = try container.decode(Double.self, forKey: .value)
+            self = .setEditArrayParameter(assetId: assetId, parameter: parameter, index: index, value: value)
+        case .resetEditArrayParameter:
+            let assetId = try container.decode(UUID.self, forKey: .assetId)
+            let parameter = try container.decode(String.self, forKey: .parameter)
+            let index = try container.decode(Int.self, forKey: .index)
+            self = .resetEditArrayParameter(assetId: assetId, parameter: parameter, index: index)
         case .undo:
             self = .undo
         case .redo:
@@ -393,6 +414,17 @@ public enum Command: Codable, Sendable, Equatable {
             try container.encode(CommandType.resetEditParameter, forKey: .type)
             try container.encode(assetId, forKey: .assetId)
             try container.encode(parameter, forKey: .parameter)
+        case .setEditArrayParameter(let assetId, let parameter, let index, let value):
+            try container.encode(CommandType.setEditArrayParameter, forKey: .type)
+            try container.encode(assetId, forKey: .assetId)
+            try container.encode(parameter, forKey: .parameter)
+            try container.encode(index, forKey: .index)
+            try container.encode(value, forKey: .value)
+        case .resetEditArrayParameter(let assetId, let parameter, let index):
+            try container.encode(CommandType.resetEditArrayParameter, forKey: .type)
+            try container.encode(assetId, forKey: .assetId)
+            try container.encode(parameter, forKey: .parameter)
+            try container.encode(index, forKey: .index)
         case .undo:
             try container.encode(CommandType.undo, forKey: .type)
         case .redo:

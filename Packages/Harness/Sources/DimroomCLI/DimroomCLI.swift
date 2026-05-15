@@ -36,6 +36,8 @@ struct DimroomCLI: ParsableCommand {
             Export.self,
             SetEditParameter.self,
             ResetEditParameter.self,
+            SetEditArrayParameter.self,
+            ResetEditArrayParameter.self,
             Undo.self,
             Redo.self,
             SelectAssets.self,
@@ -565,6 +567,61 @@ extension DimroomCLI {
                 throw ValidationError("Invalid UUID '\(id)'.")
             }
             try runCommand(.resetEditParameter(assetId: uuid, parameter: parameter), socket: socket)
+        }
+    }
+
+    struct SetEditArrayParameter: ParsableCommand {
+        static let configuration = CommandConfiguration(
+            commandName: "set-edit-array-parameter",
+            abstract: "Set a single index of an array-valued edit parameter (e.g. hueShift, hslSaturation, hslLuminance)."
+        )
+
+        @Argument(help: "The UUID of the asset.")
+        var id: String
+
+        @Argument(help: "Parameter name (hueShift, hslSaturation, hslLuminance).")
+        var parameter: String
+
+        @Argument(help: "Array index (0…7 for HSL: red, orange, yellow, green, aqua, blue, purple, magenta).")
+        var index: Int
+
+        @Argument(help: "The value to set.")
+        var value: Double
+
+        @Option(name: .long, help: "Path to the harness socket.")
+        var socket: String = HarnessServer.defaultSocketPath
+
+        func run() throws {
+            guard let uuid = UUID(uuidString: id) else {
+                throw ValidationError("Invalid UUID '\(id)'.")
+            }
+            try runCommand(.setEditArrayParameter(assetId: uuid, parameter: parameter, index: index, value: value), socket: socket)
+        }
+    }
+
+    struct ResetEditArrayParameter: ParsableCommand {
+        static let configuration = CommandConfiguration(
+            commandName: "reset-edit-array-parameter",
+            abstract: "Reset a single index of an array-valued edit parameter to its identity value (0)."
+        )
+
+        @Argument(help: "The UUID of the asset.")
+        var id: String
+
+        @Argument(help: "Parameter name (hueShift, hslSaturation, hslLuminance).")
+        var parameter: String
+
+        @Argument(help: "Array index (0…7).")
+        var index: Int
+
+        @Option(name: .long, help: "Path to the harness socket.")
+        var socket: String = HarnessServer.defaultSocketPath
+
+        func run() throws {
+            guard let uuid = UUID(uuidString: id) else {
+                throw ValidationError("Invalid UUID '\(id)'.")
+            }
+            try runCommand(.resetEditArrayParameter(assetId: uuid, parameter: parameter, index: index), socket: socket)
         }
     }
 

@@ -223,6 +223,12 @@ final class HarnessController: @unchecked Sendable {
         case .resetEditParameter(let assetId, let parameter):
             return await handleResetEditParameter(assetId: assetId, parameter: parameter)
 
+        case .setEditArrayParameter(let assetId, let parameter, let index, let value):
+            return await handleSetEditArrayParameter(assetId: assetId, parameter: parameter, index: index, value: value)
+
+        case .resetEditArrayParameter(let assetId, let parameter, let index):
+            return await handleResetEditArrayParameter(assetId: assetId, parameter: parameter, index: index)
+
         case .undo:
             return await handleUndo()
 
@@ -892,6 +898,61 @@ final class HarnessController: @unchecked Sendable {
         }
         await MainActor.run {
             developViewModel.resetParameter(keyPath)
+        }
+        return .ok()
+    }
+
+    private func handleSetEditArrayParameter(
+        assetId: UUID,
+        parameter: String,
+        index: Int,
+        value: Double
+    ) async -> Response {
+        guard let axis = DevelopViewModel.hslAxis(forParameter: parameter) else {
+            return .error("unknown parameter: \(parameter)")
+        }
+        guard (0..<8).contains(index) else {
+            return .error("index out of range: \(index) (expected 0…7)")
+        }
+        let alreadyActive: Bool = await MainActor.run {
+            if developViewModel.currentAssetId != assetId {
+                router.route = .develop
+                return false
+            }
+            return true
+        }
+        if !alreadyActive {
+            await developViewModel.activate(assetId: assetId)
+        }
+        await MainActor.run {
+            developViewModel.setHSLParameter(axis: axis, rangeIndex: index, value: value)
+        }
+        return .ok()
+    }
+
+    private func handleResetEditArrayParameter(
+        assetId: UUID,
+        parameter: String,
+        index: Int
+    ) async -> Response {
+        guard let axis = DevelopViewModel.hslAxis(forParameter: parameter) else {
+            return .error("unknown parameter: \(parameter)")
+        }
+        guard (0..<8).contains(index) else {
+            return .error("index out of range: \(index) (expected 0…7)")
+        }
+        let alreadyActive: Bool = await MainActor.run {
+            if developViewModel.currentAssetId != assetId {
+                router.route = .develop
+                return false
+            }
+            return true
+        }
+        if !alreadyActive {
+            await developViewModel.activate(assetId: assetId)
+        }
+        await MainActor.run {
+            developViewModel.resetHSLParameter(axis: axis, rangeIndex: index)
         }
         return .ok()
     }

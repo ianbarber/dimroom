@@ -622,6 +622,156 @@ final class RendererTests: XCTestCase {
         XCTAssertGreaterThan(resCorner.r, srcCorner.r, "Positive vignette should brighten corners")
     }
 
+    // MARK: - HSL
+
+    /// All-zero HSL arrays must short-circuit the kernel and leave a
+    /// non-greyscale pixel sample byte-identical. This is the
+    /// acceptance-criterion "All zeros = pass-through" guard for the
+    /// fast-path in `applyHSL`.
+    func testHSLIdentityWithExplicitZerosPassesThrough() {
+        let source = makeSolidColorImage(r: 200, g: 80, b: 60)
+        let midX = Int(source.extent.width) / 2
+        let midY = Int(source.extent.height) / 2
+
+        let identity = EditState(
+            hueShift: EditState.hslIdentity,
+            hslSaturation: EditState.hslIdentity,
+            hslLuminance: EditState.hslIdentity
+        )
+        let result = Renderer.render(source: source, editState: identity)
+        let srcPx = samplePixel(image: source, x: midX, y: midY, context: ctx)
+        let resPx = samplePixel(image: result, x: midX, y: midY, context: ctx)
+        XCTAssertEqual(srcPx.r, resPx.r)
+        XCTAssertEqual(srcPx.g, resPx.g)
+        XCTAssertEqual(srcPx.b, resPx.b)
+    }
+
+    /// A positive hue shift on the Red band must rotate the hue of a
+    /// pure-red sample pixel. The exact destination depends on the
+    /// kernel's hue-shift scaling, so the assertion is that the green
+    /// channel rises (hue rotates toward orange/yellow at +100).
+    func testHSLHueShiftRotatesRedBand() {
+        let source = makeSolidColorImage(r: 220, g: 30, b: 30)
+        let midX = Int(source.extent.width) / 2
+        let midY = Int(source.extent.height) / 2
+
+        var hue = EditState.hslIdentity
+        hue[0] = 100 // Red band
+        let result = Renderer.render(
+            source: source,
+            editState: EditState(hueShift: hue)
+        )
+        let resPx = samplePixel(image: result, x: midX, y: midY, context: ctx)
+        XCTAssertGreaterThan(resPx.g, 30, "+100 hue on Red should rotate toward orange/yellow (raise G)")
+    }
+
+    /// The "doesn't visibly affect colours outside it" acceptance
+    /// criterion: a Red-band hue shift must leave a pure-blue sample
+    /// pixel unchanged within a tight tolerance. The cosine-falloff
+    /// window has half-width 60°, so 240° (blue) sits well outside the
+    /// red band's reach.
+    func testHSLHueShiftDoesNotBleedIntoBlue() {
+        let source = makeSolidColorImage(r: 30, g: 30, b: 220)
+        let midX = Int(source.extent.width) / 2
+        let midY = Int(source.extent.height) / 2
+
+        var hue = EditState.hslIdentity
+        hue[0] = 100 // Red band only
+        let result = Renderer.render(
+            source: source,
+            editState: EditState(hueShift: hue)
+        )
+        let srcPx = samplePixel(image: source, x: midX, y: midY, context: ctx)
+        let resPx = samplePixel(image: result, x: midX, y: midY, context: ctx)
+
+        XCTAssertEqual(Int(resPx.r), Int(srcPx.r), accuracy: 2,
+                       "Red-band shift must not bleed into blue (R)")
+        XCTAssertEqual(Int(resPx.g), Int(srcPx.g), accuracy: 2,
+                       "Red-band shift must not bleed into blue (G)")
+        XCTAssertEqual(Int(resPx.b), Int(srcPx.b), accuracy: 2,
+                       "Red-band shift must not bleed into blue (B)")
+    }
+
+    /// `-100` on a band's HSL Saturation slider must desaturate that
+    /// band toward grey. A pure-red pixel under Red-band saturation -100
+    /// should converge on its luminance value (R≈G≈B).
+    func testHSLSaturationMinusFullDesaturatesRedBand() {
+        let source = makeSolidColorImage(r: 220, g: 30, b: 30)
+        let midX = Int(source.extent.width) / 2
+        let midY = Int(source.extent.height) / 2
+
+        var sat = EditState.hslIdentity
+        sat[0] = -100
+        let result = Renderer.render(
+            source: source,
+            editState: EditState(hslSaturation: sat)
+        )
+        let resPx = samplePixel(image: result, x: midX, y: midY, context: ctx)
+        // Red collapses, green and blue rise toward the same grey value.
+        XCTAssertLessThan(resPx.r, 200, "-100 HSL sat on Red should lower R toward grey")
+        XCTAssertGreaterThan(resPx.g, 40, "-100 HSL sat on Red should raise G toward grey")
+        XCTAssertGreaterThan(resPx.b, 40, "-100 HSL sat on Red should raise B toward grey")
+    }
+
+    /// Per-band saturation desaturation must not affect a different band.
+    /// Pure blue under Red-band saturation -100 stays blue.
+    func testHSLSaturationDoesNotBleedAcrossBands() {
+        let source = makeSolidColorImage(r: 30, g: 30, b: 220)
+        let midX = Int(source.extent.width) / 2
+        let midY = Int(source.extent.height) / 2
+
+        var sat = EditState.hslIdentity
+        sat[0] = -100 // Red band only
+        let result = Renderer.render(
+            source: source,
+            editState: EditState(hslSaturation: sat)
+        )
+        let srcPx = samplePixel(image: source, x: midX, y: midY, context: ctx)
+        let resPx = samplePixel(image: result, x: midX, y: midY, context: ctx)
+        XCTAssertEqual(Int(resPx.r), Int(srcPx.r), accuracy: 2)
+        XCTAssertEqual(Int(resPx.g), Int(srcPx.g), accuracy: 2)
+        XCTAssertEqual(Int(resPx.b), Int(srcPx.b), accuracy: 2)
+    }
+
+    /// `+100` on a band's HSL Luminance slider must lighten that band.
+    /// Pure red under Red-band luminance +100 produces lighter pixels.
+    func testHSLLuminancePositiveLightensRedBand() {
+        let source = makeSolidColorImage(r: 200, g: 50, b: 50)
+        let midX = Int(source.extent.width) / 2
+        let midY = Int(source.extent.height) / 2
+
+        var lum = EditState.hslIdentity
+        lum[0] = 100
+        let result = Renderer.render(
+            source: source,
+            editState: EditState(hslLuminance: lum)
+        )
+        let srcPx = samplePixel(image: source, x: midX, y: midY, context: ctx)
+        let resPx = samplePixel(image: result, x: midX, y: midY, context: ctx)
+        // Lightness rises — at least one of G/B (the lower channels) must climb.
+        XCTAssertGreaterThan(Int(resPx.g) + Int(resPx.b), Int(srcPx.g) + Int(srcPx.b),
+                             "+100 HSL luminance on Red should lighten the pixel")
+    }
+
+    /// `-100` on a band's HSL Luminance slider must darken that band.
+    func testHSLLuminanceNegativeDarkensBlueBand() {
+        let source = makeSolidColorImage(r: 50, g: 80, b: 200)
+        let midX = Int(source.extent.width) / 2
+        let midY = Int(source.extent.height) / 2
+
+        var lum = EditState.hslIdentity
+        lum[5] = -100 // Blue band
+        let result = Renderer.render(
+            source: source,
+            editState: EditState(hslLuminance: lum)
+        )
+        let srcPx = samplePixel(image: source, x: midX, y: midY, context: ctx)
+        let resPx = samplePixel(image: result, x: midX, y: midY, context: ctx)
+        XCTAssertLessThan(Int(resPx.r) + Int(resPx.g) + Int(resPx.b),
+                          Int(srcPx.r) + Int(srcPx.g) + Int(srcPx.b),
+                          "-100 HSL luminance on Blue should darken the pixel")
+    }
+
     func testClaritySymmetry() {
         // Positive and negative clarity should move the same edge pixel in opposite directions
         let source = makeColorImage()

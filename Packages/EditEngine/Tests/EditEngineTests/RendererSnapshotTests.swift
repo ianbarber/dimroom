@@ -98,4 +98,28 @@ final class RendererSnapshotTests: XCTestCase {
         )
         assertSnapshot(of: image, as: .image(precision: 0.99, perceptualPrecision: 0.98))
     }
+
+    func testHSLHueShiftRedSnapshot() {
+        let source = makeColorImage()
+        var hue = EditState.hslIdentity
+        hue[0] = 80
+        let image = renderToNSImage(source: source, editState: EditState(hueShift: hue))
+        assertSnapshot(of: image, as: .image(precision: 0.99, perceptualPrecision: 0.98))
+    }
+
+    func testHSLSaturationGreenSnapshot() {
+        let source = makeColorImage()
+        var sat = EditState.hslIdentity
+        sat[3] = -80 // Green band
+        let image = renderToNSImage(source: source, editState: EditState(hslSaturation: sat))
+        assertSnapshot(of: image, as: .image(precision: 0.99, perceptualPrecision: 0.98))
+    }
+
+    func testHSLLuminanceBlueSnapshot() {
+        let source = makeColorImage()
+        var lum = EditState.hslIdentity
+        lum[5] = -60 // Blue band
+        let image = renderToNSImage(source: source, editState: EditState(hslLuminance: lum))
+        assertSnapshot(of: image, as: .image(precision: 0.99, perceptualPrecision: 0.98))
+    }
 }

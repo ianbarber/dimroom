@@ -40,6 +40,10 @@ final class EditStateTests: XCTestCase {
         XCTAssertEqual(state.vignetteAmount, 0)
         XCTAssertEqual(state.vignetteRoundness, 50)
         XCTAssertEqual(state.vignetteSoftness, 50)
+        XCTAssertEqual(state.hueShift, EditState.hslIdentity)
+        XCTAssertEqual(state.hslSaturation, EditState.hslIdentity)
+        XCTAssertEqual(state.hslLuminance, EditState.hslIdentity)
+        XCTAssertEqual(state.hueShift.count, 8)
         XCTAssertNil(state.cropRect)
         XCTAssertNil(state.cropAngle)
     }
@@ -61,6 +65,9 @@ final class EditStateTests: XCTestCase {
             vignetteAmount: -40,
             vignetteRoundness: 70,
             vignetteSoftness: 30,
+            hueShift: [12, -8, 0, 25, 0, -40, 6, 0],
+            hslSaturation: [0, 50, 0, 0, -30, 0, 0, 20],
+            hslLuminance: [-10, 0, 0, 15, 0, 0, 0, 0],
             cropRect: CGRect(x: 0.1, y: 0.2, width: 0.6, height: 0.5),
             cropAngle: 2.5
         )
@@ -74,9 +81,9 @@ final class EditStateTests: XCTestCase {
     }
 
     func testLegacyEditStateJSONDecodesWithDefaults() throws {
-        // A pre-existing catalog row written before sharpening/vignette fields
-        // existed. The new keys are absent; decoder must fall back to identity
-        // defaults without throwing.
+        // A pre-existing catalog row written before sharpening/vignette/HSL
+        // fields existed. The new keys are absent; decoder must fall back to
+        // identity defaults without throwing.
         let legacy = """
         {
             "exposure": 1.5,
@@ -101,6 +108,20 @@ final class EditStateTests: XCTestCase {
         XCTAssertEqual(decoded.vignetteAmount, 0)
         XCTAssertEqual(decoded.vignetteRoundness, 50)
         XCTAssertEqual(decoded.vignetteSoftness, 50)
+        XCTAssertEqual(decoded.hueShift, EditState.hslIdentity)
+        XCTAssertEqual(decoded.hslSaturation, EditState.hslIdentity)
+        XCTAssertEqual(decoded.hslLuminance, EditState.hslIdentity)
+    }
+
+    func testHSLLengthMismatchPadsToEight() throws {
+        let json = """
+        {
+            "hueShift": [10, 20, 30]
+        }
+        """
+        let decoded = try JSONDecoder().decode(EditState.self, from: Data(json.utf8))
+        XCTAssertEqual(decoded.hueShift, [10, 20, 30, 0, 0, 0, 0, 0])
+        XCTAssertEqual(decoded.hslSaturation, EditState.hslIdentity)
     }
 
     func testIdentityEditStateRoundTrip() throws {
@@ -123,6 +144,7 @@ final class EditStateTests: XCTestCase {
 
         // Keys should be alphabetically ordered
         let keys = ["blacks", "clarity", "contrast", "exposure", "highlights",
+                     "hslLuminance", "hslSaturation", "hueShift",
                      "saturation", "shadows", "sharpening", "temperature", "tint",
                      "vibrance", "vignetteAmount", "vignetteRoundness", "vignetteSoftness",
                      "whites"]

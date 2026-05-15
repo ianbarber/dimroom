@@ -32,10 +32,24 @@ public struct EditState: Codable, Sendable, Equatable {
     public var vignetteRoundness: Double
     public var vignetteSoftness: Double
 
+    // MARK: - HSL
+
+    /// Per-range hue shift in the order [red, orange, yellow, green, aqua,
+    /// blue, purple, magenta]. Each entry is -100…+100, identity 0.
+    public var hueShift: [Double]
+    /// Per-range saturation in the order above. -100 fully desaturates the
+    /// range, +100 boosts; identity 0.
+    public var hslSaturation: [Double]
+    /// Per-range luminance in the order above. -100 darkens the range,
+    /// +100 lightens; identity 0.
+    public var hslLuminance: [Double]
+
     // MARK: - Crop
 
     public var cropRect: CGRect?
     public var cropAngle: Double?
+
+    public static let hslIdentity: [Double] = [0, 0, 0, 0, 0, 0, 0, 0]
 
     public init(
         exposure: Double = 0,
@@ -53,6 +67,9 @@ public struct EditState: Codable, Sendable, Equatable {
         vignetteAmount: Double = 0,
         vignetteRoundness: Double = 50,
         vignetteSoftness: Double = 50,
+        hueShift: [Double] = EditState.hslIdentity,
+        hslSaturation: [Double] = EditState.hslIdentity,
+        hslLuminance: [Double] = EditState.hslIdentity,
         cropRect: CGRect? = nil,
         cropAngle: Double? = nil
     ) {
@@ -71,20 +88,24 @@ public struct EditState: Codable, Sendable, Equatable {
         self.vignetteAmount = vignetteAmount
         self.vignetteRoundness = vignetteRoundness
         self.vignetteSoftness = vignetteSoftness
+        self.hueShift = EditState.normalisedHSL(hueShift)
+        self.hslSaturation = EditState.normalisedHSL(hslSaturation)
+        self.hslLuminance = EditState.normalisedHSL(hslLuminance)
         self.cropRect = cropRect
         self.cropAngle = cropAngle
     }
 
     // MARK: - Codable
 
-    // Hand-rolled decoder so existing catalog rows (written before sharpening
-    // and vignette existed) decode without error — missing keys fall back to
-    // identity defaults defined in `init(...)`.
+    // Hand-rolled decoder so existing catalog rows (written before sharpening,
+    // vignette, and HSL existed) decode without error — missing keys fall
+    // back to identity defaults defined in `init(...)`.
     private enum CodingKeys: String, CodingKey {
         case exposure, contrast, highlights, shadows, whites, blacks
         case temperature, tint
         case clarity, sharpening, vibrance, saturation
         case vignetteAmount, vignetteRoundness, vignetteSoftness
+        case hueShift, hslSaturation, hslLuminance
         case cropRect, cropAngle
     }
 
@@ -106,8 +127,23 @@ public struct EditState: Codable, Sendable, Equatable {
             vignetteAmount: try c.decodeIfPresent(Double.self, forKey: .vignetteAmount) ?? 0,
             vignetteRoundness: try c.decodeIfPresent(Double.self, forKey: .vignetteRoundness) ?? 50,
             vignetteSoftness: try c.decodeIfPresent(Double.self, forKey: .vignetteSoftness) ?? 50,
+            hueShift: try c.decodeIfPresent([Double].self, forKey: .hueShift) ?? EditState.hslIdentity,
+            hslSaturation: try c.decodeIfPresent([Double].self, forKey: .hslSaturation) ?? EditState.hslIdentity,
+            hslLuminance: try c.decodeIfPresent([Double].self, forKey: .hslLuminance) ?? EditState.hslIdentity,
             cropRect: try c.decodeIfPresent(CGRect.self, forKey: .cropRect),
             cropAngle: try c.decodeIfPresent(Double.self, forKey: .cropAngle)
         )
+    }
+
+    /// Coerce a user-supplied HSL array back to length 8 by truncating or
+    /// padding with zeros. Tolerates a future catalog row written by a
+    /// different binary with a different range count.
+    private static func normalisedHSL(_ values: [Double]) -> [Double] {
+        if values.count == 8 { return values }
+        var out = hslIdentity
+        for i in 0..<min(values.count, 8) {
+            out[i] = values[i]
+        }
+        return out
     }
 }

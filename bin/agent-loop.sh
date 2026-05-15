@@ -216,6 +216,11 @@ extract_approval_timestamp() {
 # back to state:changes-requested so the responder picks it up and fixes
 # the problem.
 #
+# Also performs a log-only sanity check: if a state:ready-to-merge PR has
+# no approving review (via extract_approval_timestamp), emit a warning so
+# the human can investigate. The label is intentionally NOT auto-flipped
+# — per issue #124, heuristic-based label changes here proved unreliable.
+#
 # Note: we used to also flip back when a new human comment appeared after
 # an approval comment. That heuristic was removed because it inspected
 # PR comments (which do not include reviews, so LGTMs were invisible)
@@ -241,6 +246,13 @@ check_ready_to_merge() {
       gh issue edit "$issue" --remove-label "state:ready-to-merge" --add-label "state:changes-requested" 2>/dev/null
       gh pr comment "$pr" --body "Merge conflicts detected. Moving to \`state:changes-requested\` for the responder to rebase." 2>/dev/null || true
       continue
+    fi
+
+    # Sanity check: state:ready-to-merge should have an approving review.
+    local approved_at
+    approved_at=$(gh pr view "$pr" --json reviews 2>/dev/null | extract_approval_timestamp || true)
+    if [ -z "$approved_at" ]; then
+      log "PR #$pr (issue #$issue) is state:ready-to-merge with no approving review — leaving label alone, please verify"
     fi
   done
 }

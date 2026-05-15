@@ -94,6 +94,33 @@ final class DeleteMenuItemEnablementTests: XCTestCase {
         )
     }
 
+    /// `.recentlyDeleted` scope shows already-trashed rows; Delete is a
+    /// no-op there and must stay disabled even with a selection in Library.
+    /// Catches a regression that drops the `scope == .recentlyDeleted`
+    /// clause from `isDisabled`.
+    func testDisabledInRecentlyDeletedScopeEvenWithSelection() async throws {
+        let vm = try await makeViewModel()
+        let router = AppRouter()
+        router.route = .library
+
+        // Soft-delete one of the seeded assets, then switch to the
+        // Recently Deleted scope so the row remains visible — keeping the
+        // selection stable across `reloadAndWait`'s `intersection(visible)`
+        // step. Without this, switching scope to `.recentlyDeleted` would
+        // empty `rows` and clear the selection, masking the scope clause.
+        let firstId = try XCTUnwrap(vm.rows.first?.id)
+        await vm.deleteAssets(ids: [firstId])
+        await vm.setScope(.recentlyDeleted)
+        let trashedId = try XCTUnwrap(vm.rows.first?.id)
+        vm.select(trashedId)
+
+        let item = DeleteMenuItem(libraryViewModel: vm, router: router)
+        XCTAssertTrue(
+            item.isDisabled,
+            "selection in the trash scope must not enable Delete"
+        )
+    }
+
     // MARK: - Sanity (both clauses disabling)
 
     func testDisabledWithEmptySelectionInLibrary() async throws {

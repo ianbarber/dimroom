@@ -49,6 +49,10 @@ struct DimroomCLI: ParsableCommand {
             CancelCrop.self,
             SetCropPreset.self,
             ResetCrop.self,
+            ConnectDrive.self,
+            DisconnectDrive.self,
+            DriveAuthStateCmd.self,
+            PostMenuAction.self,
         ]
     )
 }
@@ -819,6 +823,65 @@ extension DimroomCLI {
 
         func run() throws {
             try runCommand(.resetCrop, socket: socket)
+        }
+    }
+
+    struct ConnectDrive: ParsableCommand {
+        static let configuration = CommandConfiguration(
+            commandName: "connect-drive",
+            abstract: "Trigger the Google Drive OAuth connect flow (same path as the menu)."
+        )
+
+        @Option(name: .long, help: "Path to the harness socket.")
+        var socket: String = HarnessServer.defaultSocketPath
+
+        func run() throws {
+            try runCommand(.connectDrive, socket: socket)
+        }
+    }
+
+    struct DisconnectDrive: ParsableCommand {
+        static let configuration = CommandConfiguration(
+            commandName: "disconnect-drive",
+            abstract: "Clear the stored Drive refresh token and revert the UI to disconnected."
+        )
+
+        @Option(name: .long, help: "Path to the harness socket.")
+        var socket: String = HarnessServer.defaultSocketPath
+
+        func run() throws {
+            try runCommand(.disconnectDrive, socket: socket)
+        }
+    }
+
+    struct DriveAuthStateCmd: ParsableCommand {
+        static let configuration = CommandConfiguration(
+            commandName: "drive-auth-state",
+            abstract: "Return the current Drive auth status (disconnected/connecting/connected) and email."
+        )
+
+        @Option(name: .long, help: "Path to the harness socket.")
+        var socket: String = HarnessServer.defaultSocketPath
+
+        func run() throws {
+            try runCommand(.driveAuthState, socket: socket)
+        }
+    }
+
+    struct PostMenuAction: ParsableCommand {
+        static let configuration = CommandConfiguration(
+            commandName: "post-menu-action",
+            abstract: "Fire one of the app's menu-attached keyboard actions by name (mode-library, mode-loupe, mode-develop, set-rating-1…5, clear-rating, rotate-cw, rotate-ccw, zoom-toggle, zoom-reset, toggle-histogram, select-next, select-previous, select-up, select-down, select-all-visible)."
+        )
+
+        @Argument(help: "Action name; see abstract for the whitelist.")
+        var name: String
+
+        @Option(name: .long, help: "Path to the harness socket.")
+        var socket: String = HarnessServer.defaultSocketPath
+
+        func run() throws {
+            try runCommand(.postMenuAction(name: name), socket: socket)
         }
     }
 }

@@ -7,6 +7,7 @@ import Foundation
 import Harness
 import ImportKit
 import Previews
+import SyncEngine
 import UI
 
 /// Bridges harness commands to the app's state and AppKit operations.
@@ -23,6 +24,8 @@ final class HarnessController: @unchecked Sendable {
     private let driveUploader: (any DriveUploading)?
     private let originalsCoordinator: OriginalsCoordinator?
     private let undoStack: UndoStack?
+    private let catalogPublisher: CatalogPublisher?
+    private let driveAuthState: DriveAuthState?
     private var server: HarnessServer?
 
     init(
@@ -37,7 +40,9 @@ final class HarnessController: @unchecked Sendable {
         uploadCoordinator: UploadCoordinator,
         driveUploader: (any DriveUploading)? = nil,
         originalsCoordinator: OriginalsCoordinator? = nil,
-        undoStack: UndoStack? = nil
+        undoStack: UndoStack? = nil,
+        catalogPublisher: CatalogPublisher? = nil,
+        driveAuthState: DriveAuthState? = nil
     ) {
         self.router = router
         self.catalog = catalog
@@ -51,6 +56,8 @@ final class HarnessController: @unchecked Sendable {
         self.driveUploader = driveUploader
         self.originalsCoordinator = originalsCoordinator
         self.undoStack = undoStack
+        self.catalogPublisher = catalogPublisher
+        self.driveAuthState = driveAuthState
     }
 
     func start(socketPath: String = HarnessServer.defaultSocketPath) throws {
@@ -267,7 +274,80 @@ final class HarnessController: @unchecked Sendable {
 
         case .resetCrop:
             return await handleResetCrop()
+
+        case .publishCatalog:
+            return await handlePublishCatalog()
+
+        case .connectDrive:
+            return await handleConnectDrive()
+
+        case .disconnectDrive:
+            return await handleDisconnectDrive()
+
+        case .driveAuthState:
+            return await handleDriveAuthState()
+
+        case .postMenuAction(let name):
+            return await handlePostMenuAction(name: name)
         }
+    }
+
+    private func handlePostMenuAction(name: String) async -> Response {
+        guard let action = MenuActionName(rawValue: name) else {
+            let valid = MenuActionName.allCases.map(\.rawValue).joined(separator: ", ")
+            return .error("unknown menu action '\(name)'; expected one of: \(valid)")
+        }
+        // Posting via the same notification path the menu uses proves
+        // the menu-to-action wiring end-to-end without the harness
+        // needing to synthesise NSEvents.
+        await MainActor.run {
+            NotificationCenter.default.post(name: action.notificationName, object: nil)
+        }
+        return .ok()
+    }
+
+    // MARK: - Drive auth
+
+    private func handleConnectDrive() async -> Response {
+        guard let driveAuthState else {
+            return .error("drive auth state not configured (OAuth credentials missing?)")
+        }
+        await driveAuthState.connect()
+        return await handleDriveAuthState()
+    }
+
+    private func handleDisconnectDrive() async -> Response {
+        guard let driveAuthState else {
+            return .error("drive auth state not configured")
+        }
+        await driveAuthState.disconnect()
+        return await handleDriveAuthState()
+    }
+
+    private func handleDriveAuthState() async -> Response {
+        guard let driveAuthState else {
+            return .ok(data: .dictionary([
+                "status": .string("disconnected"),
+                "configured": .bool(false),
+            ]))
+        }
+        let snapshot: (status: String, email: String?) = await MainActor.run {
+            switch driveAuthState.status {
+            case .disconnected: return ("disconnected", nil)
+            case .connecting: return ("connecting", nil)
+            case .connected(let email): return ("connected", email)
+            }
+        }
+        var payload: [String: AnyCodableValue] = [
+            "status": .string(snapshot.status),
+            "configured": .bool(true),
+        ]
+        if let email = snapshot.email {
+            payload["email"] = .string(email)
+        } else {
+            payload["email"] = .null
+        }
+        return .ok(data: .dictionary(payload))
     }
 
     // MARK: - Preview signature
@@ -401,6 +481,33 @@ final class HarnessController: @unchecked Sendable {
         }
     }
 
+    // MARK: - Publish catalog
+
+    private func handlePublishCatalog() async -> Response {
+        guard let catalogPublisher else {
+            return .error("catalog publisher not configured (drive not authenticated)")
+        }
+        do {
+            let outcome = try await catalogPublisher.publishNow()
+            return .ok(data: .dictionary([
+                "driveFileId": .string(outcome.driveFileId),
+                "uploadedBytes": .int(Int(outcome.uploadedBytes)),
+                "durationMs": .int(Self.durationToMs(outcome.duration)),
+                "wasCreate": .bool(outcome.wasCreate),
+            ]))
+        } catch SyncEngineError.notAuthenticated {
+            return .error("drive not authenticated")
+        } catch {
+            return .error("publishCatalog failed: \(error)")
+        }
+    }
+
+    private static func durationToMs(_ duration: Duration) -> Int {
+        let components = duration.components
+        let ms = components.seconds * 1_000 + components.attoseconds / 1_000_000_000_000_000
+        return Int(ms)
+    }
+
     // MARK: - Undo / Redo
 
     private func handleUndo() async -> Response {
@@ -502,17 +609,20 @@ final class HarnessController: @unchecked Sendable {
             destinationDirectory: destinationURL
         )
 
-        let exportedCount: Int
-        if case .done(let count) = await exportCoordinator.phase {
-            exportedCount = count
-        } else {
-            exportedCount = 0
+        let phase = await exportCoordinator.phase
+        switch phase {
+        case .done(let exported, let skipped, let failures):
+            return .ok(data: .dictionary([
+                "exportedCount": .int(exported),
+                "skippedCount": .int(skipped),
+                "failedCount": .int(failures.count),
+                "destinationPath": .string(destinationPath),
+            ]))
+        case .failed(let message):
+            return .error("export failed: \(message)")
+        default:
+            return .error("export ended in unexpected phase")
         }
-
-        return .ok(data: .dictionary([
-            "exportedCount": .int(exportedCount),
-            "destinationPath": .string(destinationPath),
-        ]))
     }
 
     // MARK: - List assets

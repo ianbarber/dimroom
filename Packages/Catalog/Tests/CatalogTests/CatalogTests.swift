@@ -470,4 +470,179 @@ final class CatalogDatabaseTests: XCTestCase {
         XCTAssertEqual(sessions.count, 1)
         XCTAssertTrue(sessions[0].displayName.contains("Canon EOS R6"))
     }
+
+    // MARK: - onChange notification
+
+    func testOnChangeFiresOncePerWriterAcrossAPIs() throws {
+        let db = try makeDatabase()
+        let counter = CallCounter()
+        db.onChange = { counter.increment() }
+
+        // Build up enough state to exercise every writer path.
+        let asset = makeSampleAsset(contentHash: "oc1")
+        try db.insertAsset(asset)
+        XCTAssertEqual(counter.value, 1)
+
+        let session = ImportSession(sourceKind: "folder")
+        try db.insertImportSession(session)
+        XCTAssertEqual(counter.value, 2)
+
+        try db.updateImportSessionSourceDevice(id: session.id, sourceDevice: "Canon")
+        XCTAssertEqual(counter.value, 3)
+
+        try db.updateRating(assetId: asset.id, rating: 4)
+        XCTAssertEqual(counter.value, 4)
+
+        try db.updateRotation(assetId: asset.id, rotation: 90)
+        XCTAssertEqual(counter.value, 5)
+
+        try db.updateLocalPath(assetId: asset.id, path: "/tmp/local.jpg")
+        XCTAssertEqual(counter.value, 6)
+
+        try db.updateDriveFileId(assetId: asset.id, driveFileId: "drive-1")
+        XCTAssertEqual(counter.value, 7)
+
+        _ = try db.saveEditState(EditState(), for: asset.id)
+        XCTAssertEqual(counter.value, 8)
+
+        try db.deleteAsset(id: asset.id)
+        XCTAssertEqual(counter.value, 9)
+
+        try db.restoreAsset(id: asset.id)
+        XCTAssertEqual(counter.value, 10)
+
+        // Batch operations fire once per call, not once per row.
+        let b = makeSampleAsset(contentHash: "oc2")
+        let c = makeSampleAsset(contentHash: "oc3")
+        try db.insertAsset(b)
+        try db.insertAsset(c)
+        XCTAssertEqual(counter.value, 12)
+
+        try db.deleteAssets(ids: [b.id, c.id])
+        XCTAssertEqual(counter.value, 13)
+
+        try db.restoreAssets(ids: [b.id, c.id])
+        XCTAssertEqual(counter.value, 14)
+
+        try db.permanentlyDeleteAssets(ids: [b.id, c.id])
+        XCTAssertEqual(counter.value, 15)
+
+        _ = try db.permanentlyDeleteAsset(id: asset.id)
+        XCTAssertEqual(counter.value, 16)
+    }
+
+    func testOnChangeDoesNotFireWhenNothingChanges() throws {
+        let db = try makeDatabase()
+        let counter = CallCounter()
+        db.onChange = { counter.increment() }
+
+        // Unknown ids — nothing actually written.
+        try db.updateRating(assetId: UUID(), rating: 3)
+        try db.updateRotation(assetId: UUID(), rotation: 0)
+        try db.updateLocalPath(assetId: UUID(), path: "/x")
+        try db.updateDriveFileId(assetId: UUID(), driveFileId: "x")
+        try db.deleteAsset(id: UUID())
+        try db.restoreAsset(id: UUID())
+        _ = try db.deleteAssets(ids: [UUID(), UUID()])
+        _ = try db.restoreAssets(ids: [UUID()])
+        _ = try db.permanentlyDeleteAsset(id: UUID())
+        _ = try db.permanentlyDeleteAssets(ids: [UUID()])
+
+        XCTAssertEqual(counter.value, 0)
+    }
+
+    // MARK: - snapshot(to:)
+
+    func testSnapshotProducesOpenableEquivalentDatabase() throws {
+        let db = try makeDatabase()
+        let a = makeSampleAsset(contentHash: "snap-a")
+        let b = makeSampleAsset(contentHash: "snap-b")
+        try db.insertAsset(a)
+        try db.insertAsset(b)
+
+        let tmp = FileManager.default.temporaryDirectory
+            .appendingPathComponent("dimroom-snapshot-\(UUID().uuidString)")
+            .appendingPathComponent("snap.sqlite")
+        defer { try? FileManager.default.removeItem(at: tmp.deletingLastPathComponent()) }
+
+        try db.snapshot(to: tmp.path)
+
+        XCTAssertTrue(FileManager.default.fileExists(atPath: tmp.path))
+
+        let restored = try CatalogDatabase(path: tmp.path)
+        let assets = try restored.fetchAssets().sorted { $0.contentHash < $1.contentHash }
+        XCTAssertEqual(assets.map(\.contentHash), ["snap-a", "snap-b"])
+    }
+
+    func testSnapshotOverwritesExistingDestination() throws {
+        let db = try makeDatabase()
+        let asset = makeSampleAsset(contentHash: "ow")
+        try db.insertAsset(asset)
+
+        let tmp = FileManager.default.temporaryDirectory
+            .appendingPathComponent("dimroom-snapshot-\(UUID().uuidString)")
+            .appendingPathComponent("snap.sqlite")
+        defer { try? FileManager.default.removeItem(at: tmp.deletingLastPathComponent()) }
+
+        try db.snapshot(to: tmp.path)
+        let firstSize = try FileManager.default.attributesOfItem(atPath: tmp.path)[.size] as? Int ?? 0
+        XCTAssertGreaterThan(firstSize, 0)
+
+        // Second snapshot must replace rather than fail.
+        try db.snapshot(to: tmp.path)
+        XCTAssertTrue(FileManager.default.fileExists(atPath: tmp.path))
+    }
+
+    func testSnapshotCreatesParentDirectory() throws {
+        let db = try makeDatabase()
+        let asset = makeSampleAsset(contentHash: "parent")
+        try db.insertAsset(asset)
+
+        let nested = FileManager.default.temporaryDirectory
+            .appendingPathComponent("dimroom-snapshot-\(UUID().uuidString)")
+            .appendingPathComponent("nested/deep")
+            .appendingPathComponent("snap.sqlite")
+        defer {
+            try? FileManager.default.removeItem(
+                at: nested.deletingLastPathComponent().deletingLastPathComponent().deletingLastPathComponent()
+            )
+        }
+
+        try db.snapshot(to: nested.path)
+        XCTAssertTrue(FileManager.default.fileExists(atPath: nested.path))
+    }
+
+    // MARK: - path property
+
+    func testInMemoryPathIsSentinel() throws {
+        let db = try CatalogDatabase.inMemory()
+        XCTAssertEqual(db.path, ":memory:")
+    }
+
+    func testOpenedPathIsExposed() throws {
+        let tmp = FileManager.default.temporaryDirectory
+            .appendingPathComponent("dimroom-path-\(UUID().uuidString).sqlite")
+        defer { try? FileManager.default.removeItem(at: tmp) }
+        let db = try CatalogDatabase(path: tmp.path)
+        XCTAssertEqual(db.path, tmp.path)
+    }
+}
+
+/// Thread-safe counter used by `onChange` tests so the callback can be
+/// invoked from any GRDB write queue without confusing XCTest.
+private final class CallCounter: @unchecked Sendable {
+    private let lock = NSLock()
+    private var count: Int = 0
+
+    func increment() {
+        lock.lock()
+        count += 1
+        lock.unlock()
+    }
+
+    var value: Int {
+        lock.lock()
+        defer { lock.unlock() }
+        return count
+    }
 }

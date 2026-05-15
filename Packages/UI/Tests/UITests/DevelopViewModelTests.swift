@@ -465,12 +465,12 @@ final class DevelopViewModelTests: XCTestCase {
 
     // MARK: - Thumbnail regeneration after save
 
-    /// After the auto-save debounce fires, the cached thumbnail must be
-    /// (re)written via EditEngine — that's how Library/Loupe pick up the
-    /// edited look. Placing a pre-existing thumbnail proves the bytes
-    /// actually change rather than getting populated for the first time.
+    /// After the auto-save debounce fires, regen writes a **display-tier**
+    /// thumbnail with the edited bytes — that's how Library/Loupe pick up
+    /// the edited look. The master thumbnail must stay byte-identical so
+    /// future regens still source from unedited pixels (issue #186).
     @MainActor
-    func testAutoSaveRegeneratesThumbnail() async throws {
+    func testAutoSaveRegeneratesDisplayThumbnailWithoutTouchingMaster() async throws {
         let (vm, asset, _) = try await makeViewModelWithAsset(hash: "regen-thumb-afteredit")
         try TestFixtures.placeThumbnail(
             for: asset,
@@ -480,10 +480,16 @@ final class DevelopViewModelTests: XCTestCase {
 
         await vm.activate(assetId: asset.id)
 
-        let thumbURL = tempCacheDir
+        let shard = tempCacheDir
             .appendingPathComponent(String(asset.contentHash.prefix(2)), isDirectory: true)
-            .appendingPathComponent("\(asset.contentHash).thumb.jpg")
-        let hashBefore = try Self.sha256(of: thumbURL)
+        let masterThumbURL = shard.appendingPathComponent("\(asset.contentHash).thumb.jpg")
+        let displayThumbURL = shard.appendingPathComponent("\(asset.contentHash).edit.thumb.jpg")
+
+        let masterBefore = try Self.sha256(of: masterThumbURL)
+        XCTAssertFalse(
+            FileManager.default.fileExists(atPath: displayThumbURL.path),
+            "Display thumbnail must not exist before any edit"
+        )
 
         vm.setParameter(\.exposure, value: 2.0)
 
@@ -491,12 +497,71 @@ final class DevelopViewModelTests: XCTestCase {
         // to land.
         try await Task.sleep(nanoseconds: 1_500_000_000)
 
-        let hashAfter = try Self.sha256(of: thumbURL)
-        XCTAssertNotEqual(
-            hashBefore,
-            hashAfter,
-            "Cached thumbnail bytes must change after auto-save completes"
+        XCTAssertTrue(
+            FileManager.default.fileExists(atPath: displayThumbURL.path),
+            "Display thumbnail must be written after auto-save"
         )
+        let displayAfter = try Self.sha256(of: displayThumbURL)
+        XCTAssertNotEqual(
+            displayAfter,
+            masterBefore,
+            "Display thumbnail bytes must differ from pre-existing master"
+        )
+
+        let masterAfter = try Self.sha256(of: masterThumbURL)
+        XCTAssertEqual(
+            masterAfter,
+            masterBefore,
+            "Master thumbnail must be byte-identical — regen must never overwrite it (issue #186)"
+        )
+    }
+
+    /// Issue #186: when display-tier preview files exist (because a
+    /// previous regen wrote them), Develop must still drive its render
+    /// pipeline from the master preview. Otherwise the saved
+    /// `EditState` is applied on top of an already-edited display JPEG
+    /// and the look compounds on every entry into Develop.
+    ///
+    /// Distinct master/display dimensions let us prove which file was
+    /// loaded by inspecting `sourceImageSize`.
+    @MainActor
+    func testActivateReadsMasterPreviewEvenWhenDisplayFilesExist() async throws {
+        let catalog = try CatalogDatabase.inMemory()
+        let asset = TestFixtures.makeAsset(hash: "regen-master-read")
+        try catalog.insertAsset(asset)
+        // Master: 800×600. Display: 400×300 — deliberately smaller so a
+        // bug that reads display instead of master shows up as a smaller
+        // `sourceImageSize`.
+        try TestFixtures.placePreview(
+            for: asset,
+            cacheDirectory: tempCacheDir,
+            color: (r: 120, g: 120, b: 120),
+            width: 800,
+            height: 600
+        )
+        try TestFixtures.placeDisplayPreview(
+            for: asset,
+            cacheDirectory: tempCacheDir,
+            color: (r: 220, g: 220, b: 220),
+            width: 400,
+            height: 300
+        )
+        var saved = EditState()
+        saved.exposure = 1.0
+        _ = try catalog.saveEditState(saved, for: asset.id)
+
+        let store = PreviewStore(cacheDirectory: tempCacheDir)
+        let vm = DevelopViewModel(catalog: catalog, previewStore: store)
+
+        await vm.activate(assetId: asset.id)
+
+        let size = try XCTUnwrap(vm.sourceImageSize)
+        XCTAssertEqual(
+            size.width,
+            800,
+            "Develop must load the master preview (800×600), not the display preview (400×300)"
+        )
+        XCTAssertEqual(size.height, 600)
     }
 
     private static func sha256(of url: URL) throws -> String {

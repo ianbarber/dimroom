@@ -108,6 +108,7 @@ public struct ExportSheetView: View {
         let panel = NSOpenPanel()
         panel.canChooseFiles = false
         panel.canChooseDirectories = true
+        panel.canCreateDirectories = true
         panel.allowsMultipleSelection = false
         panel.message = "Choose export destination"
         panel.prompt = "Select"

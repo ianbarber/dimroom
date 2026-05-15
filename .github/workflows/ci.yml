@@ -138,6 +138,13 @@ jobs:
             exit 0
           fi
           bin/harness-zoom-flow.sh
+      - name: Run harness loupe zoom small flow
+        run: |
+          if [ ! -x bin/harness-loupe-zoom-small-flow.sh ]; then
+            echo "No harness loupe-zoom-small flow script yet — skipping."
+            exit 0
+          fi
+          bin/harness-loupe-zoom-small-flow.sh
       - name: Run harness export flow
         run: |
           if [ ! -x bin/harness-export-flow.sh ]; then

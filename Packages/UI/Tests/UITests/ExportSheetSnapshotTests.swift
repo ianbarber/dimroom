@@ -130,6 +130,29 @@ final class ExportSheetSnapshotTests: XCTestCase {
         }
     }
 
+    @MainActor
+    func test_export_progress_with_download_bar() async throws {
+        let coordinator = ExportCoordinator()
+        coordinator.setPhaseForTesting(.exporting)
+        coordinator.setProgressForTesting(current: 5, total: 12)
+        coordinator.setCurrentItemProgressForTesting(0.42)
+
+        let image = renderFixedPixelImage(
+            for: ExportProgressView(coordinator: coordinator),
+            size: CGSize(width: 1024, height: 768)
+        )
+
+        runAssertSnapshot {
+            assertSnapshot(
+                of: image,
+                as: .image(
+                    precision: Self.snapshotPrecision,
+                    perceptualPrecision: Self.snapshotPerceptualPrecision
+                )
+            )
+        }
+    }
+
     // MARK: - Completion alert body
 
     /// Snapshots the composed alert body for a partial-success export

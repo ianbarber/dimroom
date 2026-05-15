@@ -141,9 +141,15 @@ public final class DevelopViewModel: ObservableObject {
             // synchronous to keep its existing callers simple.
             let previewStore = self.previewStore
             let catalog = self.catalog
+            let originalFetcher = self.originalFetcher
             Task.detached {
                 guard let asset = try? catalog.fetchAsset(id: assetId) else { return }
-                await previewStore.regenerateWithEdit(for: asset, editState: next)
+                await Self.regenerateWithMasterRecovery(
+                    asset: asset,
+                    editState: next,
+                    previewStore: previewStore,
+                    originalFetcher: originalFetcher
+                )
             }
         }
         hasUnsavedChanges = false
@@ -397,7 +403,12 @@ public final class DevelopViewModel: ObservableObject {
             // subsequent `scheduleSave`.
             guard !Task.isCancelled else { return }
             if let asset = try? catalog.fetchAsset(id: assetId) {
-                await previewStore.regenerateWithEdit(for: asset, editState: next)
+                await Self.regenerateWithMasterRecovery(
+                    asset: asset,
+                    editState: next,
+                    previewStore: previewStore,
+                    originalFetcher: originalFetcher
+                )
             }
         }
     }
@@ -500,5 +511,31 @@ public final class DevelopViewModel: ObservableObject {
         saveTask = nil
         hasUnsavedChanges = false
         pendingUndoPrevious = nil
+    }
+
+    /// Run `regenerateWithEdit` for `asset`, transparently rebuilding
+    /// the master preview tier first if it has been evicted. When the
+    /// master JPEG is missing and an `OriginalFetcher` is wired, this
+    /// fetches the original and re-runs `PreviewStore.generate` to lay
+    /// the master back down before the regen reads it. Without a
+    /// fetcher (or when the fetch returns `nil`), the regen call falls
+    /// through to `PreviewStore.regenerateWithEdit`'s own missing-master
+    /// no-op so an offline / unreachable-Drive session is no worse than
+    /// today's behaviour.
+    ///
+    /// `nonisolated static` so the `deactivate` site can call it from a
+    /// `Task.detached` after `self` has escaped.
+    nonisolated static func regenerateWithMasterRecovery(
+        asset: Asset,
+        editState: EditState,
+        previewStore: PreviewStore,
+        originalFetcher: (any OriginalFetcher)?
+    ) async {
+        if previewStore.masterPreviewURL(for: asset) == nil,
+           let fetcher = originalFetcher,
+           let originalURL = await fetcher.fetchOriginal(assetId: asset.id) {
+            _ = try? await previewStore.generate(for: asset, sourceURL: originalURL)
+        }
+        await previewStore.regenerateWithEdit(for: asset, editState: editState)
     }
 }

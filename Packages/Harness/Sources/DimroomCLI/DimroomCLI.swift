@@ -55,6 +55,7 @@ struct DimroomCLI: ParsableCommand {
             DriveAuthStateCmd.self,
             SimulateDriveAuthFailure.self,
             PostMenuAction.self,
+            ReleaseHeldDownloads.self,
         ]
     )
 }
@@ -898,6 +899,20 @@ extension DimroomCLI {
 
         func run() throws {
             try runCommand(.simulateDriveAuthFailure, socket: socket)
+        }
+    }
+
+    struct ReleaseHeldDownloads: ParsableCommand {
+        static let configuration = CommandConfiguration(
+            commandName: "release-held-downloads",
+            abstract: "Drain every parked download in the hold-until-released harness stub (paired with DIMROOM_HARNESS_STUB_DOWNLOADER=hold-until-released)."
+        )
+
+        @Option(name: .long, help: "Path to the harness socket.")
+        var socket: String = HarnessServer.defaultSocketPath
+
+        func run() throws {
+            try runCommand(.releaseHeldDownloads, socket: socket)
         }
     }
 

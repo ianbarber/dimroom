@@ -1047,6 +1047,70 @@ final class LibraryViewModelTests: XCTestCase {
         XCTAssertFalse(vm.downloadingAssetIds.contains(assetId))
     }
 
+    /// Regression for the defer-clobber half of the same race covered by
+    /// `testFetchOriginalIfNeededDoesNotPolluteRefetchWithStaleTick`. Here
+    /// fetch N+1 starts on the same asset id *before* fetch N's `defer`
+    /// runs (concurrent in-flight). Without the
+    /// `currentFetchIdByAssetId[assetId] == fetchId` guard inside the
+    /// defer, N's cleanup would unconditionally remove `assetId` from
+    /// `downloadingAssetIds` and wipe `downloadProgressByAssetId[assetId]`,
+    /// even though those slots now belong to N+1.
+    @MainActor
+    func testFetchOriginalIfNeededConcurrentInFlightDoesNotClobberSlotOnFirstDefer() async throws {
+        let catalog = try CatalogDatabase.inMemory()
+        let store = PreviewStore(cacheDirectory: tempCacheDir)
+        let vm = LibraryViewModel(catalog: catalog, previewStore: store)
+
+        let resultURL = tempCacheDir.appendingPathComponent("orig.jpg")
+        let fetcher = ControlledProgressFetcher(resultURL: resultURL)
+        vm.originalFetcher = fetcher
+        let assetId = UUID()
+
+        // Fetch N: kick off, wait until it has reached the fetcher.
+        // Do NOT resolve yet.
+        let firstTask = Task { @MainActor in
+            await vm.fetchOriginalIfNeeded(assetId: assetId)
+        }
+        await fetcher.waitForStart()
+
+        // Fetch N+1: same asset id, kick off and wait until it has also
+        // reached the fetcher. This overwrites currentFetchIdByAssetId
+        // with N+1's id; N's defer must notice the mismatch when it runs.
+        let secondTask = Task { @MainActor in
+            await vm.fetchOriginalIfNeeded(assetId: assetId)
+        }
+        await fetcher.waitForStart()
+
+        // Publish a concrete progress value through N+1's closure so the
+        // survival assertion below discriminates: without this, the test
+        // would pass whether or not the defer-clobber regression returns.
+        let nextClosure = await fetcher.capturedProgress(at: 1)
+        nextClosure?(0.4)
+        await MainActor.run { }
+
+        // Resolve N (FIFO). Its defer runs and must hit the id mismatch
+        // and skip the clear.
+        await fetcher.resolveNext()
+        _ = await firstTask.value
+
+        XCTAssertTrue(
+            vm.downloadingAssetIds.contains(assetId),
+            "fetch N's defer must leave the in-flight slot in place for N+1"
+        )
+        XCTAssertEqual(
+            vm.downloadProgressByAssetId[assetId],
+            0.4,
+            "fetch N's defer must leave N+1's progress entry intact"
+        )
+
+        // Tear down: resolve N+1 so its task can exit; state should
+        // finally be clean.
+        await fetcher.resolveNext()
+        _ = await secondTask.value
+        XCTAssertFalse(vm.downloadingAssetIds.contains(assetId))
+        XCTAssertNil(vm.downloadProgressByAssetId[assetId])
+    }
+
     /// Sanity guard against over-gating: a tick fired *during* a fetch
     /// (same fetch-id) still lands in `downloadProgressByAssetId`. This
     /// is the happy-path that `testFetchOriginalIfNeededPublishesProgress`

@@ -37,6 +37,8 @@ final class EditStateTests: XCTestCase {
         XCTAssertEqual(state.sharpening, 0)
         XCTAssertEqual(state.vibrance, 0)
         XCTAssertEqual(state.saturation, 0)
+        XCTAssertEqual(state.luminanceNoiseReduction, 0)
+        XCTAssertEqual(state.chrominanceNoiseReduction, 0)
         XCTAssertEqual(state.vignetteAmount, 0)
         XCTAssertEqual(state.vignetteRoundness, 50)
         XCTAssertEqual(state.vignetteSoftness, 50)
@@ -58,6 +60,8 @@ final class EditStateTests: XCTestCase {
             sharpening: 65,
             vibrance: 10,
             saturation: -5,
+            luminanceNoiseReduction: 35,
+            chrominanceNoiseReduction: 55,
             vignetteAmount: -40,
             vignetteRoundness: 70,
             vignetteSoftness: 30,
@@ -98,6 +102,8 @@ final class EditStateTests: XCTestCase {
         XCTAssertEqual(decoded.contrast, 20)
         XCTAssertEqual(decoded.clarity, 10)
         XCTAssertEqual(decoded.sharpening, 0)
+        XCTAssertEqual(decoded.luminanceNoiseReduction, 0)
+        XCTAssertEqual(decoded.chrominanceNoiseReduction, 0)
         XCTAssertEqual(decoded.vignetteAmount, 0)
         XCTAssertEqual(decoded.vignetteRoundness, 50)
         XCTAssertEqual(decoded.vignetteSoftness, 50)
@@ -122,7 +128,8 @@ final class EditStateTests: XCTestCase {
         let json = String(data: data, encoding: .utf8)!
 
         // Keys should be alphabetically ordered
-        let keys = ["blacks", "clarity", "contrast", "exposure", "highlights",
+        let keys = ["blacks", "chrominanceNoiseReduction", "clarity", "contrast",
+                     "exposure", "highlights", "luminanceNoiseReduction",
                      "saturation", "shadows", "sharpening", "temperature", "tint",
                      "vibrance", "vignetteAmount", "vignetteRoundness", "vignetteSoftness",
                      "whites"]

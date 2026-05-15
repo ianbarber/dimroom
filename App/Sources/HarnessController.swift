@@ -337,11 +337,12 @@ final class HarnessController: @unchecked Sendable {
                 "configured": .bool(false),
             ]))
         }
-        let snapshot: (status: String, email: String?) = await MainActor.run {
+        let snapshot: (status: String, email: String?, needsReauthMessage: String?) = await MainActor.run {
+            let message = driveAuthState.needsReauthMessage
             switch driveAuthState.status {
-            case .disconnected: return ("disconnected", nil)
-            case .connecting: return ("connecting", nil)
-            case .connected(let email): return ("connected", email)
+            case .disconnected: return ("disconnected", nil, message)
+            case .connecting: return ("connecting", nil, message)
+            case .connected(let email): return ("connected", email, message)
             }
         }
         var payload: [String: AnyCodableValue] = [
@@ -352,6 +353,11 @@ final class HarnessController: @unchecked Sendable {
             payload["email"] = .string(email)
         } else {
             payload["email"] = .null
+        }
+        if let message = snapshot.needsReauthMessage {
+            payload["needsReauthMessage"] = .string(message)
+        } else {
+            payload["needsReauthMessage"] = .null
         }
         return .ok(data: .dictionary(payload))
     }

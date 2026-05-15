@@ -57,6 +57,20 @@ func editParameterDescription(previous: EditState?, next: EditState) -> String? 
         changes.append(Change(label: "Crop"))
     }
 
+    // Curves: each channel reports as a single labelled change.
+    if base.toneCurvePoints != next.toneCurvePoints {
+        changes.append(Change(label: "Luminance Curve"))
+    }
+    if base.redCurvePoints != next.redCurvePoints {
+        changes.append(Change(label: "Red Curve"))
+    }
+    if base.greenCurvePoints != next.greenCurvePoints {
+        changes.append(Change(label: "Green Curve"))
+    }
+    if base.blueCurvePoints != next.blueCurvePoints {
+        changes.append(Change(label: "Blue Curve"))
+    }
+
     guard changes.count == 1 else { return nil }
     return changes[0].label
 }

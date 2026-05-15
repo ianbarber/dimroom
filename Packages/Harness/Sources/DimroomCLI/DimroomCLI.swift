@@ -52,6 +52,7 @@ struct DimroomCLI: ParsableCommand {
             ConnectDrive.self,
             DisconnectDrive.self,
             DriveAuthStateCmd.self,
+            PostMenuAction.self,
         ]
     )
 }
@@ -864,6 +865,23 @@ extension DimroomCLI {
 
         func run() throws {
             try runCommand(.driveAuthState, socket: socket)
+        }
+    }
+
+    struct PostMenuAction: ParsableCommand {
+        static let configuration = CommandConfiguration(
+            commandName: "post-menu-action",
+            abstract: "Fire one of the app's menu-attached keyboard actions by name (mode-library, mode-loupe, mode-develop, set-rating-1…5, clear-rating, rotate-cw, rotate-ccw, zoom-toggle, zoom-reset, toggle-histogram, select-next, select-previous, select-up, select-down, select-all-visible)."
+        )
+
+        @Argument(help: "Action name; see abstract for the whitelist.")
+        var name: String
+
+        @Option(name: .long, help: "Path to the harness socket.")
+        var socket: String = HarnessServer.defaultSocketPath
+
+        func run() throws {
+            try runCommand(.postMenuAction(name: name), socket: socket)
         }
     }
 }

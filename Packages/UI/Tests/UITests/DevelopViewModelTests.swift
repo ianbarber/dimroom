@@ -614,6 +614,123 @@ final class DevelopViewModelTests: XCTestCase {
         )
     }
 
+    // MARK: - Master preview eviction recovery (issue #211)
+
+    /// After PR #209 split the cache into master + display tiers, an
+    /// external removal of the master JPEG would leave `regenerateWithEdit`
+    /// silently no-opping — the visible display thumbnail would stay frozen
+    /// at the previously-edited bytes forever. With an `OriginalFetcher`
+    /// wired in, the save-time regen must transparently fetch the original,
+    /// rebuild the master, and re-render the display tier.
+    @MainActor
+    func testScheduleSaveRebuildsMasterWhenEvicted() async throws {
+        let (vm, asset, _) = try await makeViewModelWithAsset(hash: "regen-recover-master")
+
+        let shard = tempCacheDir
+            .appendingPathComponent(String(asset.contentHash.prefix(2)), isDirectory: true)
+        let masterPreviewURL = shard.appendingPathComponent("\(asset.contentHash).preview.jpg")
+        let displayPreviewURL = shard.appendingPathComponent("\(asset.contentHash).edit.preview.jpg")
+
+        // Stage an "original" JPEG that the recovery fetcher will return,
+        // so `PreviewStore.generate` has something to decode when the
+        // master rebuild kicks in.
+        let originalsDir = tempCacheDir.appendingPathComponent("originals", isDirectory: true)
+        try FileManager.default.createDirectory(at: originalsDir, withIntermediateDirectories: true)
+        let originalURL = originalsDir.appendingPathComponent("\(asset.contentHash).jpg")
+        try TestFixtures.writeSolidJPEG(
+            width: 800, height: 600,
+            color: (r: 200, g: 50, b: 50),
+            to: originalURL
+        )
+
+        let fetcher = RecoveryFetcher(originalURL: originalURL)
+        vm.attach(originalFetcher: fetcher)
+
+        await vm.activate(assetId: asset.id)
+
+        // First edit: produces a display tier from the placed master.
+        vm.setParameter(\.exposure, value: 2.0)
+        try await Task.sleep(nanoseconds: 1_500_000_000)
+        XCTAssertTrue(
+            FileManager.default.fileExists(atPath: displayPreviewURL.path),
+            "Display preview must exist after the initial edit + save"
+        )
+        let displayBytesBeforeEviction = try Self.sha256(of: displayPreviewURL)
+
+        // Evict the master while leaving the display tier intact —
+        // this is the latent state today's `regenerateWithEdit` would
+        // be unable to escape from on its own.
+        try FileManager.default.removeItem(at: masterPreviewURL)
+        XCTAssertFalse(FileManager.default.fileExists(atPath: masterPreviewURL.path))
+
+        // A second edit. Without recovery, this would silently no-op
+        // and `displayPreviewURL` would still hash to the
+        // exposure=2.0 bytes.
+        vm.setParameter(\.exposure, value: 1.0)
+        try await Task.sleep(nanoseconds: 1_500_000_000)
+
+        XCTAssertTrue(
+            FileManager.default.fileExists(atPath: masterPreviewURL.path),
+            "Master preview must be rebuilt by the recovery fetch"
+        )
+        XCTAssertTrue(
+            FileManager.default.fileExists(atPath: displayPreviewURL.path),
+            "Display preview must still exist after the rebuild + regen"
+        )
+        let displayBytesAfterRecovery = try Self.sha256(of: displayPreviewURL)
+        XCTAssertNotEqual(
+            displayBytesBeforeEviction,
+            displayBytesAfterRecovery,
+            "Display preview must be rewritten with the new EditState — not stale exposure=2.0 bytes"
+        )
+
+        let calls = await fetcher.callCount
+        XCTAssertEqual(
+            calls,
+            1,
+            "Recovery must invoke the fetcher exactly once for the missing master"
+        )
+    }
+
+    /// Issue #211 acceptance: when no fetcher is wired (offline /
+    /// pre-Drive-auth), an evicted-master save must degrade gracefully
+    /// — the silent no-op behaviour today's `regenerateWithEdit` exhibits
+    /// stays the floor, not the ceiling. This protects the no-original
+    /// path the issue explicitly calls out.
+    @MainActor
+    func testScheduleSaveDegradesGracefullyWhenFetcherUnavailable() async throws {
+        let (vm, asset, _) = try await makeViewModelWithAsset(hash: "regen-recover-no-fetcher")
+
+        let shard = tempCacheDir
+            .appendingPathComponent(String(asset.contentHash.prefix(2)), isDirectory: true)
+        let masterPreviewURL = shard.appendingPathComponent("\(asset.contentHash).preview.jpg")
+        let displayPreviewURL = shard.appendingPathComponent("\(asset.contentHash).edit.preview.jpg")
+
+        // Note: no fetcher attached — the VM's `originalFetcher` stays nil.
+
+        await vm.activate(assetId: asset.id)
+        vm.setParameter(\.exposure, value: 2.0)
+        try await Task.sleep(nanoseconds: 1_500_000_000)
+        XCTAssertTrue(FileManager.default.fileExists(atPath: displayPreviewURL.path))
+        let displayBytesBefore = try Self.sha256(of: displayPreviewURL)
+
+        try FileManager.default.removeItem(at: masterPreviewURL)
+
+        vm.setParameter(\.exposure, value: 1.0)
+        try await Task.sleep(nanoseconds: 1_500_000_000)
+
+        XCTAssertFalse(
+            FileManager.default.fileExists(atPath: masterPreviewURL.path),
+            "Without a fetcher, the master must not be rebuilt — recovery only kicks in when a fetcher is wired"
+        )
+        let displayBytesAfter = try Self.sha256(of: displayPreviewURL)
+        XCTAssertEqual(
+            displayBytesBefore,
+            displayBytesAfter,
+            "Display preview must be untouched (silent no-op) when no recovery path exists"
+        )
+    }
+
     private static func sha256(of url: URL) throws -> String {
         let data = try Data(contentsOf: url)
         let digest = SHA256.hash(data: data)
@@ -858,6 +975,26 @@ private actor ProgressFetcher: OriginalFetcher {
         await MainActor.run { }
         await release.wait()
         return nil
+    }
+}
+
+/// Returns a fixed local URL on every call. Used by issue #211's master
+/// preview eviction recovery test, where the recovery path expects the
+/// fetcher to hand back a path that `PreviewStore.generate` can decode.
+private actor RecoveryFetcher: OriginalFetcher {
+    let originalURL: URL
+    private(set) var callCount = 0
+
+    init(originalURL: URL) {
+        self.originalURL = originalURL
+    }
+
+    func fetchOriginal(
+        assetId: UUID,
+        progress: (@Sendable (Double) -> Void)?
+    ) async -> URL? {
+        callCount += 1
+        return originalURL
     }
 }
 

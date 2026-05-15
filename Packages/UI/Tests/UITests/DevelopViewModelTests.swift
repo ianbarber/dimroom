@@ -624,6 +624,66 @@ final class DevelopViewModelTests: XCTestCase {
         )
     }
 
+    /// Companion to `testReloadEditStateRegeneratesThumbnail`: that test
+    /// covers the identity branch of `PreviewStore.regenerateWithEdit`,
+    /// which only has to *delete* the display thumb. The undo replay UX
+    /// also has to handle non-identity → non-identity transitions (e.g.
+    /// undoing one slider tweak to land on a different non-identity
+    /// state), where the **write** branch fires and must rebuild the
+    /// cached bytes to match the replayed state. This test asserts the
+    /// display thumb's bytes actually change between two different
+    /// non-identity states, not just that the file is present.
+    @MainActor
+    func testReloadEditStateRegeneratesDisplayThumbBetweenNonIdentityStates() async throws {
+        let (vm, asset, catalog) = try await makeViewModelWithAsset(hash: "regen-thumb-onreload-nonidentity")
+        try TestFixtures.placeThumbnail(
+            for: asset,
+            cacheDirectory: tempCacheDir,
+            color: (r: 120, g: 120, b: 120)
+        )
+
+        await vm.activate(assetId: asset.id)
+
+        let displayThumbURL = tempCacheDir
+            .appendingPathComponent(String(asset.contentHash.prefix(2)), isDirectory: true)
+            .appendingPathComponent("\(asset.contentHash).edit.thumb.jpg")
+
+        // First non-identity state: drive an edit + auto-save so the
+        // display thumb is laid down with the "+2 EV" look. Wait past
+        // the 500ms debounce + regen.
+        vm.setParameter(\.exposure, value: 2.0)
+        try await Task.sleep(nanoseconds: 1_500_000_000)
+
+        XCTAssertTrue(
+            FileManager.default.fileExists(atPath: displayThumbURL.path),
+            "Display thumbnail must be written after the first edit's auto-save"
+        )
+        let hashAfterFirstEdit = try Self.sha256(of: displayThumbURL)
+
+        // Mimic an undo-style replay that lands on a *different*
+        // non-identity state: write the new EditState directly to the
+        // catalog (UndoStack's job), then call reloadEditState. The
+        // detached regen inside reloadEditState hits the write branch
+        // of PreviewStore.regenerateWithEdit (not the delete branch),
+        // so the display thumb must be re-rendered in place.
+        var replayed = EditState()
+        replayed.exposure = -1.0
+        _ = try catalog.saveEditState(replayed, for: asset.id)
+        await vm.reloadEditState(for: asset.id)
+        try await Task.sleep(nanoseconds: 1_500_000_000)
+
+        XCTAssertTrue(
+            FileManager.default.fileExists(atPath: displayThumbURL.path),
+            "Display thumbnail must still exist after non-identity replay — write branch should run, not delete"
+        )
+        let hashAfterReplay = try Self.sha256(of: displayThumbURL)
+        XCTAssertNotEqual(
+            hashAfterReplay,
+            hashAfterFirstEdit,
+            "Display thumbnail bytes must change to match the replayed state — undo replay UX requires Library to reflect the replayed look, not the previous edit"
+        )
+    }
+
     // MARK: - Master preview eviction recovery (issue #211)
 
     /// After PR #209 split the cache into master + display tiers, an

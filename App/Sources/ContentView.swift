@@ -13,6 +13,11 @@ struct ContentView: View {
     @ObservedObject var uploadCoordinator: UploadCoordinator
     @ObservedObject var undoStack: UndoStack
     let catalog: CatalogDatabase?
+    /// Fetcher used by the export flow to pull originals from Drive when
+    /// an asset has been evicted from the local cache. `nil` outside the
+    /// fully-wired production app (e.g. early-init before
+    /// `applicationDidFinishLaunching` finishes).
+    let originalFetcher: (any OriginalFetcher)?
     @State private var showExportSheet = false
     /// True while the "Export all N photos?" confirmation is on screen.
     /// Set when File → Export is triggered with no selection / filter
@@ -95,7 +100,7 @@ struct ContentView: View {
             )
             ExportSheetView(
                 assetCount: scopedAssets.count,
-                onExport: { [catalog] destinationURL, format, jpegQuality, applyEdits in
+                onExport: { [catalog, originalFetcher] destinationURL, format, jpegQuality, applyEdits in
                     showExportSheet = false
                     guard let catalog else { return }
                     Task {
@@ -105,7 +110,8 @@ struct ContentView: View {
                             format: format,
                             jpegQuality: jpegQuality,
                             applyEdits: applyEdits,
-                            destinationDirectory: destinationURL
+                            destinationDirectory: destinationURL,
+                            originalFetcher: originalFetcher
                         )
                     }
                 },

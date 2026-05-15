@@ -147,6 +147,53 @@ final class DevelopSnapshotTests: XCTestCase {
         }
     }
 
+    /// Develop view on a Drive-only asset, frozen mid-download: the
+    /// indicator should overlay the preview area and the slider sidebar
+    /// should be disabled (greyed). Mirrors the holding-fetcher pattern
+    /// used by `LoupeSnapshotTests` so the in-flight state is captured
+    /// deterministically.
+    @MainActor
+    func test_develop_with_download_overlay() async throws {
+        let catalog = try CatalogDatabase.inMemory()
+        var asset = TestFixtures.makeAsset(hash: "snap-download")
+        asset.driveFileId = "drive-id"
+        try catalog.insertAsset(asset)
+        try TestFixtures.placePreview(
+            for: asset,
+            cacheDirectory: tempCacheDir,
+            color: (r: 80, g: 110, b: 160),
+            width: 800,
+            height: 600
+        )
+        let store = PreviewStore(cacheDirectory: tempCacheDir)
+
+        let release = AsyncBarrier()
+        let fetcher = HoldingProgressFetcher(tick: 0.42, release: release)
+        let vm = DevelopViewModel(
+            catalog: catalog,
+            previewStore: store,
+            originalFetcher: fetcher
+        )
+
+        await vm.activate(assetId: asset.id)
+        // Initial render + download flag propagation.
+        try await Task.sleep(nanoseconds: 300_000_000)
+
+        let image = renderFixedPixelImage(for: DevelopView(viewModel: vm))
+
+        runAssertSnapshot {
+            assertSnapshot(
+                of: image,
+                as: .image(
+                    precision: Self.snapshotPrecision,
+                    perceptualPrecision: Self.snapshotPerceptualPrecision
+                )
+            )
+        }
+
+        await release.signal()
+    }
+
     /// Develop view with no selected asset — placeholder state.
     @MainActor
     func test_develop_empty_placeholder() async throws {
@@ -188,5 +235,51 @@ final class DevelopSnapshotTests: XCTestCase {
         // Let the initial render publish the NSImage.
         try await Task.sleep(nanoseconds: 300_000_000)
         return vm
+    }
+}
+
+/// Stub `OriginalFetcher` that fires one progress tick then suspends
+/// until `release.signal()` so a snapshot can capture the Develop view
+/// in its mid-download state.
+private actor HoldingProgressFetcher: OriginalFetcher {
+    private let tick: Double
+    private let release: AsyncBarrier
+
+    init(tick: Double, release: AsyncBarrier) {
+        self.tick = tick
+        self.release = release
+    }
+
+    func fetchOriginal(
+        assetId: UUID,
+        progress: (@Sendable (Double) -> Void)?
+    ) async -> URL? {
+        progress?(tick)
+        // Allow the @MainActor progress callback to run before the
+        // snapshot reads `downloadProgress`.
+        await MainActor.run { }
+        await release.wait()
+        return nil
+    }
+}
+
+private actor AsyncBarrier {
+    private var hasSignalled = false
+    private var continuations: [CheckedContinuation<Void, Never>] = []
+
+    func wait() async {
+        if hasSignalled { return }
+        await withCheckedContinuation { continuation in
+            continuations.append(continuation)
+        }
+    }
+
+    func signal() {
+        guard !hasSignalled else { return }
+        hasSignalled = true
+        for continuation in continuations {
+            continuation.resume()
+        }
+        continuations.removeAll()
     }
 }

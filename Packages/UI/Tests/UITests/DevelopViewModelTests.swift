@@ -609,6 +609,147 @@ final class DevelopViewModelTests: XCTestCase {
         XCTAssertTrue(vm.showHistogram)
     }
 
+    // MARK: - Original fetch on activate
+
+    /// Asset has a present localPath → no fetch, no download flag. This
+    /// is the digital-camera-import path; we must not pull bytes from
+    /// Drive on every Develop entry for files already on disk.
+    @MainActor
+    func testActivateWithLocalPathDoesNotFetch() async throws {
+        let catalog = try CatalogDatabase.inMemory()
+        // Stage a real file on disk so the localPath check passes.
+        let originalsDir = tempCacheDir.appendingPathComponent("originals", isDirectory: true)
+        try FileManager.default.createDirectory(at: originalsDir, withIntermediateDirectories: true)
+        let originalURL = originalsDir.appendingPathComponent("local.jpg")
+        try Data().write(to: originalURL)
+
+        var asset = TestFixtures.makeAsset(hash: "has-local")
+        asset.localPath = originalURL.path
+        asset.driveFileId = "drive-id"
+        try catalog.insertAsset(asset)
+        try TestFixtures.placePreview(for: asset, cacheDirectory: tempCacheDir, color: (1, 2, 3))
+        let store = PreviewStore(cacheDirectory: tempCacheDir)
+
+        let fetcher = CountingFetcher()
+        let vm = DevelopViewModel(catalog: catalog, previewStore: store, originalFetcher: fetcher)
+
+        await vm.activate(assetId: asset.id)
+        try await Task.sleep(nanoseconds: 100_000_000)
+
+        XCTAssertFalse(vm.isDownloadingOriginal)
+        XCTAssertNil(vm.downloadProgress)
+        let calls = await fetcher.callCount
+        XCTAssertEqual(
+            calls,
+            0,
+            "activate must not invoke the fetcher when localPath is present on disk"
+        )
+    }
+
+    /// Drive-only asset (localPath nil, driveFileId set) → activate kicks
+    /// off a fetch, flips `isDownloadingOriginal`, propagates ticks via
+    /// `downloadProgress`, then clears the flag once the fetcher returns.
+    @MainActor
+    func testActivateWithDriveOnlyAssetTriggersFetchAndDownloadingFlag() async throws {
+        let catalog = try CatalogDatabase.inMemory()
+        var asset = TestFixtures.makeAsset(hash: "drive-only")
+        asset.driveFileId = "drive-id"
+        try catalog.insertAsset(asset)
+        try TestFixtures.placePreview(for: asset, cacheDirectory: tempCacheDir, color: (1, 2, 3))
+        let store = PreviewStore(cacheDirectory: tempCacheDir)
+
+        let release = AsyncBarrier()
+        let fetcher = ProgressFetcher(tick: 0.4, release: release)
+        let vm = DevelopViewModel(catalog: catalog, previewStore: store, originalFetcher: fetcher)
+
+        await vm.activate(assetId: asset.id)
+        // Give the spawned download task and its progress callback a
+        // chance to flip the @Published flags on the main actor.
+        try await Task.sleep(nanoseconds: 200_000_000)
+
+        XCTAssertTrue(vm.isDownloadingOriginal)
+        XCTAssertEqual(vm.downloadProgress ?? 0, 0.4, accuracy: 0.001)
+
+        await release.signal()
+        // Allow the fetcher to return and the finally-block to run.
+        try await Task.sleep(nanoseconds: 200_000_000)
+
+        XCTAssertFalse(vm.isDownloadingOriginal)
+        XCTAssertNil(vm.downloadProgress)
+    }
+
+    /// Fetcher returns nil (Drive unreachable). The flag must clear so
+    /// the UI re-enables and degrades gracefully to preview-only.
+    @MainActor
+    func testActivateWithFetchFailureDegradesGracefully() async throws {
+        let catalog = try CatalogDatabase.inMemory()
+        var asset = TestFixtures.makeAsset(hash: "fetch-fail")
+        asset.driveFileId = "drive-id"
+        try catalog.insertAsset(asset)
+        try TestFixtures.placePreview(for: asset, cacheDirectory: tempCacheDir, color: (1, 2, 3))
+        let store = PreviewStore(cacheDirectory: tempCacheDir)
+
+        let fetcher = FailingFetcher()
+        let vm = DevelopViewModel(catalog: catalog, previewStore: store, originalFetcher: fetcher)
+
+        await vm.activate(assetId: asset.id)
+        try await Task.sleep(nanoseconds: 200_000_000)
+
+        XCTAssertFalse(vm.isDownloadingOriginal)
+        XCTAssertNil(vm.downloadProgress)
+        XCTAssertEqual(vm.currentAssetId, asset.id)
+    }
+
+    /// `deactivate()` while a fetch is in flight must cancel the task
+    /// and clear both flags so a subsequent activate starts from a
+    /// clean state.
+    @MainActor
+    func testDeactivateClearsDownloadState() async throws {
+        let catalog = try CatalogDatabase.inMemory()
+        var asset = TestFixtures.makeAsset(hash: "deact-download")
+        asset.driveFileId = "drive-id"
+        try catalog.insertAsset(asset)
+        try TestFixtures.placePreview(for: asset, cacheDirectory: tempCacheDir, color: (1, 2, 3))
+        let store = PreviewStore(cacheDirectory: tempCacheDir)
+
+        let release = AsyncBarrier()
+        let fetcher = ProgressFetcher(tick: 0.2, release: release)
+        let vm = DevelopViewModel(catalog: catalog, previewStore: store, originalFetcher: fetcher)
+
+        await vm.activate(assetId: asset.id)
+        try await Task.sleep(nanoseconds: 200_000_000)
+        XCTAssertTrue(vm.isDownloadingOriginal)
+
+        vm.deactivate()
+
+        XCTAssertFalse(vm.isDownloadingOriginal)
+        XCTAssertNil(vm.downloadProgress)
+        XCTAssertNil(vm.currentAssetId)
+        await release.signal()
+    }
+
+    /// No driveFileId and no localPath → asset isn't Drive-backed yet
+    /// (e.g. pre-upload). The fetcher must not be invoked because
+    /// there's nothing to fetch.
+    @MainActor
+    func testActivateWithoutDriveFileIdDoesNotFetch() async throws {
+        let catalog = try CatalogDatabase.inMemory()
+        let asset = TestFixtures.makeAsset(hash: "no-drive")
+        try catalog.insertAsset(asset)
+        try TestFixtures.placePreview(for: asset, cacheDirectory: tempCacheDir, color: (1, 2, 3))
+        let store = PreviewStore(cacheDirectory: tempCacheDir)
+
+        let fetcher = CountingFetcher()
+        let vm = DevelopViewModel(catalog: catalog, previewStore: store, originalFetcher: fetcher)
+
+        await vm.activate(assetId: asset.id)
+        try await Task.sleep(nanoseconds: 100_000_000)
+
+        XCTAssertFalse(vm.isDownloadingOriginal)
+        let calls = await fetcher.callCount
+        XCTAssertEqual(calls, 0)
+    }
+
     // MARK: - Helper
 
     /// Build a viewmodel with an in-memory catalog and a single asset that
@@ -630,5 +771,75 @@ final class DevelopViewModelTests: XCTestCase {
         let store = PreviewStore(cacheDirectory: tempCacheDir)
         let vm = DevelopViewModel(catalog: catalog, previewStore: store)
         return (vm, asset, catalog)
+    }
+}
+
+/// Counts `fetchOriginal` invocations so tests can prove no fetch
+/// happens for already-local assets.
+private actor CountingFetcher: OriginalFetcher {
+    private(set) var callCount = 0
+
+    func fetchOriginal(
+        assetId: UUID,
+        progress: (@Sendable (Double) -> Void)?
+    ) async -> URL? {
+        callCount += 1
+        return nil
+    }
+}
+
+/// Fetcher that emits a single progress tick, suspends on `release`,
+/// then returns `nil`. Used to inspect intermediate `isDownloadingOriginal`
+/// state while a download is "in flight".
+private actor ProgressFetcher: OriginalFetcher {
+    private let tick: Double
+    private let release: AsyncBarrier
+
+    init(tick: Double, release: AsyncBarrier) {
+        self.tick = tick
+        self.release = release
+    }
+
+    func fetchOriginal(
+        assetId: UUID,
+        progress: (@Sendable (Double) -> Void)?
+    ) async -> URL? {
+        progress?(tick)
+        await MainActor.run { }
+        await release.wait()
+        return nil
+    }
+}
+
+/// Returns nil immediately to simulate Drive-unreachable.
+private actor FailingFetcher: OriginalFetcher {
+    func fetchOriginal(
+        assetId: UUID,
+        progress: (@Sendable (Double) -> Void)?
+    ) async -> URL? {
+        nil
+    }
+}
+
+/// One-shot async barrier. Mirrors the helper used by LoupeSnapshotTests
+/// for the same "freeze the fetcher mid-download" pattern.
+private actor AsyncBarrier {
+    private var hasSignalled = false
+    private var continuations: [CheckedContinuation<Void, Never>] = []
+
+    func wait() async {
+        if hasSignalled { return }
+        await withCheckedContinuation { continuation in
+            continuations.append(continuation)
+        }
+    }
+
+    func signal() {
+        guard !hasSignalled else { return }
+        hasSignalled = true
+        for continuation in continuations {
+            continuation.resume()
+        }
+        continuations.removeAll()
     }
 }

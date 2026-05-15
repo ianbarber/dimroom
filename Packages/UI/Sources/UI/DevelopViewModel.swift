@@ -22,6 +22,15 @@ public final class DevelopViewModel: ObservableObject {
     /// the current values). The Develop view keys its slider animation
     /// off this so only replays tween — interactive drags don't.
     @Published public private(set) var replaySequence: Int = 0
+    /// True while a Drive-backed original is being fetched on Develop
+    /// entry. Sliders are gated on this so a user can't push edits
+    /// against an asset whose full-res bytes aren't on disk yet — the
+    /// export pipeline would then have to fall back to the preview.
+    @Published public private(set) var isDownloadingOriginal: Bool = false
+    /// Streaming download progress (0.0...1.0) for the in-flight original
+    /// fetch, or `nil` when no fetch is active or the fetcher does not
+    /// report progress (cached hit, unknown `Content-Length`).
+    @Published public private(set) var downloadProgress: Double?
     public private(set) var currentAssetId: UUID?
 
     /// Child view model driving the interactive crop overlay. Owned
@@ -31,10 +40,12 @@ public final class DevelopViewModel: ObservableObject {
 
     private var catalog: CatalogDatabase
     private var previewStore: PreviewStore
+    private var originalFetcher: (any OriginalFetcher)?
     private var sourceImage: CIImage?
     private let ciContext = CIContext()
     private var renderTask: Task<Void, Never>?
     private var saveTask: Task<Void, Never>?
+    private var downloadTask: Task<Void, Never>?
     private var hasUnsavedChanges: Bool = false
     /// `EditState` snapshot taken the first time `setParameter` /
     /// `commitCrop` runs in a debounce window. Used as the `previous`
@@ -43,9 +54,14 @@ public final class DevelopViewModel: ObservableObject {
     private var pendingUndoPrevious: EditState?
     private weak var undoStack: UndoStack?
 
-    public init(catalog: CatalogDatabase, previewStore: PreviewStore) {
+    public init(
+        catalog: CatalogDatabase,
+        previewStore: PreviewStore,
+        originalFetcher: (any OriginalFetcher)? = nil
+    ) {
         self.catalog = catalog
         self.previewStore = previewStore
+        self.originalFetcher = originalFetcher
     }
 
     /// Late-bind the shared undo stack so edit saves show up as Cmd+Z
@@ -53,6 +69,13 @@ public final class DevelopViewModel: ObservableObject {
     /// run without one.
     public func attach(undoStack: UndoStack) {
         self.undoStack = undoStack
+    }
+
+    /// Late-bind the originals fetcher so the SwiftUI tree can construct
+    /// the view model before the app finishes wiring `OriginalsCoordinator`.
+    /// Matches how `LibraryViewModel.originalFetcher` is assigned post-init.
+    public func attach(originalFetcher: any OriginalFetcher) {
+        self.originalFetcher = originalFetcher
     }
 
     /// Size of the preview image currently driving the Develop pipeline,
@@ -83,6 +106,7 @@ public final class DevelopViewModel: ObservableObject {
             hasUnsavedChanges = false
             pendingUndoPrevious = nil
             hydrateUndoStack(for: assetId)
+            fetchOriginalIfNeeded(for: asset)
             return
         }
 
@@ -93,13 +117,18 @@ public final class DevelopViewModel: ObservableObject {
         pendingUndoPrevious = nil
         hydrateUndoStack(for: assetId)
         triggerRender()
+        fetchOriginalIfNeeded(for: asset)
     }
 
     public func deactivate() {
         renderTask?.cancel()
         saveTask?.cancel()
+        downloadTask?.cancel()
         renderTask = nil
         saveTask = nil
+        downloadTask = nil
+        isDownloadingOriginal = false
+        downloadProgress = nil
 
         if hasUnsavedChanges, let assetId = currentAssetId {
             let previous = pendingUndoPrevious
@@ -405,6 +434,51 @@ public final class DevelopViewModel: ObservableObject {
             bounded = pairs
         }
         stack.hydrateEditHistory(pairs: bounded)
+    }
+
+    /// Kick off an on-demand original fetch when the asset has a Drive
+    /// id but no usable local file. The preview-driven Develop pipeline
+    /// keeps running while this is in flight; sliders are gated on
+    /// `isDownloadingOriginal` so the user can't queue edits against an
+    /// asset whose full-res bytes aren't on disk yet (export would then
+    /// fall back to the preview, losing resolution). No-op if no
+    /// fetcher is attached, the asset already has a present local path,
+    /// or there's no `driveFileId` to fetch from.
+    private func fetchOriginalIfNeeded(for asset: Asset) {
+        guard let fetcher = originalFetcher else { return }
+        if let localPath = asset.localPath,
+           FileManager.default.fileExists(atPath: localPath) {
+            return
+        }
+        guard asset.driveFileId != nil else { return }
+
+        let assetId = asset.id
+        isDownloadingOriginal = true
+        downloadProgress = nil
+
+        downloadTask?.cancel()
+        downloadTask = Task { [weak self] in
+            let progress: @Sendable (Double) -> Void = { [weak self] fraction in
+                Task { @MainActor [weak self] in
+                    guard let self else { return }
+                    guard self.isDownloadingOriginal,
+                          self.currentAssetId == assetId else { return }
+                    let clamped = min(max(fraction, 0), 1)
+                    let existing = self.downloadProgress ?? 0
+                    if clamped >= existing {
+                        self.downloadProgress = clamped
+                    }
+                }
+            }
+            _ = await fetcher.fetchOriginal(assetId: assetId, progress: progress)
+            await MainActor.run { [weak self] in
+                guard let self else { return }
+                guard !Task.isCancelled else { return }
+                guard self.currentAssetId == assetId else { return }
+                self.isDownloadingOriginal = false
+                self.downloadProgress = nil
+            }
+        }
     }
 
     /// Drop any in-flight debounced save + its captured undo baseline.

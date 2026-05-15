@@ -24,7 +24,8 @@ struct DimroomApp: App {
                 exportCoordinator: appDelegate.exportCoordinator,
                 uploadCoordinator: appDelegate.uploadCoordinator,
                 undoStack: appDelegate.undoStack,
-                catalog: appDelegate.catalog
+                catalog: appDelegate.catalog,
+                originalFetcher: appDelegate.originalFetcher
             )
         }
         .commands {
@@ -423,6 +424,12 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     private var catalogUploader: DriveCatalogUploader?
     private var driveFileIdStore: FileSystemDriveFileIdStore?
 
+    /// Public read-only view of the wired-up `OriginalsCoordinator` so
+    /// `ContentView` can route export-with-edits through it. Returns
+    /// `nil` before `applicationDidFinishLaunching` has wired the
+    /// originals cache.
+    var originalFetcher: (any OriginalFetcher)? { originalsCoordinator }
+
     func applicationDidFinishLaunching(_ notification: Notification) {
         let args = ProcessInfo.processInfo.arguments
 
@@ -513,6 +520,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             ) {
                 coordinator.attach(cache: cache)
                 libraryViewModel.originalFetcher = coordinator
+                developViewModel.attach(originalFetcher: coordinator)
                 originalsCoordinator = coordinator
             }
         }
@@ -570,7 +578,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
                     exportCoordinator: exportCoordinator,
                     uploadCoordinator: uploadCoordinator,
                     undoStack: undoStack,
-                    catalog: resolvedCatalog
+                    catalog: resolvedCatalog,
+                    originalFetcher: originalsCoordinator
                 )
             )
             window.title = "Dimroom"

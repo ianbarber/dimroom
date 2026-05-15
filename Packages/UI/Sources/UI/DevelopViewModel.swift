@@ -466,6 +466,16 @@ public final class DevelopViewModel: ObservableObject {
     /// fetcher is attached, the asset already has a present local path,
     /// or there's no `driveFileId` to fetch from.
     private func fetchOriginalIfNeeded(for asset: Asset) {
+        // Cancel and reset before any early-return: an A→B activation
+        // where B has a local file (or no driveFileId) must not leave
+        // A's task running with `isDownloadingOriginal` pinned true —
+        // A's tail can't clear it because the closure gates on
+        // `currentAssetId == assetId`, which is now B's id. See #204.
+        downloadTask?.cancel()
+        downloadTask = nil
+        isDownloadingOriginal = false
+        downloadProgress = nil
+
         guard let fetcher = originalFetcher else { return }
         if let localPath = asset.localPath,
            FileManager.default.fileExists(atPath: localPath) {
@@ -475,9 +485,7 @@ public final class DevelopViewModel: ObservableObject {
 
         let assetId = asset.id
         isDownloadingOriginal = true
-        downloadProgress = nil
 
-        downloadTask?.cancel()
         downloadTask = Task { [weak self] in
             let progress: @Sendable (Double) -> Void = { [weak self] fraction in
                 Task { @MainActor [weak self] in

@@ -25,6 +25,7 @@ final class HarnessController: @unchecked Sendable {
     private let originalsCoordinator: OriginalsCoordinator?
     private let undoStack: UndoStack?
     private let catalogPublisher: CatalogPublisher?
+    private let driveAuthState: DriveAuthState?
     private var server: HarnessServer?
 
     init(
@@ -40,7 +41,8 @@ final class HarnessController: @unchecked Sendable {
         driveUploader: (any DriveUploading)? = nil,
         originalsCoordinator: OriginalsCoordinator? = nil,
         undoStack: UndoStack? = nil,
-        catalogPublisher: CatalogPublisher? = nil
+        catalogPublisher: CatalogPublisher? = nil,
+        driveAuthState: DriveAuthState? = nil
     ) {
         self.router = router
         self.catalog = catalog
@@ -55,6 +57,7 @@ final class HarnessController: @unchecked Sendable {
         self.originalsCoordinator = originalsCoordinator
         self.undoStack = undoStack
         self.catalogPublisher = catalogPublisher
+        self.driveAuthState = driveAuthState
     }
 
     func start(socketPath: String = HarnessServer.defaultSocketPath) throws {
@@ -274,7 +277,60 @@ final class HarnessController: @unchecked Sendable {
 
         case .publishCatalog:
             return await handlePublishCatalog()
+
+        case .connectDrive:
+            return await handleConnectDrive()
+
+        case .disconnectDrive:
+            return await handleDisconnectDrive()
+
+        case .driveAuthState:
+            return await handleDriveAuthState()
         }
+    }
+
+    // MARK: - Drive auth
+
+    private func handleConnectDrive() async -> Response {
+        guard let driveAuthState else {
+            return .error("drive auth state not configured (OAuth credentials missing?)")
+        }
+        await driveAuthState.connect()
+        return await handleDriveAuthState()
+    }
+
+    private func handleDisconnectDrive() async -> Response {
+        guard let driveAuthState else {
+            return .error("drive auth state not configured")
+        }
+        await driveAuthState.disconnect()
+        return await handleDriveAuthState()
+    }
+
+    private func handleDriveAuthState() async -> Response {
+        guard let driveAuthState else {
+            return .ok(data: .dictionary([
+                "status": .string("disconnected"),
+                "configured": .bool(false),
+            ]))
+        }
+        let snapshot: (status: String, email: String?) = await MainActor.run {
+            switch driveAuthState.status {
+            case .disconnected: return ("disconnected", nil)
+            case .connecting: return ("connecting", nil)
+            case .connected(let email): return ("connected", email)
+            }
+        }
+        var payload: [String: AnyCodableValue] = [
+            "status": .string(snapshot.status),
+            "configured": .bool(true),
+        ]
+        if let email = snapshot.email {
+            payload["email"] = .string(email)
+        } else {
+            payload["email"] = .null
+        }
+        return .ok(data: .dictionary(payload))
     }
 
     // MARK: - Preview signature
@@ -536,17 +592,20 @@ final class HarnessController: @unchecked Sendable {
             destinationDirectory: destinationURL
         )
 
-        let exportedCount: Int
-        if case .done(let count) = await exportCoordinator.phase {
-            exportedCount = count
-        } else {
-            exportedCount = 0
+        let phase = await exportCoordinator.phase
+        switch phase {
+        case .done(let exported, let skipped, let failures):
+            return .ok(data: .dictionary([
+                "exportedCount": .int(exported),
+                "skippedCount": .int(skipped),
+                "failedCount": .int(failures.count),
+                "destinationPath": .string(destinationPath),
+            ]))
+        case .failed(let message):
+            return .error("export failed: \(message)")
+        default:
+            return .error("export ended in unexpected phase")
         }
-
-        return .ok(data: .dictionary([
-            "exportedCount": .int(exportedCount),
-            "destinationPath": .string(destinationPath),
-        ]))
     }
 
     // MARK: - List assets

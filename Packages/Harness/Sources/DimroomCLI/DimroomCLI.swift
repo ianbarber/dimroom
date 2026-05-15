@@ -528,7 +528,7 @@ extension DimroomCLI {
         @Argument(help: "The UUID of the asset.")
         var id: String
 
-        @Argument(help: "Parameter name (exposure, contrast, highlights, shadows, whites, blacks, temperature, tint, clarity, sharpening, vibrance, saturation, vignetteAmount, vignetteRoundness, vignetteSoftness).")
+        @Argument(help: "Parameter name (exposure, contrast, highlights, shadows, whites, blacks, temperature, tint, clarity, sharpening, vibrance, saturation, luminanceNoiseReduction, chrominanceNoiseReduction, vignetteAmount, vignetteRoundness, vignetteSoftness).")
         var parameter: String
 
         @Argument(help: "The value to set.")
@@ -554,7 +554,7 @@ extension DimroomCLI {
         @Argument(help: "The UUID of the asset.")
         var id: String
 
-        @Argument(help: "Parameter name (exposure, contrast, highlights, shadows, whites, blacks, temperature, tint, clarity, sharpening, vibrance, saturation, vignetteAmount, vignetteRoundness, vignetteSoftness).")
+        @Argument(help: "Parameter name (exposure, contrast, highlights, shadows, whites, blacks, temperature, tint, clarity, sharpening, vibrance, saturation, luminanceNoiseReduction, chrominanceNoiseReduction, vignetteAmount, vignetteRoundness, vignetteSoftness).")
         var parameter: String
 
         @Option(name: .long, help: "Path to the harness socket.")

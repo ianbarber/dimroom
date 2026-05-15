@@ -1,24 +1,24 @@
 #!/usr/bin/env bash
-# harness-develop-ranges-flow.sh — Layer C flow exercising each slider at its
-# extremes, to verify the #127 range remap is wired end-to-end and to capture
-# screenshots that humans can eyeball for dead-zones.
+# harness-develop-noise-flow.sh — Layer C flow for the new Noise Reduction
+# group in Develop.
 #
-# For each parameter: drive it to +100 (or a high usable value), screenshot,
-# back to 0, drive to -100 (or low), screenshot, back to 0. get-edit after
-# each step pins that the value landed.
+# Seeds a throwaway catalog, launches the app in harness mode, enters Develop
+# on the first asset and drives the luminance + chrominance sliders to a few
+# meaningful states, asserting get-edit round-trips each value and capturing
+# screenshots for human review.
 #
 # Assumes the capture-screenshots skill already built the app, CLI, and
-# fixture seeder — this script must not rebuild. SCREENSHOT_DIR is set
-# by the capture skill per-flow.
+# fixture seeder — this script must not rebuild. SCREENSHOT_DIR is set by
+# the capture skill per-flow.
 set -euo pipefail
 
 REPO_ROOT="$(cd "$(dirname "$0")/.." && pwd)"
-SCREENSHOT_DIR="${SCREENSHOT_DIR:-$REPO_ROOT/.artifacts/develop-ranges}"
+SCREENSHOT_DIR="${SCREENSHOT_DIR:-$REPO_ROOT/.artifacts/develop-noise}"
 SEED_SRC="$REPO_ROOT/fixtures/library-seed"
-WORK_DIR="$REPO_ROOT/.artifacts/harness-develop-ranges"
+WORK_DIR="$REPO_ROOT/.artifacts/harness-develop-noise"
 CATALOG_PATH="$WORK_DIR/catalog.sqlite"
 PREVIEW_CACHE="$WORK_DIR/previews"
-SOCKET="/tmp/dimroom-harness-develop-ranges-$$.sock"
+SOCKET="/tmp/dimroom-harness-develop-noise-$$.sock"
 APP_PID=""
 
 cleanup() {
@@ -105,9 +105,7 @@ drive() {
     local param="$1"
     local value="$2"
     local set_out
-    # --socket must precede the positional value or a negative value is parsed
-    # as a short flag by ArgumentParser.
-    set_out=$("$CLI_BIN" set-edit-parameter "$ASSET_ID" "$param" --socket "$SOCKET" -- "$value")
+    set_out=$("$CLI_BIN" set-edit-parameter "$ASSET_ID" "$param" "$value" --socket "$SOCKET")
     if ! echo "$set_out" | grep -q '"ok"'; then
         echo "ERROR: set-edit-parameter $param $value did not return ok"
         echo "$set_out"
@@ -117,7 +115,6 @@ drive() {
     local get_out actual
     get_out=$("$CLI_BIN" get-edit "$ASSET_ID" --socket "$SOCKET")
     actual=$(printf '%s' "$get_out" | "$REPO_ROOT/bin/harness-json-extract" "data.$param")
-    # Harness returns Doubles; strip trailing .0 for exact integer compare when possible.
     local actual_f expected_f
     actual_f=$(/usr/bin/python3 -c "import sys; print(float(sys.argv[1]))" "$actual")
     expected_f=$(/usr/bin/python3 -c "import sys; print(float(sys.argv[1]))" "$value")
@@ -128,44 +125,37 @@ drive() {
     echo "  OK: $param == $actual_f"
 }
 
-# Each slider: drive to max, screenshot, back to 0, drive to min, screenshot.
-# Temperature and tint live at neutral 6500/0 and use different extremes.
-for param in exposure contrast highlights shadows whites blacks clarity vibrance saturation luminanceNoiseReduction chrominanceNoiseReduction; do
-    echo "=== $param: +100 ==="
-    # Exposure is in EV stops — ±5, not ±100. Noise-reduction sliders are
-    # one-sided 0…100 so the "min" leg degenerates to identity.
-    if [ "$param" = "exposure" ]; then
-        MAX=5
-        MIN=-5
-    elif [ "$param" = "luminanceNoiseReduction" ] || [ "$param" = "chrominanceNoiseReduction" ]; then
-        MAX=100
-        MIN=0
-    else
-        MAX=100
-        MIN=-100
-    fi
+echo "=== luminance NR only @ 80 ==="
+drive luminanceNoiseReduction 80
+"$CLI_BIN" screenshot "$SCREENSHOT_DIR/develop-noise-luma-80.png" --socket "$SOCKET" >/dev/null
+if [ ! -f "$SCREENSHOT_DIR/develop-noise-luma-80.png" ]; then
+    echo "ERROR: luma screenshot not created"
+    exit 1
+fi
 
-    drive "$param" "$MAX"
-    "$CLI_BIN" screenshot "$SCREENSHOT_DIR/develop-${param}-max.png" --socket "$SOCKET" >/dev/null
-    if [ ! -f "$SCREENSHOT_DIR/develop-${param}-max.png" ]; then
-        echo "ERROR: max screenshot not created for $param"
-        exit 1
-    fi
+echo "=== reset luminance NR ==="
+drive luminanceNoiseReduction 0
 
-    echo "=== $param: 0 (reset between extremes) ==="
-    drive "$param" 0
+echo "=== chrominance NR only @ 80 ==="
+drive chrominanceNoiseReduction 80
+"$CLI_BIN" screenshot "$SCREENSHOT_DIR/develop-noise-chroma-80.png" --socket "$SOCKET" >/dev/null
+if [ ! -f "$SCREENSHOT_DIR/develop-noise-chroma-80.png" ]; then
+    echo "ERROR: chroma screenshot not created"
+    exit 1
+fi
 
-    echo "=== $param: $MIN ==="
-    drive "$param" "$MIN"
-    "$CLI_BIN" screenshot "$SCREENSHOT_DIR/develop-${param}-min.png" --socket "$SOCKET" >/dev/null
-    if [ ! -f "$SCREENSHOT_DIR/develop-${param}-min.png" ]; then
-        echo "ERROR: min screenshot not created for $param"
-        exit 1
-    fi
+echo "=== both NR sliders @ 100 ==="
+drive luminanceNoiseReduction 100
+drive chrominanceNoiseReduction 100
+"$CLI_BIN" screenshot "$SCREENSHOT_DIR/develop-noise-both-100.png" --socket "$SOCKET" >/dev/null
+if [ ! -f "$SCREENSHOT_DIR/develop-noise-both-100.png" ]; then
+    echo "ERROR: combined screenshot not created"
+    exit 1
+fi
 
-    echo "=== $param: 0 (reset after sweep) ==="
-    drive "$param" 0
-done
+echo "=== reset both NR sliders ==="
+drive luminanceNoiseReduction 0
+drive chrominanceNoiseReduction 0
 
 echo "=== quit ==="
 "$CLI_BIN" quit --socket "$SOCKET" 2>&1 || true
@@ -177,4 +167,4 @@ if kill -0 "$APP_PID" 2>/dev/null; then
 fi
 APP_PID=""
 
-echo "=== Harness develop-ranges flow PASSED ==="
+echo "=== Harness develop-noise flow PASSED ==="

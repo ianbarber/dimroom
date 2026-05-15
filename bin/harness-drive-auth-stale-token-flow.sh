@@ -1,15 +1,22 @@
 #!/usr/bin/env bash
 # harness-drive-auth-stale-token-flow.sh — Layer C flow for the stale-token
-# recovery path (#195).
+# recovery path (#195, strengthened in #218).
 #
-# Verifies that injecting a refresh-token failure flips DriveAuthState back
-# to `disconnected` so the UI can surface a re-auth prompt. Drives the
-# transition deterministically via the harness `simulate-drive-auth-failure`
-# command rather than waiting for a real revoked-token round-trip against
-# Google.
+# Verifies the full `connected → disconnected` transition on refresh failure:
+# starts the app under the harness OAuth stubs (DIMROOM_HARNESS_DRIVE_STUB=1),
+# drives `connect-drive` to put DriveAuthState into `connected`, fires
+# `simulate-drive-auth-failure`, and asserts the published state flips back
+# to `disconnected` AND that the `needsReauthMessage` re-auth nudge is set.
+# This exercises the bug fix from #195 end-to-end rather than smoke-testing
+# the wiring against an already-disconnected state.
 #
 # Assumes the capture-screenshots skill already built App and CLI binaries.
 set -euo pipefail
+
+# Email the stub `HTTPClient` returns from `/drive/v3/about`. Pinned here
+# so the assertion below stays in sync with `HarnessStubHTTPClient`'s
+# default `email:` argument.
+EXPECTED_STUB_EMAIL="harness@example.test"
 
 REPO_ROOT="$(cd "$(dirname "$0")/.." && pwd)"
 SCREENSHOT_DIR="${SCREENSHOT_DIR:-$REPO_ROOT/.artifacts/drive-auth-stale-token}"
@@ -73,6 +80,7 @@ mkdir -p "$SCREENSHOT_DIR"
 
 echo "=== Launching app in harness mode ==="
 DIMROOM_HARNESS_SOCKET="$SOCKET" \
+DIMROOM_HARNESS_DRIVE_STUB=1 \
     "$APP_BIN" --harness \
     --fixture-catalog "$CATALOG_PATH" \
     --preview-cache "$PREVIEW_CACHE" &
@@ -99,20 +107,32 @@ echo "=== drive-auth-state — initial status ==="
 INIT_OUT=$("$CLI_BIN" drive-auth-state --socket "$SOCKET")
 echo "$INIT_OUT"
 INIT_STATUS=$(printf '%s' "$INIT_OUT" | "$REPO_ROOT/bin/harness-json-extract" 'data.status')
-# In CI / harness runs the OAuth client may or may not be configured.
-# Both outcomes are acceptable here — what we care about is that the
-# command returns and reports a known status.
-case "$INIT_STATUS" in
-    disconnected|connected|connecting)
-        echo "  OK: initial status = $INIT_STATUS"
-        ;;
-    *)
-        echo "ERROR: unexpected initial status '$INIT_STATUS'"
-        exit 1
-        ;;
-esac
+# Stub mode boots with an empty `InMemoryTokenStore`, so the hydrated
+# status must be `disconnected` before we drive the connect path.
+if [ "$INIT_STATUS" != "disconnected" ]; then
+    echo "ERROR: expected initial status 'disconnected' under stub OAuth, got '$INIT_STATUS'"
+    exit 1
+fi
+echo "  OK: initial status = disconnected"
 
 take_screenshot "drive-auth-initial"
+
+echo "=== connect-drive — put state into connected ==="
+CONNECT_OUT=$("$CLI_BIN" connect-drive --socket "$SOCKET")
+echo "$CONNECT_OUT"
+CONNECT_STATUS=$(printf '%s' "$CONNECT_OUT" | "$REPO_ROOT/bin/harness-json-extract" 'data.status')
+CONNECT_EMAIL=$(printf '%s' "$CONNECT_OUT" | "$REPO_ROOT/bin/harness-json-extract" 'data.email')
+if [ "$CONNECT_STATUS" != "connected" ]; then
+    echo "ERROR: expected status 'connected' after connectDrive, got '$CONNECT_STATUS'"
+    exit 1
+fi
+if [ "$CONNECT_EMAIL" != "$EXPECTED_STUB_EMAIL" ]; then
+    echo "ERROR: expected email '$EXPECTED_STUB_EMAIL' after connectDrive, got '$CONNECT_EMAIL'"
+    exit 1
+fi
+echo "  OK: status = connected, email = $CONNECT_EMAIL"
+
+take_screenshot "drive-auth-connected"
 
 echo "=== simulate-drive-auth-failure — inject refresh failure ==="
 FAIL_OUT=$("$CLI_BIN" simulate-drive-auth-failure --socket "$SOCKET")
@@ -122,7 +142,7 @@ if ! echo "$FAIL_OUT" | grep -q '"ok"'; then
     exit 1
 fi
 
-echo "=== drive-auth-state — assert disconnected after simulated failure ==="
+echo "=== drive-auth-state — assert disconnected + needsReauthMessage after simulated failure ==="
 POST_OUT=$("$CLI_BIN" drive-auth-state --socket "$SOCKET")
 echo "$POST_OUT"
 POST_STATUS=$(printf '%s' "$POST_OUT" | "$REPO_ROOT/bin/harness-json-extract" 'data.status')
@@ -131,6 +151,13 @@ if [ "$POST_STATUS" != "disconnected" ]; then
     exit 1
 fi
 echo "  OK: status = disconnected"
+
+POST_REAUTH=$(printf '%s' "$POST_OUT" | "$REPO_ROOT/bin/harness-json-extract" 'data.needsReauthMessage' --absent)
+if [ "$POST_REAUTH" != "present" ]; then
+    echo "ERROR: expected needsReauthMessage to be present after simulateDriveAuthFailure, got '$POST_REAUTH'"
+    exit 1
+fi
+echo "  OK: needsReauthMessage = present"
 
 take_screenshot "drive-auth-after-simulated-failure"
 

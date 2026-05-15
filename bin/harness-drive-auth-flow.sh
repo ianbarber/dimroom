@@ -1,17 +1,23 @@
 #!/usr/bin/env bash
-# harness-drive-auth-flow.sh — Layer C flow for the Drive auth menu state (#166).
+# harness-drive-auth-flow.sh — Layer C flow for the Drive auth menu state (#166, #194).
 #
-# Verifies the menu-bound `driveAuthState` command is scriptable end-to-end:
-# starts the app in harness mode, queries the published status, runs the
-# `disconnectDrive` no-op against a clean state, and captures a screenshot
-# of the File menu with the "Connect Google Drive…" item visible.
+# Verifies the menu-bound `connectDrive` / `disconnectDrive` / `driveAuthState`
+# commands are scriptable end-to-end: starts the app in harness mode with the
+# stub OAuth components (DIMROOM_HARNESS_DRIVE_STUB=1), drives the full
+# disconnected → connecting → connected → disconnected cycle, and captures
+# screenshots at each stable state.
 #
-# Real OAuth requires a browser round-trip and cannot run in CI, so this
-# flow only covers the hydration + disconnect paths. The connect path is
-# covered by Layer A (DriveAuthStateTests).
+# The stubs replace the browser launcher and HTTPClient inside `DriveClient`
+# so `authenticate()` runs through its real code path without real Google
+# traffic — see `Packages/DriveClient/Sources/DriveClient/HarnessOAuthStubs.swift`.
 #
 # Assumes the capture-screenshots skill already built App and CLI binaries.
 set -euo pipefail
+
+# Email the stub `HTTPClient` returns from `/drive/v3/about`. Pinned here
+# so the assertion below stays in sync with `HarnessStubHTTPClient`'s
+# default `email:` argument.
+EXPECTED_STUB_EMAIL="harness@example.test"
 
 REPO_ROOT="$(cd "$(dirname "$0")/.." && pwd)"
 SCREENSHOT_DIR="${SCREENSHOT_DIR:-$REPO_ROOT/.artifacts/drive-auth}"
@@ -75,6 +81,7 @@ mkdir -p "$SCREENSHOT_DIR"
 
 echo "=== Launching app in harness mode ==="
 DIMROOM_HARNESS_SOCKET="$SOCKET" \
+DIMROOM_HARNESS_DRIVE_STUB=1 \
     "$APP_BIN" --harness \
     --fixture-catalog "$CATALOG_PATH" \
     --preview-cache "$PREVIEW_CACHE" &
@@ -101,22 +108,34 @@ echo "=== drive-auth-state — initial status ==="
 INIT_OUT=$("$CLI_BIN" drive-auth-state --socket "$SOCKET")
 echo "$INIT_OUT"
 INIT_STATUS=$(printf '%s' "$INIT_OUT" | "$REPO_ROOT/bin/harness-json-extract" 'data.status')
-# In CI / harness runs the OAuth client may or may not be configured.
-# Both outcomes are acceptable here — what we care about is that the
-# command returns and reports a known status.
-case "$INIT_STATUS" in
-    disconnected|connected|connecting)
-        echo "  OK: initial status = $INIT_STATUS"
-        ;;
-    *)
-        echo "ERROR: unexpected initial status '$INIT_STATUS'"
-        exit 1
-        ;;
-esac
+# Stub mode boots with an empty `InMemoryTokenStore`, so the hydrated
+# status must be `disconnected` before we drive the connect path.
+if [ "$INIT_STATUS" != "disconnected" ]; then
+    echo "ERROR: expected initial status 'disconnected' under stub OAuth, got '$INIT_STATUS'"
+    exit 1
+fi
+echo "  OK: initial status = disconnected"
 
 take_screenshot "drive-auth-initial"
 
-echo "=== disconnect-drive — no-op against clean state ==="
+echo "=== connect-drive — assert full OAuth round-trip through stubs ==="
+CONNECT_OUT=$("$CLI_BIN" connect-drive --socket "$SOCKET")
+echo "$CONNECT_OUT"
+CONNECT_STATUS=$(printf '%s' "$CONNECT_OUT" | "$REPO_ROOT/bin/harness-json-extract" 'data.status')
+CONNECT_EMAIL=$(printf '%s' "$CONNECT_OUT" | "$REPO_ROOT/bin/harness-json-extract" 'data.email')
+if [ "$CONNECT_STATUS" != "connected" ]; then
+    echo "ERROR: expected status 'connected' after connectDrive, got '$CONNECT_STATUS'"
+    exit 1
+fi
+if [ "$CONNECT_EMAIL" != "$EXPECTED_STUB_EMAIL" ]; then
+    echo "ERROR: expected email '$EXPECTED_STUB_EMAIL' after connectDrive, got '$CONNECT_EMAIL'"
+    exit 1
+fi
+echo "  OK: status = connected, email = $CONNECT_EMAIL"
+
+take_screenshot "drive-auth-connected"
+
+echo "=== disconnect-drive — assert disconnect from connected state ==="
 DISC_OUT=$("$CLI_BIN" disconnect-drive --socket "$SOCKET")
 echo "$DISC_OUT"
 if ! echo "$DISC_OUT" | grep -q '"ok"'; then

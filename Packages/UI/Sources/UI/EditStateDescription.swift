@@ -44,6 +44,8 @@ func editParameterDescription(previous: EditState?, next: EditState) -> String? 
     scalar("Sharpening", \.sharpening, decimals: 0)
     scalar("Vibrance", \.vibrance, decimals: 0)
     scalar("Saturation", \.saturation, decimals: 0)
+    scalar("Luminance NR", \.luminanceNoiseReduction, decimals: 0)
+    scalar("Chrominance NR", \.chrominanceNoiseReduction, decimals: 0)
     scalar("Vignette Amount", \.vignetteAmount, decimals: 0)
     scalar("Vignette Roundness", \.vignetteRoundness, decimals: 0)
     scalar("Vignette Softness", \.vignetteSoftness, decimals: 0)

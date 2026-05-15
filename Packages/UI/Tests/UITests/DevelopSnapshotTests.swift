@@ -148,6 +148,31 @@ final class DevelopSnapshotTests: XCTestCase {
         }
     }
 
+    /// Develop view with non-identity noise-reduction settings. Exercises
+    /// the new Noise Reduction group sliders so the sidebar layout is
+    /// pinned and the rendered preview reflects the NR pass.
+    @MainActor
+    func test_develop_noise_reduction() async throws {
+        let vm = try await makeActivatedViewModel(hash: "snap-nr")
+
+        vm.setParameter(\.luminanceNoiseReduction, value: 60)
+        vm.setParameter(\.chrominanceNoiseReduction, value: 60)
+        // Give the debounced render time to publish.
+        try await Task.sleep(nanoseconds: 300_000_000)
+
+        let image = renderFixedPixelImage(for: DevelopView(viewModel: vm))
+
+        runAssertSnapshot {
+            assertSnapshot(
+                of: image,
+                as: .image(
+                    precision: Self.snapshotPrecision,
+                    perceptualPrecision: Self.snapshotPerceptualPrecision
+                )
+            )
+        }
+    }
+
     /// Develop view on a Drive-only asset, frozen mid-download: the
     /// indicator should overlay the preview area and the slider sidebar
     /// should be disabled (greyed). Mirrors the holding-fetcher pattern

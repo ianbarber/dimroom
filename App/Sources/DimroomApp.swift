@@ -1047,6 +1047,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         switch ProcessInfo.processInfo.environment["DIMROOM_HARNESS_STUB_DOWNLOADER"] {
         case "slow-chunks":
             return SlowChunkHarnessDownloader()
+        case "hold-until-released":
+            return HoldUntilReleasedHarnessDownloader()
         default:
             return nil
         }

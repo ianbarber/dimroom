@@ -45,6 +45,20 @@ public struct AppState: Codable, Sendable, Equatable {
     /// assert the `toggleHistogram` command flipped it. Defaults to
     /// `true` to match the view model's startup state.
     public let showHistogram: Bool
+    /// Whether Develop is currently fetching an original for its active
+    /// asset. Mirrors `DevelopViewModel.isDownloadingOriginal` so harness
+    /// flows can assert the mid-fetch overlay clears immediately on
+    /// asset switch (the regression #204 fixed).
+    public let developIsDownloadingOriginal: Bool
+    /// Develop's current download progress in `[0, 1]`, or `nil` when no
+    /// fetch is in flight. Mirrors `DevelopViewModel.downloadProgress`.
+    public let developDownloadProgress: Double?
+    /// Asset currently active in `DevelopViewModel`, or `nil` if no
+    /// asset has been activated yet. Distinct from `selectedAssetId`
+    /// (which is Library's selection) because Develop activations can
+    /// happen via auto-activate paths (`setEditParameter`, `setCrop`)
+    /// that don't touch Library state.
+    public let developCurrentAssetId: UUID?
 
     public init(
         route: Route,
@@ -58,7 +72,10 @@ public struct AppState: Codable, Sendable, Equatable {
         hasUndoToast: Bool = false,
         downloadingAssetIds: [UUID] = [],
         downloadProgressByAssetId: [String: Double] = [:],
-        showHistogram: Bool = true
+        showHistogram: Bool = true,
+        developIsDownloadingOriginal: Bool = false,
+        developDownloadProgress: Double? = nil,
+        developCurrentAssetId: UUID? = nil
     ) {
         self.route = route
         self.assetCount = assetCount
@@ -72,5 +89,8 @@ public struct AppState: Codable, Sendable, Equatable {
         self.downloadingAssetIds = downloadingAssetIds
         self.downloadProgressByAssetId = downloadProgressByAssetId
         self.showHistogram = showHistogram
+        self.developIsDownloadingOriginal = developIsDownloadingOriginal
+        self.developDownloadProgress = developDownloadProgress
+        self.developCurrentAssetId = developCurrentAssetId
     }
 }

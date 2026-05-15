@@ -26,6 +26,11 @@ public struct EditState: Codable, Sendable, Equatable {
     public var vibrance: Double
     public var saturation: Double
 
+    // MARK: - Noise Reduction
+
+    public var luminanceNoiseReduction: Double
+    public var chrominanceNoiseReduction: Double
+
     // MARK: - Vignette
 
     public var vignetteAmount: Double
@@ -64,6 +69,8 @@ public struct EditState: Codable, Sendable, Equatable {
         sharpening: Double = 0,
         vibrance: Double = 0,
         saturation: Double = 0,
+        luminanceNoiseReduction: Double = 0,
+        chrominanceNoiseReduction: Double = 0,
         vignetteAmount: Double = 0,
         vignetteRoundness: Double = 50,
         vignetteSoftness: Double = 50,
@@ -85,6 +92,8 @@ public struct EditState: Codable, Sendable, Equatable {
         self.sharpening = sharpening
         self.vibrance = vibrance
         self.saturation = saturation
+        self.luminanceNoiseReduction = luminanceNoiseReduction
+        self.chrominanceNoiseReduction = chrominanceNoiseReduction
         self.vignetteAmount = vignetteAmount
         self.vignetteRoundness = vignetteRoundness
         self.vignetteSoftness = vignetteSoftness
@@ -104,6 +113,7 @@ public struct EditState: Codable, Sendable, Equatable {
         case exposure, contrast, highlights, shadows, whites, blacks
         case temperature, tint
         case clarity, sharpening, vibrance, saturation
+        case luminanceNoiseReduction, chrominanceNoiseReduction
         case vignetteAmount, vignetteRoundness, vignetteSoftness
         case hueShift, hslSaturation, hslLuminance
         case cropRect, cropAngle
@@ -124,6 +134,8 @@ public struct EditState: Codable, Sendable, Equatable {
             sharpening: try c.decodeIfPresent(Double.self, forKey: .sharpening) ?? 0,
             vibrance: try c.decodeIfPresent(Double.self, forKey: .vibrance) ?? 0,
             saturation: try c.decodeIfPresent(Double.self, forKey: .saturation) ?? 0,
+            luminanceNoiseReduction: try c.decodeIfPresent(Double.self, forKey: .luminanceNoiseReduction) ?? 0,
+            chrominanceNoiseReduction: try c.decodeIfPresent(Double.self, forKey: .chrominanceNoiseReduction) ?? 0,
             vignetteAmount: try c.decodeIfPresent(Double.self, forKey: .vignetteAmount) ?? 0,
             vignetteRoundness: try c.decodeIfPresent(Double.self, forKey: .vignetteRoundness) ?? 50,
             vignetteSoftness: try c.decodeIfPresent(Double.self, forKey: .vignetteSoftness) ?? 50,

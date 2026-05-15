@@ -502,17 +502,20 @@ final class HarnessController: @unchecked Sendable {
             destinationDirectory: destinationURL
         )
 
-        let exportedCount: Int
-        if case .done(let count) = await exportCoordinator.phase {
-            exportedCount = count
-        } else {
-            exportedCount = 0
+        let phase = await exportCoordinator.phase
+        switch phase {
+        case .done(let exported, let skipped, let failures):
+            return .ok(data: .dictionary([
+                "exportedCount": .int(exported),
+                "skippedCount": .int(skipped),
+                "failedCount": .int(failures.count),
+                "destinationPath": .string(destinationPath),
+            ]))
+        case .failed(let message):
+            return .error("export failed: \(message)")
+        default:
+            return .error("export ended in unexpected phase")
         }
-
-        return .ok(data: .dictionary([
-            "exportedCount": .int(exportedCount),
-            "destinationPath": .string(destinationPath),
-        ]))
     }
 
     // MARK: - List assets

@@ -46,6 +46,7 @@ public enum Command: Codable, Sendable, Equatable {
     case cancelCrop
     case setCropPreset(name: String)
     case resetCrop
+    case publishCatalog
     case connectDrive
     case disconnectDrive
     case driveAuthState
@@ -120,6 +121,7 @@ public enum Command: Codable, Sendable, Equatable {
         case cancelCrop
         case setCropPreset
         case resetCrop
+        case publishCatalog
         case connectDrive
         case disconnectDrive
         case driveAuthState
@@ -261,6 +263,8 @@ public enum Command: Codable, Sendable, Equatable {
             self = .setCropPreset(name: name)
         case .resetCrop:
             self = .resetCrop
+        case .publishCatalog:
+            self = .publishCatalog
         case .connectDrive:
             self = .connectDrive
         case .disconnectDrive:
@@ -398,6 +402,8 @@ public enum Command: Codable, Sendable, Equatable {
             try container.encode(name, forKey: .name)
         case .resetCrop:
             try container.encode(CommandType.resetCrop, forKey: .type)
+        case .publishCatalog:
+            try container.encode(CommandType.publishCatalog, forKey: .type)
         case .connectDrive:
             try container.encode(CommandType.connectDrive, forKey: .type)
         case .disconnectDrive:

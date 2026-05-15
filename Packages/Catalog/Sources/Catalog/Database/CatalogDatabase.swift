@@ -1,11 +1,35 @@
 import Foundation
 import GRDB
 
-public final class CatalogDatabase: Sendable {
+public final class CatalogDatabase: @unchecked Sendable {
     private let dbQueue: DatabaseQueue
+    public let path: String
 
-    public init(dbQueue: DatabaseQueue) throws {
+    private let onChangeLock = NSLock()
+    private var _onChange: (@Sendable () -> Void)?
+
+    /// Optional callback invoked once after every successful mutating
+    /// write completes. The sync engine plugs into this slot to debounce
+    /// catalog publishes; pure tests/consumers can leave it unset.
+    ///
+    /// Concurrent writes serialise inside GRDB's write queue, so the
+    /// callback is fired on whichever queue executed the write.
+    public var onChange: (@Sendable () -> Void)? {
+        get {
+            onChangeLock.lock()
+            defer { onChangeLock.unlock() }
+            return _onChange
+        }
+        set {
+            onChangeLock.lock()
+            _onChange = newValue
+            onChangeLock.unlock()
+        }
+    }
+
+    public init(dbQueue: DatabaseQueue, path: String) throws {
         self.dbQueue = dbQueue
+        self.path = path
         var migrator = DatabaseMigrator()
         CatalogMigrations.registerAll(in: &migrator)
         try migrator.migrate(dbQueue)
@@ -13,12 +37,40 @@ public final class CatalogDatabase: Sendable {
 
     public convenience init(path: String) throws {
         let dbQueue = try DatabaseQueue(path: path)
-        try self.init(dbQueue: dbQueue)
+        try self.init(dbQueue: dbQueue, path: path)
     }
 
     public static func inMemory() throws -> CatalogDatabase {
         let dbQueue = try DatabaseQueue()
-        return try CatalogDatabase(dbQueue: dbQueue)
+        return try CatalogDatabase(dbQueue: dbQueue, path: ":memory:")
+    }
+
+    /// Copy the live database into a new file at `destinationPath` via
+    /// SQLite `VACUUM INTO`. The source remains open and writable; the
+    /// destination is a consistent point-in-time snapshot used by the
+    /// catalog publisher to upload a stable byte stream to Drive without
+    /// closing the catalog.
+    public func snapshot(to destinationPath: String) throws {
+        let url = URL(fileURLWithPath: destinationPath)
+        try FileManager.default.createDirectory(
+            at: url.deletingLastPathComponent(),
+            withIntermediateDirectories: true
+        )
+        // VACUUM INTO refuses to overwrite an existing file.
+        if FileManager.default.fileExists(atPath: destinationPath) {
+            try FileManager.default.removeItem(atPath: destinationPath)
+        }
+        // VACUUM INTO cannot run inside a transaction, so we use
+        // `writeWithoutTransaction` rather than `write` here. The
+        // serialised queue still gives us exclusive access against
+        // other writes.
+        try dbQueue.writeWithoutTransaction { db in
+            // GRDB doesn't bind paths into VACUUM INTO; the destination
+            // is escaped manually. SQLite path literals use doubled single
+            // quotes.
+            let escaped = destinationPath.replacingOccurrences(of: "'", with: "''")
+            try db.execute(sql: "VACUUM INTO '\(escaped)'")
+        }
     }
 
     // MARK: - Assets
@@ -27,6 +79,7 @@ public final class CatalogDatabase: Sendable {
         try dbQueue.write { db in
             try asset.insert(db)
         }
+        fireOnChange()
     }
 
     public func fetchAsset(byHash hash: String) throws -> Asset? {
@@ -68,54 +121,69 @@ public final class CatalogDatabase: Sendable {
     }
 
     public func updateRating(assetId: UUID, rating: Int) throws {
+        var didChange = false
         try dbQueue.write { db in
             if var asset = try Asset.fetchOne(db, key: assetId) {
                 asset.rating = rating
                 try asset.update(db)
+                didChange = true
             }
         }
+        if didChange { fireOnChange() }
     }
 
     public func updateRotation(assetId: UUID, rotation: Int) throws {
+        var didChange = false
         try dbQueue.write { db in
             if var asset = try Asset.fetchOne(db, key: assetId) {
                 asset.rotation = rotation
                 try asset.update(db)
+                didChange = true
             }
         }
+        if didChange { fireOnChange() }
     }
 
     /// Set `Asset.localPath` for the given asset. Passing `nil` clears it,
     /// which is what the originals cache does on eviction so stale paths
     /// never serve a deleted file.
     public func updateLocalPath(assetId: UUID, path: String?) throws {
+        var didChange = false
         try dbQueue.write { db in
             if var asset = try Asset.fetchOne(db, key: assetId) {
                 asset.localPath = path
                 try asset.update(db)
+                didChange = true
             }
         }
+        if didChange { fireOnChange() }
     }
 
     /// Set `Asset.driveFileId` for the given asset. Passing `nil` clears
     /// it — callers can use that path if an upload is rolled back or a
     /// Drive file is later removed and we want the asset to re-upload.
     public func updateDriveFileId(assetId: UUID, driveFileId: String?) throws {
+        var didChange = false
         try dbQueue.write { db in
             if var asset = try Asset.fetchOne(db, key: assetId) {
                 asset.driveFileId = driveFileId
                 try asset.update(db)
+                didChange = true
             }
         }
+        if didChange { fireOnChange() }
     }
 
     public func deleteAsset(id: UUID) throws {
+        var didChange = false
         try dbQueue.write { db in
             if var asset = try Asset.fetchOne(db, key: id) {
                 asset.deletedAt = Date()
                 try asset.update(db)
+                didChange = true
             }
         }
+        if didChange { fireOnChange() }
     }
 
     /// Soft-delete multiple assets in a single write transaction. Unknown
@@ -123,7 +191,7 @@ public final class CatalogDatabase: Sendable {
     /// deleted (i.e. existed in the catalog at write time).
     @discardableResult
     public func deleteAssets(ids: [UUID]) throws -> [UUID] {
-        try dbQueue.write { db in
+        let updated: [UUID] = try dbQueue.write { db in
             let now = Date()
             var updated: [UUID] = []
             for id in ids {
@@ -135,25 +203,30 @@ public final class CatalogDatabase: Sendable {
             }
             return updated
         }
+        if !updated.isEmpty { fireOnChange() }
+        return updated
     }
 
     /// Inverse of `deleteAsset`: clears `deletedAt` so the asset shows up
     /// in default queries again. Used by the undo stack to reverse a
     /// soft-delete.
     public func restoreAsset(id: UUID) throws {
+        var didChange = false
         try dbQueue.write { db in
             if var asset = try Asset.fetchOne(db, key: id) {
                 asset.deletedAt = nil
                 try asset.update(db)
+                didChange = true
             }
         }
+        if didChange { fireOnChange() }
     }
 
     /// Clear `deletedAt` for multiple assets in a single write
     /// transaction. Returns the ids that were actually restored.
     @discardableResult
     public func restoreAssets(ids: [UUID]) throws -> [UUID] {
-        try dbQueue.write { db in
+        let updated: [UUID] = try dbQueue.write { db in
             var updated: [UUID] = []
             for id in ids {
                 if var asset = try Asset.fetchOne(db, key: id) {
@@ -164,6 +237,8 @@ public final class CatalogDatabase: Sendable {
             }
             return updated
         }
+        if !updated.isEmpty { fireOnChange() }
+        return updated
     }
 
     /// Permanently remove an asset row from the catalog. Returns the
@@ -171,18 +246,20 @@ public final class CatalogDatabase: Sendable {
     /// previews and local originals.
     @discardableResult
     public func permanentlyDeleteAsset(id: UUID) throws -> Asset? {
-        try dbQueue.write { db in
+        let removed: Asset? = try dbQueue.write { db in
             guard let asset = try Asset.fetchOne(db, key: id) else { return nil }
             try asset.delete(db)
             return asset
         }
+        if removed != nil { fireOnChange() }
+        return removed
     }
 
     /// Permanently remove multiple asset rows in a single write
     /// transaction. Returns the `Asset` values that were deleted.
     @discardableResult
     public func permanentlyDeleteAssets(ids: [UUID]) throws -> [Asset] {
-        try dbQueue.write { db in
+        let removed: [Asset] = try dbQueue.write { db in
             var removed: [Asset] = []
             for id in ids {
                 if let asset = try Asset.fetchOne(db, key: id) {
@@ -192,6 +269,8 @@ public final class CatalogDatabase: Sendable {
             }
             return removed
         }
+        if !removed.isEmpty { fireOnChange() }
+        return removed
     }
 
     // MARK: - Import Sessions
@@ -200,6 +279,7 @@ public final class CatalogDatabase: Sendable {
         try dbQueue.write { db in
             try session.insert(db)
         }
+        fireOnChange()
     }
 
     /// Returns the most recent import sessions that have at least one
@@ -233,12 +313,15 @@ public final class CatalogDatabase: Sendable {
     }
 
     public func updateImportSessionSourceDevice(id: UUID, sourceDevice: String) throws {
+        var didChange = false
         try dbQueue.write { db in
             if var session = try ImportSession.fetchOne(db, key: id) {
                 session.sourceDevice = sourceDevice
                 try session.update(db)
+                didChange = true
             }
         }
+        if didChange { fireOnChange() }
     }
 
     // MARK: - Edit States
@@ -246,7 +329,7 @@ public final class CatalogDatabase: Sendable {
     /// Inserts a new versioned edit state for the given asset. Returns the version number.
     @discardableResult
     public func saveEditState(_ state: EditState, for assetId: UUID) throws -> Int {
-        try dbQueue.write { db in
+        let version: Int = try dbQueue.write { db in
             let maxVersion = try Int.fetchOne(
                 db,
                 sql: "SELECT MAX(version) FROM edit_states WHERE assetId = ?",
@@ -264,6 +347,8 @@ public final class CatalogDatabase: Sendable {
             try record.insert(db)
             return newVersion
         }
+        fireOnChange()
+        return version
     }
 
     /// Returns the most recent edit state for the given asset, or nil if no edits exist.
@@ -288,5 +373,12 @@ public final class CatalogDatabase: Sendable {
                 (version: record.version, state: try record.decodeState(), createdAt: record.createdAt)
             }
         }
+    }
+
+    private func fireOnChange() {
+        onChangeLock.lock()
+        let callback = _onChange
+        onChangeLock.unlock()
+        callback?()
     }
 }

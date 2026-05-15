@@ -985,9 +985,27 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     /// isn't configured so harness runs without credentials don't fail
     /// to launch. The fallback downloader surfaces "unreachable" to the
     /// UI, which is the documented degraded state.
+    ///
+    /// When `DIMROOM_HARNESS_DRIVE_STUB` is set, returns a `DriveClient`
+    /// wired against in-memory stubs that drive `authenticate()` /
+    /// `fetchAccountEmail()` end-to-end without real Google traffic, so
+    /// Layer C flows can exercise the connect path.
     private func resolveDriveClient() -> DriveClient? {
+        if ProcessInfo.processInfo.environment["DIMROOM_HARNESS_DRIVE_STUB"] != nil {
+            return makeHarnessStubDriveClient()
+        }
         guard let config = try? OAuthConfig.load() else { return nil }
         return DriveClient(config: config)
+    }
+
+    private func makeHarnessStubDriveClient() -> DriveClient {
+        let config = OAuthConfig(clientID: "harness-stub-client")
+        return DriveClient(
+            config: config,
+            httpClient: HarnessStubHTTPClient(),
+            tokenStore: InMemoryTokenStore(),
+            browserLauncher: HarnessStubBrowserLauncher()
+        )
     }
 
     /// Returns a harness-specific downloader when the env var requests

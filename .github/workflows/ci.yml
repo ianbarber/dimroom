@@ -117,6 +117,13 @@ jobs:
             exit 0
           fi
           bin/harness-develop-flow.sh
+      - name: Run harness develop asset-switch mid-fetch flow
+        run: |
+          if [ ! -x bin/harness-develop-asset-switch-mid-fetch.sh ]; then
+            echo "No harness develop asset-switch mid-fetch script yet — skipping."
+            exit 0
+          fi
+          bin/harness-develop-asset-switch-mid-fetch.sh
       - name: Run harness navigation flow
         run: |
           if [ ! -x bin/harness-navigation-flow.sh ]; then

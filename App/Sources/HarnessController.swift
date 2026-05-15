@@ -106,7 +106,10 @@ final class HarnessController: @unchecked Sendable {
                     hasUndoToast: libraryViewModel.undoToast != nil,
                     downloadingAssetIds: Array(libraryViewModel.downloadingAssetIds),
                     downloadProgressByAssetId: progressByString,
-                    showHistogram: developViewModel.showHistogram
+                    showHistogram: developViewModel.showHistogram,
+                    developIsDownloadingOriginal: developViewModel.isDownloadingOriginal,
+                    developDownloadProgress: developViewModel.downloadProgress,
+                    developCurrentAssetId: developViewModel.currentAssetId
                 )
             }
             let encoder = JSONEncoder()
@@ -295,6 +298,10 @@ final class HarnessController: @unchecked Sendable {
 
         case .postMenuAction(let name):
             return await handlePostMenuAction(name: name)
+
+        case .releaseHeldDownloads:
+            HoldUntilReleasedHarnessDownloader.shared.release()
+            return .ok()
         }
     }
 

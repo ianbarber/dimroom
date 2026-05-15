@@ -63,6 +63,12 @@ public enum Command: Codable, Sendable, Equatable {
     /// without synthesising NSEvents. Unknown names are rejected by the
     /// handler at runtime.
     case postMenuAction(name: String)
+    /// Releases every pending download currently parked in the
+    /// `hold-until-released` harness stub downloader. Each held call
+    /// then writes its synthetic payload and returns, draining the
+    /// in-flight set so the flow can verify late-tail behaviour.
+    /// No-op outside harness mode with `DIMROOM_HARNESS_STUB_DOWNLOADER=hold-until-released`.
+    case releaseHeldDownloads
 
     private enum CodingKeys: String, CodingKey {
         case type
@@ -142,6 +148,7 @@ public enum Command: Codable, Sendable, Equatable {
         case driveAuthState
         case simulateDriveAuthFailure
         case postMenuAction
+        case releaseHeldDownloads
     }
 
     public init(from decoder: Decoder) throws {
@@ -296,6 +303,8 @@ public enum Command: Codable, Sendable, Equatable {
         case .postMenuAction:
             let name = try container.decode(String.self, forKey: .name)
             self = .postMenuAction(name: name)
+        case .releaseHeldDownloads:
+            self = .releaseHeldDownloads
         }
     }
 
@@ -443,6 +452,8 @@ public enum Command: Codable, Sendable, Equatable {
         case .postMenuAction(let name):
             try container.encode(CommandType.postMenuAction, forKey: .type)
             try container.encode(name, forKey: .name)
+        case .releaseHeldDownloads:
+            try container.encode(CommandType.releaseHeldDownloads, forKey: .type)
         }
     }
 }

@@ -290,6 +290,9 @@ final class HarnessController: @unchecked Sendable {
         case .driveAuthState:
             return await handleDriveAuthState()
 
+        case .simulateDriveAuthFailure:
+            return await handleSimulateDriveAuthFailure()
+
         case .postMenuAction(let name):
             return await handlePostMenuAction(name: name)
         }
@@ -351,6 +354,16 @@ final class HarnessController: @unchecked Sendable {
             payload["email"] = .null
         }
         return .ok(data: .dictionary(payload))
+    }
+
+    private func handleSimulateDriveAuthFailure() async -> Response {
+        guard let driveAuthState else {
+            return .error("drive auth state not configured")
+        }
+        await MainActor.run {
+            driveAuthState.simulateAuthFailureForTesting()
+        }
+        return await handleDriveAuthState()
     }
 
     // MARK: - Preview signature

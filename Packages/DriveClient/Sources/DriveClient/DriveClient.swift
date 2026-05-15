@@ -22,6 +22,15 @@ public actor DriveClient {
     private var cachedAccessToken: String?
     private var accessTokenExpiresAt: Date?
 
+    /// Fires once per `refreshAccessToken()` failure. Every authorized
+    /// request funnels through `refreshAccessToken` (directly or via
+    /// `AuthorizedSession`'s `forceRefreshAccessToken` path), so a single
+    /// stream covers `accessToken()`, `fetchAccountEmail`, `downloadFile`,
+    /// and the upload paths. `DriveAuthState` subscribes to flip the UI
+    /// back to `.disconnected` when a stale/revoked refresh token surfaces.
+    public nonisolated let authFailures: AsyncStream<Void>
+    private nonisolated let failureContinuation: AsyncStream<Void>.Continuation
+
     public init(
         config: OAuthConfig,
         httpClient: HTTPClient = URLSessionHTTPClient(),
@@ -40,6 +49,9 @@ public actor DriveClient {
         self.redirectServerFactory = redirectServerFactory
         self.verifierProvider = verifierProvider
         self.stateProvider = stateProvider
+        var continuation: AsyncStream<Void>.Continuation!
+        self.authFailures = AsyncStream { continuation = $0 }
+        self.failureContinuation = continuation
     }
 
     public var isAuthenticated: Bool {
@@ -64,6 +76,7 @@ public actor DriveClient {
         do {
             response = try await TokenEndpoint.refresh(refreshToken: refreshToken, config: config, client: httpClient)
         } catch {
+            failureContinuation.yield()
             throw DriveClientError.refreshFailed
         }
         applyTokenResponse(response)

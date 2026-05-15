@@ -5,6 +5,7 @@ import Foundation
 /// without spinning up an OAuth server or hitting the Keychain.
 public protocol DriveAuthenticating: Sendable {
     var isAuthenticated: Bool { get async }
+    var authFailures: AsyncStream<Void> { get }
     func authenticate() async throws
     func deauthenticate() async throws
     func fetchAccountEmail() async throws -> String?
@@ -35,11 +36,23 @@ public final class DriveAuthState: ObservableObject {
 
     @Published public private(set) var status: Status = .disconnected
     @Published public private(set) var lastErrorMessage: String?
+    /// Set when an authorized DriveClient request has surfaced
+    /// `DriveClientError.refreshFailed` — typically a stale or revoked
+    /// refresh token. The AppDelegate observes this and shows a one-shot
+    /// re-auth alert. Cleared on successful `connect()` and on `disconnect()`
+    /// so the next failure can re-fire the alert.
+    @Published public private(set) var needsReauthMessage: String?
 
     private var client: any DriveAuthenticating
+    private var failureObserverTask: Task<Void, Never>?
 
     public init(client: any DriveAuthenticating) {
         self.client = client
+        startObservingFailures()
+    }
+
+    deinit {
+        failureObserverTask?.cancel()
     }
 
     /// Swaps the underlying authenticator. The App target uses this to
@@ -48,6 +61,47 @@ public final class DriveAuthState: ObservableObject {
     /// that the SwiftUI command builder is already observing.
     public func configure(client: any DriveAuthenticating) {
         self.client = client
+        startObservingFailures()
+    }
+
+    private func startObservingFailures() {
+        failureObserverTask?.cancel()
+        let stream = client.authFailures
+        // Task created inside a `@MainActor`-isolated method inherits
+        // that isolation, so `handleAuthFailure()` runs on MainActor
+        // without needing an explicit await.
+        failureObserverTask = Task { [weak self] in
+            for await _ in stream {
+                guard let self else { return }
+                self.handleAuthFailure()
+            }
+        }
+    }
+
+    private func handleAuthFailure() {
+        // Only react when the UI thinks we're connected/connecting.
+        // A failure that arrives while already disconnected (e.g. a
+        // stale in-flight request) shouldn't churn the published
+        // message and re-fire the alert.
+        switch status {
+        case .connected, .connecting:
+            status = .disconnected
+            needsReauthMessage = "Google Drive needs to be reconnected. Your session has expired."
+        case .disconnected:
+            break
+        }
+    }
+
+    /// Test hook: lets the harness inject the same transition the stream
+    /// observer would, without requiring a real revoked-token round-trip.
+    public func simulateAuthFailureForTesting() {
+        handleAuthFailure()
+    }
+
+    /// Acknowledges a re-auth message after the AppDelegate has shown it,
+    /// so a subsequent failure can re-trigger.
+    public func clearNeedsReauthMessage() {
+        needsReauthMessage = nil
     }
 
     /// Initialise the published status from whatever's already in the
@@ -76,6 +130,7 @@ public final class DriveAuthState: ObservableObject {
         do {
             try await client.authenticate()
             status = .connected(email: nil)
+            needsReauthMessage = nil
             await refreshEmail()
         } catch {
             lastErrorMessage = (error as? LocalizedError)?.errorDescription
@@ -96,6 +151,7 @@ public final class DriveAuthState: ObservableObject {
                 ?? String(describing: error)
         }
         status = .disconnected
+        needsReauthMessage = nil
     }
 
     private func refreshEmail() async {

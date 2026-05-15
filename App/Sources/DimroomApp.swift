@@ -1,6 +1,7 @@
 import AppIcon
 import AppKit
 import Catalog
+import Combine
 import DriveClient
 import EditEngine
 import Harness
@@ -435,6 +436,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     private var catalogPublisher: CatalogPublisher?
     private var catalogUploader: DriveCatalogUploader?
     private var driveFileIdStore: FileSystemDriveFileIdStore?
+    private var driveReauthCancellable: AnyCancellable?
 
     /// Public read-only view of the wired-up `OriginalsCoordinator` so
     /// `ContentView` can route export-with-edits through it. Returns
@@ -514,6 +516,17 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
                 await driveAuthState.hydrate()
             }
         }
+
+        // Surface stale-token refresh failures (issue #195). When any
+        // authorized DriveClient request hits `refreshFailed`, the auth
+        // state publishes `needsReauthMessage`. Show a one-shot NSAlert
+        // and clear the message so the next failure can re-fire.
+        driveReauthCancellable = driveAuthState.$needsReauthMessage
+            .receive(on: RunLoop.main)
+            .sink { [weak self] message in
+                guard let self, let message else { return }
+                self.presentDriveReauthAlert(message: message)
+            }
 
         if let resolvedCatalog {
             let cacheDir = resolveOriginalsCacheDirectory(from: args)
@@ -709,6 +722,24 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     func disconnectGoogleDriveFromMenu() {
         Task { @MainActor in
             await driveAuthState.disconnect()
+        }
+    }
+
+    /// Shows a one-shot alert when a DriveClient operation has failed
+    /// to refresh — typically a stale or revoked token. Default action
+    /// re-runs the menu Connect flow; cancel just dismisses. The
+    /// message is cleared regardless so a future failure can re-fire.
+    private func presentDriveReauthAlert(message: String) {
+        let alert = NSAlert()
+        alert.messageText = "Google Drive Disconnected"
+        alert.informativeText = message
+        alert.alertStyle = .warning
+        alert.addButton(withTitle: "Reconnect…")
+        alert.addButton(withTitle: "Later")
+        let response = alert.runModal()
+        driveAuthState.clearNeedsReauthMessage()
+        if response == .alertFirstButtonReturn {
+            connectGoogleDriveFromMenu()
         }
     }
 
@@ -1023,6 +1054,7 @@ private final class ResultBox<T: Sendable>: @unchecked Sendable {
 /// the alert path. Replaced by the real client in `configure(client:)`.
 private struct UnconfiguredDriveAuth: DriveAuthenticating {
     var isAuthenticated: Bool { get async { false } }
+    var authFailures: AsyncStream<Void> { AsyncStream { $0.finish() } }
     func authenticate() async throws { throw DriveClientError.clientIDNotConfigured }
     func deauthenticate() async throws {}
     func fetchAccountEmail() async throws -> String? { nil }

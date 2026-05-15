@@ -53,6 +53,7 @@ struct DimroomCLI: ParsableCommand {
             ConnectDrive.self,
             DisconnectDrive.self,
             DriveAuthStateCmd.self,
+            SimulateDriveAuthFailure.self,
             PostMenuAction.self,
         ]
     )
@@ -883,6 +884,20 @@ extension DimroomCLI {
 
         func run() throws {
             try runCommand(.driveAuthState, socket: socket)
+        }
+    }
+
+    struct SimulateDriveAuthFailure: ParsableCommand {
+        static let configuration = CommandConfiguration(
+            commandName: "simulate-drive-auth-failure",
+            abstract: "Inject a DriveAuthState transition equivalent to a refresh-token failure (issue #195). For deterministic Layer C tests of the stale-token recovery path."
+        )
+
+        @Option(name: .long, help: "Path to the harness socket.")
+        var socket: String = HarnessServer.defaultSocketPath
+
+        func run() throws {
+            try runCommand(.simulateDriveAuthFailure, socket: socket)
         }
     }
 

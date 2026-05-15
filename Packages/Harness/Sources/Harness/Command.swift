@@ -46,6 +46,7 @@ public enum Command: Codable, Sendable, Equatable {
     case cancelCrop
     case setCropPreset(name: String)
     case resetCrop
+    case inspectMenu(title: String)
     case publishCatalog
     case connectDrive
     case disconnectDrive
@@ -82,6 +83,7 @@ public enum Command: Codable, Sendable, Equatable {
         case height
         case angle
         case name
+        case title
     }
 
     private enum CommandType: String, Codable {
@@ -128,6 +130,7 @@ public enum Command: Codable, Sendable, Equatable {
         case cancelCrop
         case setCropPreset
         case resetCrop
+        case inspectMenu
         case publishCatalog
         case connectDrive
         case disconnectDrive
@@ -271,6 +274,9 @@ public enum Command: Codable, Sendable, Equatable {
             self = .setCropPreset(name: name)
         case .resetCrop:
             self = .resetCrop
+        case .inspectMenu:
+            let title = try container.decode(String.self, forKey: .title)
+            self = .inspectMenu(title: title)
         case .publishCatalog:
             self = .publishCatalog
         case .connectDrive:
@@ -413,6 +419,9 @@ public enum Command: Codable, Sendable, Equatable {
             try container.encode(name, forKey: .name)
         case .resetCrop:
             try container.encode(CommandType.resetCrop, forKey: .type)
+        case .inspectMenu(let title):
+            try container.encode(CommandType.inspectMenu, forKey: .type)
+            try container.encode(title, forKey: .title)
         case .publishCatalog:
             try container.encode(CommandType.publishCatalog, forKey: .type)
         case .connectDrive:

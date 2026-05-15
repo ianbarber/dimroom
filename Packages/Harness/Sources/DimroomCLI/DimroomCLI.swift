@@ -49,6 +49,7 @@ struct DimroomCLI: ParsableCommand {
             CancelCrop.self,
             SetCropPreset.self,
             ResetCrop.self,
+            InspectMenu.self,
             ConnectDrive.self,
             DisconnectDrive.self,
             DriveAuthStateCmd.self,
@@ -823,6 +824,23 @@ extension DimroomCLI {
 
         func run() throws {
             try runCommand(.resetCrop, socket: socket)
+        }
+    }
+
+    struct InspectMenu: ParsableCommand {
+        static let configuration = CommandConfiguration(
+            commandName: "inspect-menu",
+            abstract: "Inspect a top-level main-menu submenu and return each item's title, key equivalent, modifier mask, and enabled state."
+        )
+
+        @Argument(help: "The title of the top-level menu to inspect (e.g. 'Edit', 'File').")
+        var title: String
+
+        @Option(name: .long, help: "Path to the harness socket.")
+        var socket: String = HarnessServer.defaultSocketPath
+
+        func run() throws {
+            try runCommand(.inspectMenu(title: title), socket: socket)
         }
     }
 

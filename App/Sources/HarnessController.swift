@@ -275,6 +275,9 @@ final class HarnessController: @unchecked Sendable {
         case .resetCrop:
             return await handleResetCrop()
 
+        case .inspectMenu(let title):
+            return await handleInspectMenu(title: title)
+
         case .publishCatalog:
             return await handlePublishCatalog()
 
@@ -879,6 +882,40 @@ final class HarnessController: @unchecked Sendable {
         f.formatOptions = [.withInternetDateTime]
         return f
     }()
+
+    // MARK: - Menu inspection
+
+    @MainActor
+    private func handleInspectMenu(title: String) async -> Response {
+        guard let mainMenu = NSApplication.shared.mainMenu else {
+            return .error("main menu is not available")
+        }
+        guard let topItem = mainMenu.items.first(where: { $0.title == title }),
+              let submenu = topItem.submenu else {
+            return .error("menu '\(title)' not found")
+        }
+        // We report whatever NSMenuItem.isEnabled SwiftUI rendered into
+        // the menu — that's exactly what the user would see if they
+        // opened the menu right now. Note that in harness mode SwiftUI
+        // does not re-render `.commands` on every `@Published` change
+        // (the scene needs an active UI cycle), so the dynamic flip is
+        // only observable at scene creation — see the docstring on
+        // `harness-multi-select-delete-flow.sh` for the regression
+        // story that drives the trade-off.
+        let items: [AnyCodableValue] = submenu.items.map { item in
+            .dictionary([
+                "title": .string(item.title),
+                "keyEquivalent": .string(item.keyEquivalent),
+                "modifierMask": .int(Int(item.keyEquivalentModifierMask.rawValue)),
+                "isEnabled": .bool(item.isEnabled),
+                "isSeparator": .bool(item.isSeparatorItem),
+            ])
+        }
+        return .ok(data: .dictionary([
+            "title": .string(title),
+            "items": .array(items),
+        ]))
+    }
 
     @MainActor
     private func captureScreenshot(to path: String) async -> Response {

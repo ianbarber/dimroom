@@ -143,10 +143,10 @@ public final class DevelopViewModel: ObservableObject {
             let catalog = self.catalog
             let originalFetcher = self.originalFetcher
             Task.detached {
-                guard let asset = try? catalog.fetchAsset(id: assetId) else { return }
-                await Self.regenerateWithMasterRecovery(
-                    asset: asset,
+                await Self.fetchAndRegenerateWithMasterRecovery(
+                    assetId: assetId,
                     editState: next,
+                    catalog: catalog,
                     previewStore: previewStore,
                     originalFetcher: originalFetcher
                 )
@@ -184,10 +184,10 @@ public final class DevelopViewModel: ObservableObject {
         let catalog = self.catalog
         let originalFetcher = self.originalFetcher
         Task.detached {
-            guard let asset = try? catalog.fetchAsset(id: assetId) else { return }
-            await Self.regenerateWithMasterRecovery(
-                asset: asset,
+            await Self.fetchAndRegenerateWithMasterRecovery(
+                assetId: assetId,
                 editState: reloaded,
+                catalog: catalog,
                 previewStore: previewStore,
                 originalFetcher: originalFetcher
             )
@@ -357,6 +357,8 @@ public final class DevelopViewModel: ObservableObject {
         case "sharpening": return \.sharpening
         case "vibrance": return \.vibrance
         case "saturation": return \.saturation
+        case "luminanceNoiseReduction": return \.luminanceNoiseReduction
+        case "chrominanceNoiseReduction": return \.chrominanceNoiseReduction
         case "vignetteAmount": return \.vignetteAmount
         case "vignetteRoundness": return \.vignetteRoundness
         case "vignetteSoftness": return \.vignetteSoftness
@@ -555,6 +557,29 @@ public final class DevelopViewModel: ObservableObject {
         saveTask = nil
         hasUnsavedChanges = false
         pendingUndoPrevious = nil
+    }
+
+    /// Fetch `assetId` from the catalog and forward into
+    /// `regenerateWithMasterRecovery`. Composed helper for the
+    /// `deactivate` / `reloadEditState` `Task.detached` blocks, which
+    /// both need to look up the asset before regenerating now that
+    /// `self` has escaped. The `scheduleSave` site keeps its inline
+    /// fetch because its `if let asset` lives next to a `Task.isCancelled`
+    /// guard inside the outer `saveTask`.
+    nonisolated static func fetchAndRegenerateWithMasterRecovery(
+        assetId: UUID,
+        editState: EditState,
+        catalog: CatalogDatabase,
+        previewStore: PreviewStore,
+        originalFetcher: (any OriginalFetcher)?
+    ) async {
+        guard let asset = try? catalog.fetchAsset(id: assetId) else { return }
+        await regenerateWithMasterRecovery(
+            asset: asset,
+            editState: editState,
+            previewStore: previewStore,
+            originalFetcher: originalFetcher
+        )
     }
 
     /// Run `regenerateWithEdit` for `asset`, transparently rebuilding

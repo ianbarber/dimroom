@@ -721,6 +721,80 @@ final class RendererTests: XCTestCase {
         XCTAssertEqual(Int(whitePx.r), 255, accuracy: 4, "x=width-1 must stay at white endpoint")
     }
 
+    // MARK: - Noise Reduction
+
+    func testNoiseReductionIdentityPassThrough() {
+        // With both NR sliders at 0 the renderer must short-circuit the
+        // noise-reduction stage entirely. Sampling the midpoint of the
+        // gradient (and a colour-image edge) should produce bit-for-bit
+        // identical results to a default EditState.
+        let gradient = makeGradientImage()
+        let mid = Int(gradient.extent.width) / 2
+
+        let identity = Renderer.render(source: gradient, editState: EditState())
+        let zeroed = Renderer.render(
+            source: gradient,
+            editState: EditState(luminanceNoiseReduction: 0, chrominanceNoiseReduction: 0)
+        )
+        let srcPx = samplePixel(image: identity, x: mid, y: mid, context: ctx)
+        let resPx = samplePixel(image: zeroed, x: mid, y: mid, context: ctx)
+        XCTAssertEqual(srcPx.r, resPx.r)
+        XCTAssertEqual(srcPx.g, resPx.g)
+        XCTAssertEqual(srcPx.b, resPx.b)
+        XCTAssertEqual(srcPx.a, resPx.a)
+    }
+
+    func testStrongLuminanceNoiseReductionSmoothsImage() {
+        // CINoiseReduction's luminance smoothing crops a few pixels around
+        // the edge of the output. Sample on an interior pixel and assert
+        // the rendered output deviates from the source — luma denoising
+        // at full strength must be a visible operation.
+        let source = makeColorImage()
+        let edgeX = Int(source.extent.width) / 2 - 1
+        let midY = Int(source.extent.height) / 2
+
+        let srcPx = samplePixel(image: source, x: edgeX, y: midY, context: ctx)
+        let result = Renderer.render(
+            source: source,
+            editState: EditState(luminanceNoiseReduction: 100)
+        )
+        let resPx = samplePixel(image: result, x: edgeX, y: midY, context: ctx)
+
+        let changed = srcPx.r != resPx.r || srcPx.g != resPx.g || srcPx.b != resPx.b
+        XCTAssertTrue(changed, "Strong luminance NR should visibly change edge pixels")
+    }
+
+    func testStrongChrominanceNoiseReductionShiftsColour() {
+        // Chroma denoising acts on the colour channels — pushing it to
+        // full strength on a high-saturation patch should perturb at
+        // least one RGB channel.
+        let source = makeColorImage()
+        let edgeX = Int(source.extent.width) / 2 - 1
+        let midY = Int(source.extent.height) / 2
+
+        let srcPx = samplePixel(image: source, x: edgeX, y: midY, context: ctx)
+        let result = Renderer.render(
+            source: source,
+            editState: EditState(chrominanceNoiseReduction: 100)
+        )
+        let resPx = samplePixel(image: result, x: edgeX, y: midY, context: ctx)
+
+        let changed = srcPx.r != resPx.r || srcPx.g != resPx.g || srcPx.b != resPx.b
+        XCTAssertTrue(changed, "Strong chrominance NR should visibly change saturated edge pixels")
+    }
+
+    func testNoiseReductionExtentUnchanged() {
+        // Whatever the slider values, the output extent must match the
+        // source so downstream stages (white balance, contrast…) keep
+        // operating over the same coordinate space.
+        let source = makeColorImage()
+        let result = Renderer.render(
+            source: source,
+            editState: EditState(luminanceNoiseReduction: 80, chrominanceNoiseReduction: 80)
+        )
+        XCTAssertEqual(result.extent, source.extent)
+    }
+
     func testClaritySymmetry() {
         // Positive and negative clarity should move the same edge pixel in opposite directions
         let source = makeColorImage()

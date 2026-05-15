@@ -57,6 +57,7 @@ struct DimroomCLI: ParsableCommand {
             DriveAuthStateCmd.self,
             SimulateDriveAuthFailure.self,
             PostMenuAction.self,
+            ReleaseHeldDownloads.self,
         ]
     )
 }
@@ -530,7 +531,7 @@ extension DimroomCLI {
         @Argument(help: "The UUID of the asset.")
         var id: String
 
-        @Argument(help: "Parameter name (exposure, contrast, highlights, shadows, whites, blacks, temperature, tint, clarity, sharpening, vibrance, saturation, vignetteAmount, vignetteRoundness, vignetteSoftness).")
+        @Argument(help: "Parameter name (exposure, contrast, highlights, shadows, whites, blacks, temperature, tint, clarity, sharpening, vibrance, saturation, luminanceNoiseReduction, chrominanceNoiseReduction, vignetteAmount, vignetteRoundness, vignetteSoftness).")
         var parameter: String
 
         @Argument(help: "The value to set.")
@@ -556,7 +557,7 @@ extension DimroomCLI {
         @Argument(help: "The UUID of the asset.")
         var id: String
 
-        @Argument(help: "Parameter name (exposure, contrast, highlights, shadows, whites, blacks, temperature, tint, clarity, sharpening, vibrance, saturation, vignetteAmount, vignetteRoundness, vignetteSoftness).")
+        @Argument(help: "Parameter name (exposure, contrast, highlights, shadows, whites, blacks, temperature, tint, clarity, sharpening, vibrance, saturation, luminanceNoiseReduction, chrominanceNoiseReduction, vignetteAmount, vignetteRoundness, vignetteSoftness).")
         var parameter: String
 
         @Option(name: .long, help: "Path to the harness socket.")
@@ -952,6 +953,20 @@ extension DimroomCLI {
 
         func run() throws {
             try runCommand(.simulateDriveAuthFailure, socket: socket)
+        }
+    }
+
+    struct ReleaseHeldDownloads: ParsableCommand {
+        static let configuration = CommandConfiguration(
+            commandName: "release-held-downloads",
+            abstract: "Drain every parked download in the hold-until-released harness stub (paired with DIMROOM_HARNESS_STUB_DOWNLOADER=hold-until-released)."
+        )
+
+        @Option(name: .long, help: "Path to the harness socket.")
+        var socket: String = HarnessServer.defaultSocketPath
+
+        func run() throws {
+            try runCommand(.releaseHeldDownloads, socket: socket)
         }
     }
 

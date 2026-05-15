@@ -12,6 +12,11 @@ public enum Renderer {
     public static func render(source: CIImage, editState: EditState) -> CIImage {
         var image = source
         image = applyExposure(image, ev: editState.exposure)
+        image = applyNoiseReduction(
+            image,
+            luminance: editState.luminanceNoiseReduction,
+            chrominance: editState.chrominanceNoiseReduction
+        )
         image = applyWhiteBalance(image, temperature: editState.temperature, tint: editState.tint)
         image = applyHighlightsShadows(image, highlights: editState.highlights, shadows: editState.shadows)
         image = applyWhitesBlacks(image, whites: editState.whites, blacks: editState.blacks)
@@ -166,6 +171,26 @@ public enum Renderer {
         filter.setValue(1.0, forKey: "inputContrast")
         filter.setValue(0.0, forKey: "inputBrightness")
         return filter.outputImage!
+    }
+
+    private static func applyNoiseReduction(
+        _ image: CIImage,
+        luminance: Double,
+        chrominance: Double
+    ) -> CIImage {
+        guard luminance != 0 || chrominance != 0 else { return image }
+        // CINoiseReduction packs both luma and chroma NR into a single pass:
+        // `inputNoiseLevel` is the chroma noise threshold (more aggressive
+        // chroma denoising as it climbs), and `inputSharpness` is how much
+        // luminance detail to keep afterward (lower = more luma smoothing).
+        // Map chroma 0…100 → 0…0.1 and luma 0…100 → 0.9…0.4 (inverted) so
+        // a slider at zero leaves that axis at the filter's near-identity
+        // value while the other slider acts independently.
+        let filter = CIFilter(name: "CINoiseReduction")!
+        filter.setValue(image, forKey: kCIInputImageKey)
+        filter.setValue(chrominance / 1000.0, forKey: "inputNoiseLevel")
+        filter.setValue(0.9 - (luminance / 100.0) * 0.5, forKey: "inputSharpness")
+        return filter.outputImage!.cropped(to: image.extent)
     }
 
     private static func applySharpening(_ image: CIImage, sharpening: Double) -> CIImage {

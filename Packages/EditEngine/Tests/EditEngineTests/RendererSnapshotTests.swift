@@ -90,6 +90,15 @@ final class RendererSnapshotTests: XCTestCase {
         assertSnapshot(of: image, as: .image(precision: 0.99, perceptualPrecision: 0.98))
     }
 
+    func testStrongNoiseReductionSnapshot() {
+        let source = makeColorImage()
+        let image = renderToNSImage(
+            source: source,
+            editState: EditState(luminanceNoiseReduction: 80, chrominanceNoiseReduction: 80)
+        )
+        assertSnapshot(of: image, as: .image(precision: 0.99, perceptualPrecision: 0.98))
+    }
+
     func testLightVignetteSnapshot() {
         let source = makeMidGreyImage()
         let image = renderToNSImage(

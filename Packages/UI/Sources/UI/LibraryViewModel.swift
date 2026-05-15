@@ -78,10 +78,19 @@ public final class LibraryViewModel: ObservableObject {
     /// fired, or the fetch hit the cache and skipped the network). Values
     /// are clamped monotonically non-decreasing so a late, lower tick
     /// cannot move the bar backwards. Writes are additionally gated on
-    /// `downloadingAssetIds.contains(assetId)` so a progress `Task`
-    /// scheduled before the cleanup `defer` but executed after it cannot
-    /// resurrect a cleared entry.
+    /// the per-asset `currentFetchIdByAssetId` matching the id captured
+    /// when the progress closure was created, so a stale tick from
+    /// fetch N cannot pollute fetch N+1's slot in a back-to-back
+    /// re-fetch of the same asset.
     @Published public private(set) var downloadProgressByAssetId: [UUID: Double] = [:]
+
+    /// Per-asset id of the currently in-flight fetch. Each invocation of
+    /// `fetchOriginalIfNeeded` mints a fresh UUID, writes it here, and
+    /// captures it in the progress callback; a late tick whose captured
+    /// id no longer matches is dropped. The cleanup `defer` likewise
+    /// only clears its own entry, so a late tail from fetch N doesn't
+    /// wipe state that fetch N+1 has just inserted.
+    private var currentFetchIdByAssetId: [UUID: UUID] = [:]
 
     /// App-level coordinator that returns a local URL for an original,
     /// downloading it from Drive if needed. `nil` in tests and the
@@ -331,15 +340,22 @@ public final class LibraryViewModel: ObservableObject {
     /// fall back to the preview in that case.
     public func fetchOriginalIfNeeded(assetId: UUID) async -> URL? {
         guard let fetcher = originalFetcher else { return nil }
+        let fetchId = UUID()
         downloadingAssetIds.insert(assetId)
+        currentFetchIdByAssetId[assetId] = fetchId
         defer {
-            downloadingAssetIds.remove(assetId)
-            downloadProgressByAssetId.removeValue(forKey: assetId)
+            // Only clear state if it's still ours — a back-to-back
+            // re-fetch may have replaced it before this defer ran.
+            if currentFetchIdByAssetId[assetId] == fetchId {
+                currentFetchIdByAssetId.removeValue(forKey: assetId)
+                downloadingAssetIds.remove(assetId)
+                downloadProgressByAssetId.removeValue(forKey: assetId)
+            }
         }
         let progress: @Sendable (Double) -> Void = { [weak self] fraction in
             Task { @MainActor [weak self] in
                 guard let self else { return }
-                guard self.downloadingAssetIds.contains(assetId) else { return }
+                guard self.currentFetchIdByAssetId[assetId] == fetchId else { return }
                 let clamped = min(max(fraction, 0), 1)
                 let existing = self.downloadProgressByAssetId[assetId] ?? 0
                 if clamped >= existing {

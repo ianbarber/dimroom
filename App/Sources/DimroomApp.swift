@@ -7,6 +7,7 @@ import Harness
 import ImportKit
 import Previews
 import SwiftUI
+import SyncEngine
 import UI
 
 @main
@@ -41,9 +42,11 @@ struct DimroomApp: App {
 
                 Divider()
 
-                Button("Connect Google Drive...") {
-                    appDelegate.connectGoogleDriveFromMenu()
-                }
+                DriveMenuItems(
+                    state: appDelegate.driveAuthState,
+                    onConnect: { appDelegate.connectGoogleDriveFromMenu() },
+                    onDisconnect: { appDelegate.disconnectGoogleDriveFromMenu() }
+                )
 
                 Button("Upload Selected to Drive") {
                     appDelegate.uploadSelectedToDriveFromMenu()
@@ -94,7 +97,41 @@ private struct DeleteMenuItem: View {
             NotificationCenter.default.post(name: .requestDeleteSelected, object: nil)
         }
         .keyboardShortcut(.delete, modifiers: [])
-        .disabled(libraryViewModel.selectedAssetIds.isEmpty || router.route != .library)
+        .disabled(
+            libraryViewModel.selectedAssetIds.isEmpty
+                || router.route != .library
+                || libraryViewModel.scope == .recentlyDeleted
+        )
+    }
+}
+
+/// Mirrors `UndoRedoMenuItems`: observes `DriveAuthState` so the menu
+/// flips between "Connect Google Drive…", "Connecting…", and
+/// "Disconnect Google Drive (email)" as the auth status changes. This
+/// is the fix for #166 — before this view existed, the menu only knew
+/// the static "Connect Google Drive…" string and ignored auth events.
+private struct DriveMenuItems: View {
+    @ObservedObject var state: DriveAuthState
+    let onConnect: () -> Void
+    let onDisconnect: () -> Void
+
+    var body: some View {
+        switch state.status {
+        case .disconnected:
+            Button("Connect Google Drive...") { onConnect() }
+        case .connecting:
+            Button("Connecting to Google Drive…") { }
+                .disabled(true)
+        case .connected(let email):
+            Button(disconnectTitle(email: email)) { onDisconnect() }
+        }
+    }
+
+    private func disconnectTitle(email: String?) -> String {
+        if let email, !email.isEmpty {
+            return "Disconnect Google Drive (\(email))"
+        }
+        return "Disconnect Google Drive"
     }
 }
 
@@ -154,6 +191,12 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     /// undo writes go against the same backing store the UI reads from.
     private(set) var undoStack: UndoStack = UndoStack.empty()
     private(set) var catalog: CatalogDatabase?
+    /// Observable wrapper around the Drive client's auth state. Created
+    /// eagerly with a no-op stub so the SwiftUI `.commands` builder — which
+    /// reads it before `applicationDidFinishLaunching` runs — has a real
+    /// `ObservableObject` to bind to. Reconfigured with the resolved
+    /// `DriveClient` in `applicationDidFinishLaunching` and then hydrated.
+    private(set) var driveAuthState: DriveAuthState = DriveAuthState(client: UnconfiguredDriveAuth())
     private var previewStore: PreviewStore?
     private var originalsDirectory: URL?
     private var harnessController: HarnessController?
@@ -161,6 +204,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     private var originalsCoordinator: OriginalsCoordinator?
     private var driveClient: DriveClient?
     private var driveUploader: DriveUploader?
+    private var catalogPublisher: CatalogPublisher?
+    private var catalogUploader: DriveCatalogUploader?
+    private var driveFileIdStore: FileSystemDriveFileIdStore?
 
     /// Public read-only view of the wired-up `OriginalsCoordinator` so
     /// `ContentView` can route export-with-edits through it. Returns
@@ -187,8 +233,25 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         let resolvedOriginalsDirectory = resolveOriginalsDirectory()
         let previewCacheDirectory = resolvePreviewCacheDirectory(from: args)
         let resolvedPreviewStore = PreviewStore(cacheDirectory: previewCacheDirectory)
-        let resolvedCatalog = loadCatalog(from: args)
 
+        // Resolve drive client first so restoreIfNeeded can probe Drive
+        // before the catalog is opened.
+        let resolvedDriveClient = resolveDriveClient()
+        self.driveClient = resolvedDriveClient
+
+        let catalogPath = resolveCatalogPath(from: args)
+        let fileIdStore = FileSystemDriveFileIdStore(
+            path: FileSystemDriveFileIdStore.defaultPath()
+        )
+        self.driveFileIdStore = fileIdStore
+
+        attemptCatalogRestore(
+            catalogPath: catalogPath,
+            driveClient: resolvedDriveClient,
+            fileIdStore: fileIdStore
+        )
+
+        let resolvedCatalog = openCatalog(at: catalogPath)
         self.catalog = resolvedCatalog
         self.previewStore = resolvedPreviewStore
         self.originalsDirectory = resolvedOriginalsDirectory
@@ -215,8 +278,14 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             developViewModel.attach(undoStack: undoStack)
         }
 
-        let resolvedDriveClient = resolveDriveClient()
-        self.driveClient = resolvedDriveClient
+        if let resolvedDriveClient {
+            driveAuthState.configure(client: resolvedDriveClient)
+            // Hydrate from the stored refresh token so the menu reflects
+            // the connected state on launch without a re-auth round-trip.
+            Task { @MainActor in
+                await driveAuthState.hydrate()
+            }
+        }
 
         if let resolvedCatalog {
             let cacheDir = resolveOriginalsCacheDirectory(from: args)
@@ -245,6 +314,32 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             let session = AuthorizedSession(client: httpClient, provider: resolvedDriveClient)
             let resolver = DriveFolderResolver(session: session)
             self.driveUploader = DriveUploader(session: session, folderResolver: resolver)
+
+            // Catalog publisher reuses the same authorized session +
+            // folder resolver but talks through a catalog-specific
+            // uploader (overwrite-in-place, no dedup).
+            if let resolvedCatalog {
+                let catalogUploader = DriveCatalogUploader(
+                    session: session,
+                    folderResolver: resolver
+                )
+                self.catalogUploader = catalogUploader
+                let publisher = CatalogPublisher(
+                    catalog: resolvedCatalog,
+                    uploader: catalogUploader,
+                    fileIdStore: driveFileIdStore ?? FileSystemDriveFileIdStore(
+                        path: FileSystemDriveFileIdStore.defaultPath()
+                    )
+                )
+                self.catalogPublisher = publisher
+                // Wire onChange → debouncer trigger. Captured weakly so
+                // the catalog doesn't pin the publisher in a retain
+                // cycle after the app shuts down.
+                resolvedCatalog.onChange = { [weak publisher] in
+                    publisher?.scheduleDebouncedPublish()
+                }
+                Task { await publisher.start() }
+            }
         }
 
         guard args.contains("--harness") else { return }
@@ -292,7 +387,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             uploadCoordinator: uploadCoordinator,
             driveUploader: driveUploader,
             originalsCoordinator: originalsCoordinator,
-            undoStack: undoStack
+            undoStack: undoStack,
+            catalogPublisher: catalogPublisher,
+            driveAuthState: driveAuthState
         )
         do {
             try controller.start(socketPath: socketPath)
@@ -361,7 +458,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     // MARK: - Drive menu actions
 
     func connectGoogleDriveFromMenu() {
-        guard let driveClient else {
+        guard driveClient != nil else {
             let alert = NSAlert()
             alert.messageText = "Drive Not Configured"
             alert.informativeText = "Set DIMROOM_GOOGLE_CLIENT_ID or create ~/Library/Application Support/dimroom/oauth.json."
@@ -370,15 +467,20 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             return
         }
         Task { @MainActor in
-            do {
-                try await driveClient.authenticate()
-            } catch {
+            await driveAuthState.connect()
+            if let message = driveAuthState.lastErrorMessage {
                 let alert = NSAlert()
                 alert.messageText = "Drive Authentication Failed"
-                alert.informativeText = error.localizedDescription
+                alert.informativeText = message
                 alert.alertStyle = .critical
                 alert.runModal()
             }
+        }
+    }
+
+    func disconnectGoogleDriveFromMenu() {
+        Task { @MainActor in
+            await driveAuthState.disconnect()
         }
     }
 
@@ -469,34 +571,127 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         }
     }
 
-    /// Opens the catalog database. Uses `--fixture-catalog <path>` when
-    /// present (harness / test mode); otherwise falls back to the default
-    /// user catalog at ~/Library/Application Support/Dimroom/catalog.sqlite.
-    private func loadCatalog(from args: [String]) -> CatalogDatabase? {
-        let path: String
+    /// Resolves the catalog path from `--fixture-catalog <path>` if
+    /// present, otherwise the default location under Application
+    /// Support. Returns `nil` only when the parent directory cannot be
+    /// created (extremely unlikely).
+    private func resolveCatalogPath(from args: [String]) -> String {
         if let index = args.firstIndex(of: "--fixture-catalog"),
            index + 1 < args.count {
-            path = args[index + 1]
-        } else {
-            let appSupport = FileManager.default.urls(
-                for: .applicationSupportDirectory,
-                in: .userDomainMask
-            ).first ?? FileManager.default.temporaryDirectory
-            let catalogDir = appSupport.appendingPathComponent("Dimroom", isDirectory: true)
-            do {
-                try FileManager.default.createDirectory(at: catalogDir, withIntermediateDirectories: true)
-            } catch {
-                print("[Dimroom] Failed to create catalog directory: \(error)")
-                return nil
-            }
-            path = catalogDir.appendingPathComponent("catalog.sqlite").path
+            return args[index + 1]
         }
+        let appSupport = FileManager.default.urls(
+            for: .applicationSupportDirectory,
+            in: .userDomainMask
+        ).first ?? FileManager.default.temporaryDirectory
+        let catalogDir = appSupport.appendingPathComponent("Dimroom", isDirectory: true)
+        try? FileManager.default.createDirectory(
+            at: catalogDir,
+            withIntermediateDirectories: true
+        )
+        return catalogDir.appendingPathComponent("catalog.sqlite").path
+    }
+
+    /// Opens the catalog at `path`. Returns nil on failure; the caller
+    /// surfaces a degraded "no catalog" mode where catalog-dependent
+    /// commands respond with an error.
+    private func openCatalog(at path: String) -> CatalogDatabase? {
         do {
             return try CatalogDatabase(path: path)
         } catch {
             print("[Dimroom] Failed to open catalog at \(path): \(error)")
             return nil
         }
+    }
+
+    /// On a fresh install (no local catalog, Drive authenticated), offer
+    /// to restore the most recent catalog from Drive before opening it.
+    /// Blocks the launch path so the catalog open below sees the
+    /// restored file. The bridge from sync to async uses a semaphore;
+    /// it only runs when the local catalog is missing, so the common
+    /// launch path is unaffected.
+    private func attemptCatalogRestore(
+        catalogPath: String,
+        driveClient: DriveClient?,
+        fileIdStore: DriveFileIdStore
+    ) {
+        if FileManager.default.fileExists(atPath: catalogPath) { return }
+        guard let driveClient else { return }
+
+        let isAuthenticated = Self.runBlocking { await driveClient.isAuthenticated }
+        guard isAuthenticated else { return }
+
+        let httpClient = URLSessionHTTPClient()
+        let session = AuthorizedSession(client: httpClient, provider: driveClient)
+        let resolver = DriveFolderResolver(session: session)
+        let uploader = DriveCatalogUploader(session: session, folderResolver: resolver)
+
+        let result: Result<RestoreOutcome, Error> = Self.runBlocking { @Sendable in
+            do {
+                let outcome = try await CatalogPublisher.restoreIfNeeded(
+                    localPath: catalogPath,
+                    uploader: uploader,
+                    fileIdStore: fileIdStore,
+                    prompt: { ref in
+                        await MainActor.run { Self.confirmRestore(ref) }
+                    }
+                )
+                return .success(outcome)
+            } catch {
+                return .failure(error)
+            }
+        }
+
+        switch result {
+        case .success(.restored(_, let bytes)):
+            print("[Dimroom] catalog restored from Drive (\(bytes) bytes)")
+        case .success(.declinedByUser):
+            print("[Dimroom] catalog restore declined by user")
+        case .success(.noRemoteCatalog),
+             .success(.notAuthenticated),
+             .success(.localCatalogPresent):
+            break
+        case .failure(let error):
+            print("[Dimroom] catalog restore failed: \(error)")
+        }
+    }
+
+    /// Synchronously runs an async closure on a detached task and waits
+    /// for it. Used during launch where we can't easily make the
+    /// surrounding code `async` (NSApplicationDelegate hook). Keep usage
+    /// minimal — once-per-launch, off the hot path.
+    private static func runBlocking<T: Sendable>(
+        _ work: @escaping @Sendable () async -> T
+    ) -> T {
+        let semaphore = DispatchSemaphore(value: 0)
+        let box = ResultBox<T>()
+        Task.detached {
+            let value = await work()
+            box.set(value)
+            semaphore.signal()
+        }
+        semaphore.wait()
+        return box.take()
+    }
+
+    @MainActor
+    private static func confirmRestore(_ ref: CatalogRestorePrompt) -> Bool {
+        let alert = NSAlert()
+        alert.messageText = "Restore Catalog From Drive?"
+        let sizeMB = Double(ref.sizeBytes) / 1_048_576
+        var info = "A catalog was found on Google Drive (\(String(format: "%.1f", sizeMB)) MB)."
+        if let modified = ref.modifiedTime {
+            let formatter = DateFormatter()
+            formatter.dateStyle = .medium
+            formatter.timeStyle = .short
+            info += " Last modified \(formatter.string(from: modified))."
+        }
+        info += "\n\nDownload it to this machine? Selecting 'Start Fresh' opens an empty local catalog instead."
+        alert.informativeText = info
+        alert.alertStyle = .informational
+        alert.addButton(withTitle: "Restore")
+        alert.addButton(withTitle: "Start Fresh")
+        return alert.runModal() == .alertFirstButtonReturn
     }
 
     /// Parses `--preview-cache <path>` out of the argument vector. Falls
@@ -579,6 +774,30 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             return nil
         }
     }
+}
+
+/// Tiny lock-protected slot used by `AppDelegate.runBlocking` to
+/// shuttle a value across the sync/async boundary during launch.
+private final class ResultBox<T: Sendable>: @unchecked Sendable {
+    private let lock = NSLock()
+    private var value: T?
+    func set(_ v: T) { lock.lock(); value = v; lock.unlock() }
+    func take() -> T {
+        lock.lock(); defer { lock.unlock() }
+        return value!
+    }
+}
+
+/// Placeholder authenticator used to construct `DriveAuthState` before
+/// the real `DriveClient` is resolved (i.e. before
+/// `applicationDidFinishLaunching` runs). Always reports unauthenticated;
+/// any auth call fails so the UI surfaces "Drive Not Configured" via
+/// the alert path. Replaced by the real client in `configure(client:)`.
+private struct UnconfiguredDriveAuth: DriveAuthenticating {
+    var isAuthenticated: Bool { get async { false } }
+    func authenticate() async throws { throw DriveClientError.clientIDNotConfigured }
+    func deauthenticate() async throws {}
+    func fetchAccountEmail() async throws -> String? { nil }
 }
 
 /// Downloader used when Drive credentials aren't configured. Always

@@ -144,6 +144,20 @@ echo "$STATE_OUT"
 assert_json_field "scopeKind" "$STATE_OUT" "data.scopeKind" "recentlyDeleted"
 assert_json_field "assetCount in trash" "$STATE_OUT" "data.assetCount" "2"
 
+# Regression for #181: in the Recently Deleted scope, deleteAssets must
+# be a no-op. Selecting a trash row and re-issuing delete-assets must
+# leave the trash count and scope untouched. (The toast lifecycle is
+# covered at Layer A in LibraryViewModelTests; the prior delete's toast
+# is still active at this point so we can't sniff it here.)
+echo "=== deleteAssets in Recently Deleted is a no-op (#181) ==="
+"$CLI_BIN" select-assets "$ID1" --socket "$SOCKET" > /dev/null
+"$CLI_BIN" delete-assets "$ID1" --socket "$SOCKET" > /dev/null
+sleep 1
+STATE_OUT=$("$CLI_BIN" state --socket "$SOCKET")
+echo "$STATE_OUT"
+assert_json_field "scope unchanged" "$STATE_OUT" "data.scopeKind" "recentlyDeleted"
+assert_json_field "trash count unchanged" "$STATE_OUT" "data.assetCount" "2"
+
 echo "=== screenshot Recently Deleted ==="
 "$CLI_BIN" screenshot "$SCREENSHOT_DIR/trash.png" --socket "$SOCKET" > /dev/null
 

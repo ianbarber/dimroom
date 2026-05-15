@@ -82,6 +82,31 @@ enum TestFixtures {
         return url
     }
 
+    /// Write a solid-colour JPEG at the **display-tier** preview path
+    /// (`<hash>.edit.preview.jpg`). Tests that need to prove a consumer
+    /// reads master vs. display can lay down distinct master and display
+    /// files with different dimensions or colours.
+    @discardableResult
+    static func placeDisplayPreview(
+        for asset: Asset,
+        cacheDirectory: URL,
+        color: (r: UInt8, g: UInt8, b: UInt8),
+        width: Int = 800,
+        height: Int = 600
+    ) throws -> URL {
+        let prefix = String(asset.contentHash.prefix(2))
+        let dir = cacheDirectory.appendingPathComponent(prefix, isDirectory: true)
+        try FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true)
+        let url = dir.appendingPathComponent("\(asset.contentHash).edit.preview.jpg")
+        try writeSolidColorJPEG(
+            width: width,
+            height: height,
+            color: color,
+            to: url
+        )
+        return url
+    }
+
     /// Public entry point used by rotate tests that need a real JPEG on
     /// disk for `PreviewStore.generate` to decode. Mirrors the internal
     /// helper used by `placeThumbnail` / `placePreview`.

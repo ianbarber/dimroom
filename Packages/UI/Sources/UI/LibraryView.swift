@@ -130,7 +130,7 @@ public struct LibraryView: View {
         .buttonStyle(.borderless)
         .help("Delete Selected")
         .accessibilityLabel("Delete Selected")
-        .disabled(viewModel.selectedAssetIds.isEmpty)
+        .disabled(viewModel.selectedAssetIds.isEmpty || viewModel.scope == .recentlyDeleted)
     }
 
     /// Bridge the view model's `setMinRating(_:)` async entry point into

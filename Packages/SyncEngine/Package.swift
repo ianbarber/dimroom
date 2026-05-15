@@ -8,8 +8,21 @@ let package = Package(
     products: [
         .library(name: "SyncEngine", targets: ["SyncEngine"]),
     ],
+    dependencies: [
+        .package(path: "../Catalog"),
+        .package(path: "../DriveClient"),
+    ],
     targets: [
-        .target(name: "SyncEngine"),
-        .testTarget(name: "SyncEngineTests", dependencies: ["SyncEngine"]),
+        .target(
+            name: "SyncEngine",
+            dependencies: [
+                .product(name: "Catalog", package: "Catalog"),
+                .product(name: "DriveClient", package: "DriveClient"),
+            ]
+        ),
+        .testTarget(
+            name: "SyncEngineTests",
+            dependencies: ["SyncEngine"]
+        ),
     ]
 )

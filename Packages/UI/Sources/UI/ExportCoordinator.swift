@@ -17,15 +17,22 @@ public final class ExportCoordinator: ObservableObject {
     public enum Phase: Equatable, Sendable {
         case idle
         case exporting
-        case done(exportedCount: Int)
+        /// Terminal success phase. `exported` is the number of files
+        /// written, `skipped` counts assets we couldn't export (missing
+        /// local original, per-file write failure), and `failures` carries
+        /// a short human-readable reason per skipped asset so the UI can
+        /// surface them in the completion alert.
+        case done(exported: Int, skipped: Int, failures: [String])
+        /// Terminal failure phase for errors that prevent the batch from
+        /// running at all (e.g. unwritable destination directory).
         case failed(String)
 
         public static func == (lhs: Phase, rhs: Phase) -> Bool {
             switch (lhs, rhs) {
             case (.idle, .idle), (.exporting, .exporting):
                 return true
-            case (.done(let a), .done(let b)):
-                return a == b
+            case (.done(let le, let ls, let lf), .done(let re, let rs, let rf)):
+                return le == re && ls == rs && lf == rf
             case (.failed(let a), .failed(let b)):
                 return a == b
             default:
@@ -78,9 +85,34 @@ public final class ExportCoordinator: ObservableObject {
         currentItem = 0
         totalItems = assets.count
 
+        // Guard the whole batch against an unwritable destination before
+        // we start touching Core Image. `isWritableFile(atPath:)` returns
+        // false for both "doesn't exist" and "exists but unwritable", so
+        // we also check `fileExists` + `isDirectory` to give a precise
+        // error message rather than a generic per-file failure.
+        var isDir: ObjCBool = false
+        let exists = FileManager.default.fileExists(
+            atPath: destinationDirectory.path,
+            isDirectory: &isDir
+        )
+        if !exists {
+            phase = .failed("Destination directory does not exist: \(destinationDirectory.path)")
+            return
+        }
+        if !isDir.boolValue {
+            phase = .failed("Destination is not a directory: \(destinationDirectory.path)")
+            return
+        }
+        if !FileManager.default.isWritableFile(atPath: destinationDirectory.path) {
+            phase = .failed("Destination directory is not writable: \(destinationDirectory.path)")
+            return
+        }
+
         let context = CIContext(options: [.useSoftwareRenderer: false])
         var existingNames = Self.existingFilenames(in: destinationDirectory)
         var exportedCount = 0
+        var skippedCount = 0
+        var failureReasons: [String] = []
 
         for asset in assets {
             var resolvedLocalPath = asset.localPath
@@ -105,6 +137,8 @@ public final class ExportCoordinator: ObservableObject {
                 }
             }
             guard let localPath = resolvedLocalPath else {
+                skippedCount += 1
+                failureReasons.append("\(asset.originalFilename): no local copy available")
                 currentItemProgress = nil
                 currentItem += 1
                 await Task.yield()
@@ -142,8 +176,10 @@ public final class ExportCoordinator: ObservableObject {
                 )
                 exportedCount += 1
             } catch {
-                // Single-file failure is non-fatal — log and continue.
-                print("[ExportCoordinator] Failed to export \(asset.originalFilename): \(error)")
+                skippedCount += 1
+                let reason = (error as? LocalizedError)?.errorDescription
+                    ?? error.localizedDescription
+                failureReasons.append("\(asset.originalFilename): \(reason)")
             }
 
             currentItemProgress = nil
@@ -151,7 +187,11 @@ public final class ExportCoordinator: ObservableObject {
             await Task.yield()
         }
 
-        phase = .done(exportedCount: exportedCount)
+        phase = .done(
+            exported: exportedCount,
+            skipped: skippedCount,
+            failures: failureReasons
+        )
     }
 
     /// Resets the coordinator back to idle so it can be reused.

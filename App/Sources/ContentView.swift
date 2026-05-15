@@ -19,6 +19,14 @@ struct ContentView: View {
     /// `applicationDidFinishLaunching` finishes).
     let originalFetcher: (any OriginalFetcher)?
     @State private var showExportSheet = false
+    /// True while the "Export all N photos?" confirmation is on screen.
+    /// Set when File → Export is triggered with no selection / filter
+    /// against the full library; a yes advances to `showExportSheet`.
+    @State private var showExportConfirmation = false
+    /// Set when the coordinator reaches `.done` or `.failed`. Drives a
+    /// post-export alert summarising what happened. Cleared by the user
+    /// dismissing the alert.
+    @State private var exportAlert: ExportAlertPayload?
     /// Non-nil while the delete-confirmation dialog is presented.
     /// Carries the count so the dialog title reads e.g. "Delete 3 photos?".
     @State private var pendingDeleteCount: Int?
@@ -112,8 +120,68 @@ struct ContentView: View {
                 }
             )
         }
+        .confirmationDialog(
+            "Export all \(libraryViewModel.rows.count) photos?",
+            isPresented: $showExportConfirmation,
+            titleVisibility: .visible
+        ) {
+            Button("Export") {
+                showExportSheet = true
+            }
+            Button("Cancel", role: .cancel) {}
+        } message: {
+            Text("No selection or filter is active. This will export every photo in your library.")
+        }
+        .alert(
+            exportAlert?.title ?? "",
+            isPresented: Binding(
+                get: { exportAlert != nil },
+                set: { newValue in
+                    if !newValue {
+                        exportAlert = nil
+                        exportCoordinator.reset()
+                    }
+                }
+            ),
+            presenting: exportAlert
+        ) { _ in
+            Button("OK", role: .cancel) {}
+        } message: { payload in
+            Text(payload.message)
+        }
         .onReceive(exportSheetPublisher) { _ in
-            showExportSheet = true
+            let shouldPrompt = ExportConfirmationPolicy.shouldPrompt(
+                scope: libraryViewModel.scope,
+                minRating: libraryViewModel.minRating,
+                selectionEmpty: libraryViewModel.selectedAssetIds.isEmpty,
+                rowCount: libraryViewModel.rows.count
+            )
+            if shouldPrompt {
+                showExportConfirmation = true
+            } else {
+                showExportSheet = true
+            }
+        }
+        .onChange(of: exportCoordinator.phase) { _, newPhase in
+            switch newPhase {
+            case .done(let exported, let skipped, let failures):
+                let built = ExportCompletionMessage.forCompletion(
+                    exported: exported,
+                    skipped: skipped,
+                    failures: failures
+                )
+                exportAlert = ExportAlertPayload(
+                    title: built.title,
+                    message: built.body
+                )
+            case .failed(let message):
+                exportAlert = ExportAlertPayload(
+                    title: "Export failed",
+                    message: message
+                )
+            case .idle, .exporting:
+                break
+            }
         }
         // Mode switch keys, Lightroom-style: G → Library, E → Loupe,
         // D → Develop. Attached at the root so they fire regardless of
@@ -259,4 +327,14 @@ struct ContentView: View {
     private var deleteSelectedPublisher: NotificationCenter.Publisher {
         NotificationCenter.default.publisher(for: .requestDeleteSelected)
     }
+}
+
+/// Carries the copy for the post-export alert. The body is built by
+/// `ExportCompletionMessage.forCompletion(...)` in the UI package and
+/// wrapped here so SwiftUI's `.alert(presenting:)` has an `Identifiable`
+/// value to drive dismissal.
+struct ExportAlertPayload: Identifiable {
+    let id = UUID()
+    let title: String
+    let message: String
 }

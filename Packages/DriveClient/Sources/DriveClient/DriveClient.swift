@@ -79,6 +79,28 @@ public actor DriveClient {
         accessTokenExpiresAt = nil
     }
 
+    /// `GET /drive/v3/about?fields=user/emailAddress` — returns the Google
+    /// account email associated with the current refresh token, or `nil`
+    /// when the response omits the field. Used by the UI to label the
+    /// connected state ("Disconnect (user@example.com)").
+    public func fetchAccountEmail() async throws -> String? {
+        let url = URL(string: "https://www.googleapis.com/drive/v3/about?fields=user/emailAddress")!
+        let request = URLRequest(url: url)
+        let session = AuthorizedSession(client: httpClient, provider: self)
+        let (data, response) = try await session.data(for: request)
+        guard (200..<300).contains(response.statusCode) else {
+            throw DriveClientError.downloadFailed(status: response.statusCode)
+        }
+        struct AboutResponse: Decodable {
+            struct User: Decodable {
+                let emailAddress: String?
+            }
+            let user: User?
+        }
+        let decoded = try JSONDecoder().decode(AboutResponse.self, from: data)
+        return decoded.user?.emailAddress
+    }
+
     /// Download a Drive file's media to `destinationURL`. Streams bytes to a
     /// temp file via `StreamingHTTPClient` so originals — often 50–100MB+ RAW
     /// or TIFF — never have to live entirely in memory. Progress fires

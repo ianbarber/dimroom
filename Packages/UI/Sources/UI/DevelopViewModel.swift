@@ -327,6 +327,8 @@ public final class DevelopViewModel: ObservableObject {
         case "sharpening": return \.sharpening
         case "vibrance": return \.vibrance
         case "saturation": return \.saturation
+        case "luminanceNoiseReduction": return \.luminanceNoiseReduction
+        case "chrominanceNoiseReduction": return \.chrominanceNoiseReduction
         case "vignetteAmount": return \.vignetteAmount
         case "vignetteRoundness": return \.vignetteRoundness
         case "vignetteSoftness": return \.vignetteSoftness

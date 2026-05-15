@@ -1108,6 +1108,130 @@ final class DevelopViewModelTests: XCTestCase {
         XCTAssertEqual(calls, 0)
     }
 
+    /// A→B activate where B has a present local file must cancel A's
+    /// in-flight fetch and clear the download flags so B's Develop view
+    /// doesn't render with a stuck overlay (#204). Without the early-
+    /// return reorder, A's task keeps running and its tail closure
+    /// no-ops on `currentAssetId == assetId`, leaving `isDownloadingOriginal`
+    /// pinned true until the next `deactivate()`.
+    @MainActor
+    func testActivateToLocalAssetCancelsInFlightFetch() async throws {
+        let catalog = try CatalogDatabase.inMemory()
+
+        var assetA = TestFixtures.makeAsset(hash: "drive-only-A")
+        assetA.driveFileId = "drive-id-A"
+        try catalog.insertAsset(assetA)
+        try TestFixtures.placePreview(for: assetA, cacheDirectory: tempCacheDir, color: (1, 2, 3))
+
+        let originalsDir = tempCacheDir.appendingPathComponent("originals", isDirectory: true)
+        try FileManager.default.createDirectory(at: originalsDir, withIntermediateDirectories: true)
+        let originalURL = originalsDir.appendingPathComponent("local-B.jpg")
+        try Data().write(to: originalURL)
+
+        var assetB = TestFixtures.makeAsset(hash: "has-local-B")
+        assetB.localPath = originalURL.path
+        assetB.driveFileId = "drive-id-B"
+        try catalog.insertAsset(assetB)
+        try TestFixtures.placePreview(for: assetB, cacheDirectory: tempCacheDir, color: (4, 5, 6))
+
+        let store = PreviewStore(cacheDirectory: tempCacheDir)
+        let release = AsyncBarrier()
+        let fetcher = ProgressFetcher(tick: 0.4, release: release)
+        let vm = DevelopViewModel(catalog: catalog, previewStore: store, originalFetcher: fetcher)
+
+        await vm.activate(assetId: assetA.id)
+        try await Task.sleep(nanoseconds: 200_000_000)
+        XCTAssertTrue(vm.isDownloadingOriginal)
+
+        await vm.activate(assetId: assetB.id)
+
+        XCTAssertFalse(
+            vm.isDownloadingOriginal,
+            "activating a local asset must clear the in-flight download flag"
+        )
+        XCTAssertNil(vm.downloadProgress)
+        XCTAssertEqual(vm.currentAssetId, assetB.id)
+
+        await release.signal()
+        try await Task.sleep(nanoseconds: 200_000_000)
+
+        XCTAssertFalse(
+            vm.isDownloadingOriginal,
+            "A's late return must not flip B's download flag back on"
+        )
+        XCTAssertNil(vm.downloadProgress)
+        XCTAssertEqual(vm.currentAssetId, assetB.id)
+    }
+
+    /// A→B activate where both assets are drive-only must cancel A's
+    /// fetch and start B's. A's late progress callback and tail closure
+    /// are gated by `currentAssetId == assetId`, so once B is active
+    /// A's emissions must not clobber B's download state (#204).
+    @MainActor
+    func testActivateToDriveOnlyAssetCancelsPreviousFetchAndStartsNew() async throws {
+        let catalog = try CatalogDatabase.inMemory()
+
+        var assetA = TestFixtures.makeAsset(hash: "drive-A")
+        assetA.driveFileId = "drive-id-A"
+        try catalog.insertAsset(assetA)
+        try TestFixtures.placePreview(for: assetA, cacheDirectory: tempCacheDir, color: (1, 2, 3))
+
+        var assetB = TestFixtures.makeAsset(hash: "drive-B")
+        assetB.driveFileId = "drive-id-B"
+        try catalog.insertAsset(assetB)
+        try TestFixtures.placePreview(for: assetB, cacheDirectory: tempCacheDir, color: (4, 5, 6))
+
+        let store = PreviewStore(cacheDirectory: tempCacheDir)
+        let releaseA = AsyncBarrier()
+        let fetcherA = ProgressFetcher(tick: 0.3, release: releaseA)
+        let vm = DevelopViewModel(catalog: catalog, previewStore: store, originalFetcher: fetcherA)
+
+        await vm.activate(assetId: assetA.id)
+        try await Task.sleep(nanoseconds: 200_000_000)
+        XCTAssertTrue(vm.isDownloadingOriginal)
+        XCTAssertEqual(vm.downloadProgress ?? 0, 0.3, accuracy: 0.001)
+
+        // Swap in a fresh fetcher for B so each asset's progress is
+        // distinguishable.
+        let releaseB = AsyncBarrier()
+        let fetcherB = ProgressFetcher(tick: 0.7, release: releaseB)
+        vm.attach(originalFetcher: fetcherB)
+
+        await vm.activate(assetId: assetB.id)
+        try await Task.sleep(nanoseconds: 200_000_000)
+
+        XCTAssertEqual(vm.currentAssetId, assetB.id)
+        XCTAssertTrue(vm.isDownloadingOriginal)
+        XCTAssertEqual(
+            vm.downloadProgress ?? 0,
+            0.7,
+            accuracy: 0.001,
+            "B's progress must overwrite the stale A tick"
+        )
+
+        // A returns late — its tail must no-op because B is now active.
+        await releaseA.signal()
+        try await Task.sleep(nanoseconds: 200_000_000)
+
+        XCTAssertTrue(
+            vm.isDownloadingOriginal,
+            "A's late return must not clear B's in-flight flag"
+        )
+        XCTAssertEqual(
+            vm.downloadProgress ?? 0,
+            0.7,
+            accuracy: 0.001,
+            "A's late tail must not clobber B's progress"
+        )
+
+        // B finally returns — flag clears.
+        await releaseB.signal()
+        try await Task.sleep(nanoseconds: 200_000_000)
+
+        XCTAssertFalse(vm.isDownloadingOriginal)
+        XCTAssertNil(vm.downloadProgress)
+    }
+
     // MARK: - Helper
 
     /// Build a viewmodel with an in-memory catalog and a single asset that

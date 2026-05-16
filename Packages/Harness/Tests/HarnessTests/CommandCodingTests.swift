@@ -178,7 +178,16 @@ final class CommandCodingTests: XCTestCase {
 
     func testSetEditParameterRoundTrip() throws {
         let id = UUID(uuidString: "12345678-1234-1234-1234-123456789012")!
-        for (parameter, value) in [("exposure", 2.0), ("contrast", -0.5), ("temperature", 5500.0)] {
+        for (parameter, value) in [
+            ("exposure", 2.0),
+            ("contrast", -0.5),
+            ("temperature", 5500.0),
+            ("splitToneHighlightHue", 30.0),
+            ("splitToneHighlightSaturation", 50.0),
+            ("splitToneShadowHue", 210.0),
+            ("splitToneShadowSaturation", 50.0),
+            ("splitToneBalance", 25.0),
+        ] {
             let command = Command.setEditParameter(assetId: id, parameter: parameter, value: value)
             let data = try encoder.encode(command)
             let decoded = try decoder.decode(Command.self, from: data)

@@ -107,4 +107,21 @@ final class RendererSnapshotTests: XCTestCase {
         )
         assertSnapshot(of: image, as: .image(precision: 0.99, perceptualPrecision: 0.98))
     }
+
+    func testLuminanceSCurveSnapshot() {
+        // Lock the visual output of a non-trivial luminance curve so a
+        // future LUT-composition or interpolation change is caught.
+        let sCurve: [CGPoint] = [
+            CGPoint(x: 0, y: 0),
+            CGPoint(x: 0.25, y: 0.10),
+            CGPoint(x: 0.75, y: 0.90),
+            CGPoint(x: 1, y: 1)
+        ]
+        let source = makeGradientImage()
+        let image = renderToNSImage(
+            source: source,
+            editState: EditState(toneCurvePoints: sCurve)
+        )
+        assertSnapshot(of: image, as: .image(precision: 0.99, perceptualPrecision: 0.98))
+    }
 }

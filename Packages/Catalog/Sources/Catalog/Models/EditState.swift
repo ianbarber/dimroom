@@ -37,10 +37,21 @@ public struct EditState: Codable, Sendable, Equatable {
     public var vignetteRoundness: Double
     public var vignetteSoftness: Double
 
+    // MARK: - Curves
+
+    /// Luminance tone curve. Identity is `[(0,0), (1,1)]`. Points must be
+    /// monotonic in x, with x and y in `[0, 1]`.
+    public var toneCurvePoints: [CGPoint]
+    public var redCurvePoints: [CGPoint]
+    public var greenCurvePoints: [CGPoint]
+    public var blueCurvePoints: [CGPoint]
+
     // MARK: - Crop
 
     public var cropRect: CGRect?
     public var cropAngle: Double?
+
+    public static let identityCurve: [CGPoint] = [CGPoint(x: 0, y: 0), CGPoint(x: 1, y: 1)]
 
     public init(
         exposure: Double = 0,
@@ -60,6 +71,10 @@ public struct EditState: Codable, Sendable, Equatable {
         vignetteAmount: Double = 0,
         vignetteRoundness: Double = 50,
         vignetteSoftness: Double = 50,
+        toneCurvePoints: [CGPoint] = EditState.identityCurve,
+        redCurvePoints: [CGPoint] = EditState.identityCurve,
+        greenCurvePoints: [CGPoint] = EditState.identityCurve,
+        blueCurvePoints: [CGPoint] = EditState.identityCurve,
         cropRect: CGRect? = nil,
         cropAngle: Double? = nil
     ) {
@@ -80,6 +95,10 @@ public struct EditState: Codable, Sendable, Equatable {
         self.vignetteAmount = vignetteAmount
         self.vignetteRoundness = vignetteRoundness
         self.vignetteSoftness = vignetteSoftness
+        self.toneCurvePoints = toneCurvePoints
+        self.redCurvePoints = redCurvePoints
+        self.greenCurvePoints = greenCurvePoints
+        self.blueCurvePoints = blueCurvePoints
         self.cropRect = cropRect
         self.cropAngle = cropAngle
     }
@@ -95,6 +114,7 @@ public struct EditState: Codable, Sendable, Equatable {
         case clarity, sharpening, vibrance, saturation
         case luminanceNoiseReduction, chrominanceNoiseReduction
         case vignetteAmount, vignetteRoundness, vignetteSoftness
+        case toneCurvePoints, redCurvePoints, greenCurvePoints, blueCurvePoints
         case cropRect, cropAngle
     }
 
@@ -118,6 +138,10 @@ public struct EditState: Codable, Sendable, Equatable {
             vignetteAmount: try c.decodeIfPresent(Double.self, forKey: .vignetteAmount) ?? 0,
             vignetteRoundness: try c.decodeIfPresent(Double.self, forKey: .vignetteRoundness) ?? 50,
             vignetteSoftness: try c.decodeIfPresent(Double.self, forKey: .vignetteSoftness) ?? 50,
+            toneCurvePoints: try c.decodeIfPresent([CGPoint].self, forKey: .toneCurvePoints) ?? EditState.identityCurve,
+            redCurvePoints: try c.decodeIfPresent([CGPoint].self, forKey: .redCurvePoints) ?? EditState.identityCurve,
+            greenCurvePoints: try c.decodeIfPresent([CGPoint].self, forKey: .greenCurvePoints) ?? EditState.identityCurve,
+            blueCurvePoints: try c.decodeIfPresent([CGPoint].self, forKey: .blueCurvePoints) ?? EditState.identityCurve,
             cropRect: try c.decodeIfPresent(CGRect.self, forKey: .cropRect),
             cropAngle: try c.decodeIfPresent(Double.self, forKey: .cropAngle)
         )

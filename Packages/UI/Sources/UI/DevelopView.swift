@@ -97,6 +97,14 @@ public struct DevelopView: View {
                 slider("Roundness", keyPath: \.vignetteRoundness, range: 0...100, step: 1, identity: 50)
                 slider("Softness", keyPath: \.vignetteSoftness, range: 0...100, step: 1, identity: 50)
             }
+
+            sliderSection("Geometry") {
+                slider("Vertical", keyPath: \.perspectiveVertical, range: -100...100, step: 1, identity: 0)
+                slider("Horizontal", keyPath: \.perspectiveHorizontal, range: -100...100, step: 1, identity: 0)
+                slider("Rotation", keyPath: \.perspectiveRotation, range: -180...180, step: 0.1, identity: 0)
+                flagToggle("Chromatic Aberration", keyPath: \.chromaticAberration)
+                flagToggle("Lens Vignette", keyPath: \.lensVignette)
+            }
         }
         .animation(.easeOut(duration: 0.25), value: viewModel.replaySequence)
     }
@@ -192,6 +200,23 @@ public struct DevelopView: View {
             ),
             onReset: { viewModel.resetParameter(keyPath) }
         )
+    }
+
+    private func flagToggle(
+        _ label: String,
+        keyPath: WritableKeyPath<EditState, Bool>
+    ) -> some View {
+        Toggle(
+            isOn: Binding(
+                get: { viewModel.editState[keyPath: keyPath] },
+                set: { viewModel.setFlag(keyPath, value: $0) }
+            )
+        ) {
+            Text(label)
+                .font(.system(size: 12))
+                .foregroundStyle(Color(white: 0.85))
+        }
+        .toggleStyle(.checkbox)
     }
 
     // MARK: - Preview

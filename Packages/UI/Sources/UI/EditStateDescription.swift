@@ -48,11 +48,24 @@ func editParameterDescription(previous: EditState?, next: EditState) -> String? 
     scalar("Vignette Amount", \.vignetteAmount, decimals: 0)
     scalar("Vignette Roundness", \.vignetteRoundness, decimals: 0)
     scalar("Vignette Softness", \.vignetteSoftness, decimals: 0)
+    scalar("Perspective Vertical", \.perspectiveVertical, decimals: 0)
+    scalar("Perspective Horizontal", \.perspectiveHorizontal, decimals: 0)
+    scalar("Perspective Rotation", \.perspectiveRotation, decimals: 1)
 
     // Temperature uses absolute formatting with a K suffix.
     if base.temperature != next.temperature {
         changes.append(Change(label: "Temperature \(String(format: "%.0f", next.temperature))K"))
     }
+
+    // Boolean flags get an "On" / "Off" suffix.
+    func flag(_ name: String, _ keyPath: KeyPath<EditState, Bool>) {
+        let before = base[keyPath: keyPath]
+        let after = next[keyPath: keyPath]
+        guard before != after else { return }
+        changes.append(Change(label: "\(name) \(after ? "On" : "Off")"))
+    }
+    flag("Chromatic Aberration", \.chromaticAberration)
+    flag("Lens Vignette", \.lensVignette)
 
     // Crop: rect + angle roll up into one logical change.
     if base.cropRect != next.cropRect || base.cropAngle != next.cropAngle {

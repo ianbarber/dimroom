@@ -202,6 +202,22 @@ public final class DevelopViewModel: ObservableObject {
         scheduleSave()
     }
 
+    /// Boolean-flag equivalent of `setParameter`. The geometry/lens-corrections
+    /// stage exposes its two switches (chromatic aberration auto-correct,
+    /// natural lens vignette correction) through this same debounced
+    /// render+save path so a toggle generates a single `.editSave` undo entry.
+    public func setFlag(_ keyPath: WritableKeyPath<EditState, Bool>, value: Bool) {
+        capturePendingUndoPreviousIfNeeded()
+        editState[keyPath: keyPath] = value
+        hasUnsavedChanges = true
+        scheduleRender()
+        scheduleSave()
+    }
+
+    public func resetFlag(_ keyPath: WritableKeyPath<EditState, Bool>) {
+        setFlag(keyPath, value: false)
+    }
+
     // MARK: - Crop
 
     /// Enter the interactive crop mode, seeding `cropViewModel` from
@@ -332,6 +348,19 @@ public final class DevelopViewModel: ObservableObject {
         case "vignetteAmount": return \.vignetteAmount
         case "vignetteRoundness": return \.vignetteRoundness
         case "vignetteSoftness": return \.vignetteSoftness
+        case "perspectiveVertical": return \.perspectiveVertical
+        case "perspectiveHorizontal": return \.perspectiveHorizontal
+        case "perspectiveRotation": return \.perspectiveRotation
+        default: return nil
+        }
+    }
+
+    /// Boolean counterpart to `keyPath(forParameter:)`. The harness uses this
+    /// to route `setEditFlag` to the right edit-state field by name.
+    nonisolated public static func keyPath(forFlag name: String) -> WritableKeyPath<EditState, Bool>? {
+        switch name {
+        case "chromaticAberration": return \.chromaticAberration
+        case "lensVignette": return \.lensVignette
         default: return nil
         }
     }

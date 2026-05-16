@@ -622,6 +622,105 @@ final class RendererTests: XCTestCase {
         XCTAssertGreaterThan(resCorner.r, srcCorner.r, "Positive vignette should brighten corners")
     }
 
+    // MARK: - Tone curves
+
+    func testCurvesIdentityIsNoOp() {
+        // All four curves at identity must produce pass-through, since
+        // the renderer's identity skip short-circuits the LUT filter.
+        let source = makeGradientImage()
+        let width = Int(source.extent.width)
+        let midY = Int(source.extent.height) / 2
+        let sampleXs = [0, width / 4, width / 2, 3 * width / 4, width - 1]
+
+        let result = Renderer.render(source: source, editState: EditState())
+
+        for x in sampleXs {
+            let srcPx = samplePixel(image: source, x: x, y: midY, context: ctx)
+            let resPx = samplePixel(image: result, x: x, y: midY, context: ctx)
+            XCTAssertEqual(srcPx.r, resPx.r, "identity curve must pass through at x=\(x)")
+            XCTAssertEqual(srcPx.g, resPx.g)
+            XCTAssertEqual(srcPx.b, resPx.b)
+        }
+    }
+
+    func testLuminanceCurveShiftsMidtones() {
+        // S-curve pulls 0.25 down and 0.75 up; the midpoint (~0.5) is on
+        // a steeper region than identity and so a midtone pixel shifts.
+        let sCurve: [CGPoint] = [
+            CGPoint(x: 0, y: 0),
+            CGPoint(x: 0.25, y: 0.10),
+            CGPoint(x: 0.75, y: 0.90),
+            CGPoint(x: 1, y: 1)
+        ]
+        let source = makeGradientImage()
+        let width = Int(source.extent.width)
+        let midY = Int(source.extent.height) / 2
+
+        // Sample a quarter-tone pixel — it should be pulled toward black
+        // by the S-curve's lower kink.
+        let darkX = width / 4
+        let srcDark = samplePixel(image: source, x: darkX, y: midY, context: ctx)
+        let result = Renderer.render(
+            source: source,
+            editState: EditState(toneCurvePoints: sCurve)
+        )
+        let resDark = samplePixel(image: result, x: darkX, y: midY, context: ctx)
+        XCTAssertLessThan(resDark.r, srcDark.r, "S-curve should pull quarter-tones down")
+
+        // And a three-quarter-tone pixel should be pushed up.
+        let brightX = 3 * width / 4
+        let srcBright = samplePixel(image: source, x: brightX, y: midY, context: ctx)
+        let resBright = samplePixel(image: result, x: brightX, y: midY, context: ctx)
+        XCTAssertGreaterThan(resBright.r, srcBright.r, "S-curve should push three-quarter-tones up")
+    }
+
+    func testRedCurveOnlyShiftsRed() {
+        // A red-only lift curve should only move the red channel.
+        let liftRed: [CGPoint] = [
+            CGPoint(x: 0, y: 0),
+            CGPoint(x: 0.5, y: 0.8),
+            CGPoint(x: 1, y: 1)
+        ]
+        let source = makeGradientImage()
+        let midX = Int(source.extent.width) / 2
+        let midY = Int(source.extent.height) / 2
+
+        let srcPx = samplePixel(image: source, x: midX, y: midY, context: ctx)
+        let result = Renderer.render(
+            source: source,
+            editState: EditState(redCurvePoints: liftRed)
+        )
+        let resPx = samplePixel(image: result, x: midX, y: midY, context: ctx)
+
+        XCTAssertGreaterThan(resPx.r, srcPx.r, "Red curve should lift the red channel")
+        // Green and blue should be unchanged (within CIColorCurves rounding).
+        XCTAssertEqual(Int(resPx.g), Int(srcPx.g), accuracy: 2, "Red curve must not move green")
+        XCTAssertEqual(Int(resPx.b), Int(srcPx.b), accuracy: 2, "Red curve must not move blue")
+    }
+
+    func testCurveEndpointsLocked() {
+        // Pure black and pure white must pass through unchanged when the
+        // curve's endpoints are at (0,0) and (1,1) — same invariant the
+        // whites/blacks tone curve has.
+        let sCurve: [CGPoint] = [
+            CGPoint(x: 0, y: 0),
+            CGPoint(x: 0.5, y: 0.8),
+            CGPoint(x: 1, y: 1)
+        ]
+        let source = makeGradientImage()
+        let width = Int(source.extent.width)
+        let midY = Int(source.extent.height) / 2
+
+        let result = Renderer.render(
+            source: source,
+            editState: EditState(toneCurvePoints: sCurve)
+        )
+        let blackPx = samplePixel(image: result, x: 0, y: midY, context: ctx)
+        let whitePx = samplePixel(image: result, x: width - 1, y: midY, context: ctx)
+        XCTAssertEqual(Int(blackPx.r), 0, accuracy: 4, "x=0 must stay at black endpoint")
+        XCTAssertEqual(Int(whitePx.r), 255, accuracy: 4, "x=width-1 must stay at white endpoint")
+    }
+
     // MARK: - Noise Reduction
 
     func testNoiseReductionIdentityPassThrough() {

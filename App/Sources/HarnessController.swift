@@ -226,6 +226,12 @@ final class HarnessController: @unchecked Sendable {
         case .resetEditParameter(let assetId, let parameter):
             return await handleResetEditParameter(assetId: assetId, parameter: parameter)
 
+        case .setCurvePoints(let assetId, let channel, let pointsJSON):
+            return await handleSetCurvePoints(assetId: assetId, channel: channel, pointsJSON: pointsJSON)
+
+        case .resetCurve(let assetId, let channel):
+            return await handleResetCurve(assetId: assetId, channel: channel)
+
         case .undo:
             return await handleUndo()
 
@@ -879,6 +885,66 @@ final class HarnessController: @unchecked Sendable {
         }
         await MainActor.run {
             developViewModel.setParameter(keyPath, value: value)
+        }
+        return .ok()
+    }
+
+    private func handleSetCurvePoints(assetId: UUID, channel: String, pointsJSON: String) async -> Response {
+        guard let curveChannel = DevelopViewModel.curveChannel(named: channel) else {
+            let valid = CurveChannel.allCases.map(\.rawValue).joined(separator: ", ")
+            return .error("unknown curve channel '\(channel)'; expected one of: \(valid)")
+        }
+        // Expect `[[x, y], …]` or `[{"x":…,"y":…}, …]`. Try array-of-pairs first
+        // (the canonical wire form), fall back to CGPoint dictionaries.
+        let points: [CGPoint]
+        let data = Data(pointsJSON.utf8)
+        if let pairs = try? JSONDecoder().decode([[Double]].self, from: data) {
+            points = pairs.compactMap { pair in
+                guard pair.count >= 2 else { return nil }
+                return CGPoint(x: pair[0], y: pair[1])
+            }
+            if points.count != pairs.count {
+                return .error("invalid curve points: each entry must be a [x, y] pair")
+            }
+        } else if let decoded = try? JSONDecoder().decode([CGPoint].self, from: data) {
+            points = decoded
+        } else {
+            return .error("invalid curve points JSON: expected an array of [x, y] pairs")
+        }
+
+        let alreadyActive: Bool = await MainActor.run {
+            if developViewModel.currentAssetId != assetId {
+                router.route = .develop
+                return false
+            }
+            return true
+        }
+        if !alreadyActive {
+            await developViewModel.activate(assetId: assetId)
+        }
+        await MainActor.run {
+            developViewModel.setCurvePoints(curveChannel, points: points)
+        }
+        return .ok()
+    }
+
+    private func handleResetCurve(assetId: UUID, channel: String) async -> Response {
+        guard let curveChannel = DevelopViewModel.curveChannel(named: channel) else {
+            let valid = CurveChannel.allCases.map(\.rawValue).joined(separator: ", ")
+            return .error("unknown curve channel '\(channel)'; expected one of: \(valid)")
+        }
+        let alreadyActive: Bool = await MainActor.run {
+            if developViewModel.currentAssetId != assetId {
+                router.route = .develop
+                return false
+            }
+            return true
+        }
+        if !alreadyActive {
+            await developViewModel.activate(assetId: assetId)
+        }
+        await MainActor.run {
+            developViewModel.resetCurve(curveChannel)
         }
         return .ok()
     }

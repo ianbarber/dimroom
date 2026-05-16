@@ -147,6 +147,34 @@ final class DevelopSnapshotTests: XCTestCase {
         }
     }
 
+    /// Develop view with a non-identity luminance S-curve. Locks the
+    /// sidebar Curves group rendering with active editor handles.
+    @MainActor
+    func test_develop_with_luminance_curve() async throws {
+        let vm = try await makeActivatedViewModel(hash: "snap-lum-curve")
+
+        vm.setCurvePoints(.luminance, points: [
+            CGPoint(x: 0, y: 0),
+            CGPoint(x: 0.25, y: 0.10),
+            CGPoint(x: 0.5, y: 0.5),
+            CGPoint(x: 0.75, y: 0.90),
+            CGPoint(x: 1, y: 1)
+        ])
+        try await Task.sleep(nanoseconds: 300_000_000)
+
+        let image = renderFixedPixelImage(for: DevelopView(viewModel: vm))
+
+        runAssertSnapshot {
+            assertSnapshot(
+                of: image,
+                as: .image(
+                    precision: Self.snapshotPrecision,
+                    perceptualPrecision: Self.snapshotPerceptualPrecision
+                )
+            )
+        }
+    }
+
     /// Develop view with non-identity noise-reduction settings. Exercises
     /// the new Noise Reduction group sliders so the sidebar layout is
     /// pinned and the rendered preview reflects the NR pass.

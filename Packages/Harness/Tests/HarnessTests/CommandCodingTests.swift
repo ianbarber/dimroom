@@ -1075,6 +1075,42 @@ final class CommandCodingTests: XCTestCase {
         XCTAssertEqual(command, .postMenuAction(name: "mode-loupe"))
     }
 
+    // MARK: - Curves
+
+    func testSetCurvePointsRoundTrip() throws {
+        let id = UUID(uuidString: "12345678-1234-1234-1234-123456789012")!
+        let command = Command.setCurvePoints(
+            assetId: id,
+            channel: "luminance",
+            pointsJSON: "[[0,0],[0.25,0.15],[0.75,0.85],[1,1]]"
+        )
+        let data = try encoder.encode(command)
+        let decoded = try decoder.decode(Command.self, from: data)
+        XCTAssertEqual(command, decoded)
+    }
+
+    func testResetCurveRoundTrip() throws {
+        let id = UUID(uuidString: "12345678-1234-1234-1234-123456789012")!
+        for channel in ["luminance", "red", "green", "blue"] {
+            let command = Command.resetCurve(assetId: id, channel: channel)
+            let data = try encoder.encode(command)
+            let decoded = try decoder.decode(Command.self, from: data)
+            XCTAssertEqual(command, decoded)
+        }
+    }
+
+    func testDecodeSetCurvePointsFromJSON() throws {
+        let json = """
+        {"type":"setCurvePoints","assetId":"12345678-1234-1234-1234-123456789012","channel":"red","pointsJSON":"[[0,0.05],[0.5,0.6],[1,1]]"}
+        """
+        let command = try decoder.decode(Command.self, from: Data(json.utf8))
+        let id = UUID(uuidString: "12345678-1234-1234-1234-123456789012")!
+        XCTAssertEqual(
+            command,
+            .setCurvePoints(assetId: id, channel: "red", pointsJSON: "[[0,0.05],[0.5,0.6],[1,1]]")
+        )
+    }
+
     // MARK: - releaseHeldDownloads
 
     func testReleaseHeldDownloadsRoundTrip() throws {

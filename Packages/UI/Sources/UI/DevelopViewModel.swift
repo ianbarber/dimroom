@@ -202,6 +202,29 @@ public final class DevelopViewModel: ObservableObject {
         scheduleSave()
     }
 
+    /// Currently-selected curve channel (Luminance / R / G / B). The
+    /// curve editor binds to this so the channel tabs and the canvas
+    /// stay in sync, and the harness can drive it through
+    /// `setCurvePoints`.
+    @Published public var selectedCurveChannel: CurveChannel = .luminance
+
+    /// Replace the points for `channel` with `points`. Routes through
+    /// the same debounced render + save pipeline as `setParameter` so
+    /// a series of drag updates collapses to a single `.editSave` undo
+    /// entry per debounce window.
+    public func setCurvePoints(_ channel: CurveChannel, points: [CGPoint]) {
+        capturePendingUndoPreviousIfNeeded()
+        editState[keyPath: channel.keyPath] = points
+        hasUnsavedChanges = true
+        scheduleRender()
+        scheduleSave()
+    }
+
+    /// Reset `channel` back to identity `[(0,0), (1,1)]`.
+    public func resetCurve(_ channel: CurveChannel) {
+        setCurvePoints(channel, points: EditState.identityCurve)
+    }
+
     // MARK: - Crop
 
     /// Enter the interactive crop mode, seeding `cropViewModel` from
@@ -311,6 +334,13 @@ public final class DevelopViewModel: ObservableObject {
     public func resetParameter(_ keyPath: WritableKeyPath<EditState, Double>) {
         let identity = Self.identityValue(for: keyPath)
         setParameter(keyPath, value: identity)
+    }
+
+    /// Look up a `CurveChannel` by its wire string. Used by the
+    /// harness handler so the wire format and view-model agree on the
+    /// channel name set.
+    nonisolated public static func curveChannel(named name: String) -> CurveChannel? {
+        return CurveChannel(rawValue: name)
     }
 
     nonisolated public static func keyPath(forParameter name: String) -> WritableKeyPath<EditState, Double>? {

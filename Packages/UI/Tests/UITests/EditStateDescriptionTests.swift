@@ -153,4 +153,68 @@ final class EditStateDescriptionTests: XCTestCase {
             "HSL"
         )
     }
+
+    // MARK: - Curves
+
+    func testLuminanceCurveOnlyChangeReportsLabel() {
+        let previous = EditState()
+        var next = EditState()
+        next.toneCurvePoints = [
+            CGPoint(x: 0, y: 0),
+            CGPoint(x: 0.5, y: 0.7),
+            CGPoint(x: 1, y: 1)
+        ]
+        XCTAssertEqual(
+            editParameterDescription(previous: previous, next: next),
+            "Luminance Curve"
+        )
+    }
+
+    func testRedCurveOnlyChangeReportsLabel() {
+        let previous = EditState()
+        var next = EditState()
+        next.redCurvePoints = [
+            CGPoint(x: 0, y: 0.05),
+            CGPoint(x: 1, y: 1)
+        ]
+        XCTAssertEqual(
+            editParameterDescription(previous: previous, next: next),
+            "Red Curve"
+        )
+    }
+
+    func testGreenCurveOnlyChangeReportsLabel() {
+        let previous = EditState()
+        var next = EditState()
+        next.greenCurvePoints = [
+            CGPoint(x: 0, y: 0),
+            CGPoint(x: 0.5, y: 0.3),
+            CGPoint(x: 1, y: 1)
+        ]
+        XCTAssertEqual(
+            editParameterDescription(previous: previous, next: next),
+            "Green Curve"
+        )
+    }
+
+    func testBlueCurveOnlyChangeReportsLabel() {
+        let previous = EditState()
+        var next = EditState()
+        next.blueCurvePoints = [
+            CGPoint(x: 0, y: 0),
+            CGPoint(x: 1, y: 0.85)
+        ]
+        XCTAssertEqual(
+            editParameterDescription(previous: previous, next: next),
+            "Blue Curve"
+        )
+    }
+
+    func testTwoCurvesChangedFallsBackToNil() {
+        let previous = EditState()
+        var next = EditState()
+        next.toneCurvePoints = [CGPoint(x: 0, y: 0), CGPoint(x: 0.5, y: 0.4), CGPoint(x: 1, y: 1)]
+        next.redCurvePoints = [CGPoint(x: 0, y: 0.1), CGPoint(x: 1, y: 1)]
+        XCTAssertNil(editParameterDescription(previous: previous, next: next))
+    }
 }

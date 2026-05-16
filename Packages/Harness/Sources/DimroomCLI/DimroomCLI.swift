@@ -38,6 +38,8 @@ struct DimroomCLI: ParsableCommand {
             ResetEditParameter.self,
             SetEditArrayParameter.self,
             ResetEditArrayParameter.self,
+            SetCurvePoints.self,
+            ResetCurve.self,
             Undo.self,
             Redo.self,
             SelectAssets.self,
@@ -623,6 +625,58 @@ extension DimroomCLI {
                 throw ValidationError("Invalid UUID '\(id)'.")
             }
             try runCommand(.resetEditArrayParameter(assetId: uuid, parameter: parameter, index: index), socket: socket)
+        }
+    }
+
+    struct SetCurvePoints: ParsableCommand {
+        static let configuration = CommandConfiguration(
+            commandName: "set-curve-points",
+            abstract: "Set the tone-curve points for a channel (luminance, red, green, blue) on an asset."
+        )
+
+        @Argument(help: "The UUID of the asset.")
+        var id: String
+
+        @Argument(help: "Channel name: luminance, red, green, blue.")
+        var channel: String
+
+        @Argument(help: #"Curve points as JSON array of [x, y] pairs, e.g. "[[0,0],[0.5,0.6],[1,1]]"."#)
+        var pointsJSON: String
+
+        @Option(name: .long, help: "Path to the harness socket.")
+        var socket: String = HarnessServer.defaultSocketPath
+
+        func run() throws {
+            guard let uuid = UUID(uuidString: id) else {
+                throw ValidationError("Invalid UUID '\(id)'.")
+            }
+            try runCommand(
+                .setCurvePoints(assetId: uuid, channel: channel, pointsJSON: pointsJSON),
+                socket: socket
+            )
+        }
+    }
+
+    struct ResetCurve: ParsableCommand {
+        static let configuration = CommandConfiguration(
+            commandName: "reset-curve",
+            abstract: "Reset the tone curve for a channel (luminance, red, green, blue) to identity [(0,0),(1,1)]."
+        )
+
+        @Argument(help: "The UUID of the asset.")
+        var id: String
+
+        @Argument(help: "Channel name: luminance, red, green, blue.")
+        var channel: String
+
+        @Option(name: .long, help: "Path to the harness socket.")
+        var socket: String = HarnessServer.defaultSocketPath
+
+        func run() throws {
+            guard let uuid = UUID(uuidString: id) else {
+                throw ValidationError("Invalid UUID '\(id)'.")
+            }
+            try runCommand(.resetCurve(assetId: uuid, channel: channel), socket: socket)
         }
     }
 

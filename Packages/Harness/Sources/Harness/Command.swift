@@ -40,6 +40,13 @@ public enum Command: Codable, Sendable, Equatable {
     /// payload to stay statically typed.
     case setEditArrayParameter(assetId: UUID, parameter: String, index: Int, value: Double)
     case resetEditArrayParameter(assetId: UUID, parameter: String, index: Int)
+    /// Replace the curve points for a single channel on an asset.
+    /// `pointsJSON` is a JSON-encoded `[[Double, Double]]` array
+    /// (e.g. `"[[0,0],[0.5,0.6],[1,1]]"`). Matches the wire convention
+    /// used by `setEdit.stateJSON` so the protocol doesn't need a
+    /// CGPoint type.
+    case setCurvePoints(assetId: UUID, channel: String, pointsJSON: String)
+    case resetCurve(assetId: UUID, channel: String)
     case undo
     case redo
     case selectAssets(ids: [UUID])
@@ -96,6 +103,8 @@ public enum Command: Codable, Sendable, Equatable {
         case parameter
         case value
         case index
+        case channel
+        case pointsJSON
         case x
         case y
         case width
@@ -138,6 +147,8 @@ public enum Command: Codable, Sendable, Equatable {
         case resetEditParameter
         case setEditArrayParameter
         case resetEditArrayParameter
+        case setCurvePoints
+        case resetCurve
         case undo
         case redo
         case selectAssets
@@ -274,6 +285,15 @@ public enum Command: Codable, Sendable, Equatable {
             let parameter = try container.decode(String.self, forKey: .parameter)
             let index = try container.decode(Int.self, forKey: .index)
             self = .resetEditArrayParameter(assetId: assetId, parameter: parameter, index: index)
+        case .setCurvePoints:
+            let assetId = try container.decode(UUID.self, forKey: .assetId)
+            let channel = try container.decode(String.self, forKey: .channel)
+            let pointsJSON = try container.decode(String.self, forKey: .pointsJSON)
+            self = .setCurvePoints(assetId: assetId, channel: channel, pointsJSON: pointsJSON)
+        case .resetCurve:
+            let assetId = try container.decode(UUID.self, forKey: .assetId)
+            let channel = try container.decode(String.self, forKey: .channel)
+            self = .resetCurve(assetId: assetId, channel: channel)
         case .undo:
             self = .undo
         case .redo:
@@ -434,6 +454,15 @@ public enum Command: Codable, Sendable, Equatable {
             try container.encode(assetId, forKey: .assetId)
             try container.encode(parameter, forKey: .parameter)
             try container.encode(index, forKey: .index)
+        case .setCurvePoints(let assetId, let channel, let pointsJSON):
+            try container.encode(CommandType.setCurvePoints, forKey: .type)
+            try container.encode(assetId, forKey: .assetId)
+            try container.encode(channel, forKey: .channel)
+            try container.encode(pointsJSON, forKey: .pointsJSON)
+        case .resetCurve(let assetId, let channel):
+            try container.encode(CommandType.resetCurve, forKey: .type)
+            try container.encode(assetId, forKey: .assetId)
+            try container.encode(channel, forKey: .channel)
         case .undo:
             try container.encode(CommandType.undo, forKey: .type)
         case .redo:

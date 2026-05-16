@@ -21,6 +21,13 @@ public enum Renderer {
         image = applyHighlightsShadows(image, highlights: editState.highlights, shadows: editState.shadows)
         image = applyWhitesBlacks(image, whites: editState.whites, blacks: editState.blacks)
         image = applyContrast(image, contrast: editState.contrast)
+        image = applyToneCurves(
+            image,
+            luminance: editState.toneCurvePoints,
+            red: editState.redCurvePoints,
+            green: editState.greenCurvePoints,
+            blue: editState.blueCurvePoints
+        )
         image = applyClarity(image, clarity: editState.clarity)
         image = applySharpening(image, sharpening: editState.sharpening)
         image = applyVibrance(image, vibrance: editState.vibrance)
@@ -278,6 +285,84 @@ public enum Renderer {
             saturation: saturation,
             luminance: luminance
         )
+    }
+
+    /// Apply luminance + per-channel curves as a single composed 256-entry
+    /// LUT through `CIColorCurves`. Composition order: luminance first, then
+    /// per-channel — `output_c = perChannel_c(luminance(input_c))` for each
+    /// of R, G, B. "Luminance" here is the same curve applied to each
+    /// channel independently (matches Lightroom's RGB curve, not a true
+    /// luminance space transform). Identity-skips when all four curves
+    /// equal `[(0,0), (1,1)]`.
+    private static func applyToneCurves(
+        _ image: CIImage,
+        luminance: [CGPoint],
+        red: [CGPoint],
+        green: [CGPoint],
+        blue: [CGPoint]
+    ) -> CIImage {
+        if isIdentityCurve(luminance)
+            && isIdentityCurve(red)
+            && isIdentityCurve(green)
+            && isIdentityCurve(blue) {
+            return image
+        }
+
+        let count = 256
+        var data = Data(count: count * 3 * MemoryLayout<Float>.size)
+        data.withUnsafeMutableBytes { rawBuffer in
+            guard let base = rawBuffer.baseAddress?
+                .bindMemory(to: Float.self, capacity: count * 3) else { return }
+            for i in 0..<count {
+                let t = Double(i) / Double(count - 1)
+                let lumOut = evaluatePiecewiseLinear(curve: luminance, at: t)
+                let rOut = evaluatePiecewiseLinear(curve: red, at: lumOut)
+                let gOut = evaluatePiecewiseLinear(curve: green, at: lumOut)
+                let bOut = evaluatePiecewiseLinear(curve: blue, at: lumOut)
+                base[i * 3]     = Float(clamp01(rOut))
+                base[i * 3 + 1] = Float(clamp01(gOut))
+                base[i * 3 + 2] = Float(clamp01(bOut))
+            }
+        }
+
+        let filter = CIFilter(name: "CIColorCurves")!
+        filter.setValue(image, forKey: kCIInputImageKey)
+        filter.setValue(data as NSData, forKey: "inputCurvesData")
+        filter.setValue(CIVector(x: 0, y: 1), forKey: "inputCurvesDomain")
+        return filter.outputImage!.cropped(to: image.extent)
+    }
+
+    /// Sample a piecewise-linear curve at `x`. Endpoints clamp to the
+    /// curve's first and last y values. Assumes points are sorted by x.
+    private static func evaluatePiecewiseLinear(curve: [CGPoint], at x: Double) -> Double {
+        guard !curve.isEmpty else { return x }
+        if curve.count == 1 { return Double(curve[0].y) }
+        let xv = CGFloat(x)
+        if xv <= curve[0].x { return Double(curve[0].y) }
+        if xv >= curve[curve.count - 1].x { return Double(curve[curve.count - 1].y) }
+        for i in 0..<(curve.count - 1) {
+            let p0 = curve[i]
+            let p1 = curve[i + 1]
+            if xv >= p0.x && xv <= p1.x {
+                let span = p1.x - p0.x
+                if span <= 0 { return Double(p0.y) }
+                let t = (xv - p0.x) / span
+                return Double(p0.y + (p1.y - p0.y) * t)
+            }
+        }
+        return Double(curve[curve.count - 1].y)
+    }
+
+    /// Identity check used by `applyToneCurves` and exposed for callers
+    /// that want to mirror the same "is this a no-op?" decision.
+    static func isIdentityCurve(_ points: [CGPoint]) -> Bool {
+        return points == EditState.identityCurve
+    }
+
+    private static func clamp01(_ v: Double) -> Double {
+        if v < 0 { return 0 }
+        if v > 1 { return 1 }
+        return v
     }
 
     private static func applyCrop(_ image: CIImage, rect: CGRect?, angle: Double?) -> CIImage {

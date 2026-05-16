@@ -49,12 +49,22 @@ public struct EditState: Codable, Sendable, Equatable {
     /// +100 lightens; identity 0.
     public var hslLuminance: [Double]
 
+    // MARK: - Curves
+
+    /// Luminance tone curve. Identity is `[(0,0), (1,1)]`. Points must be
+    /// monotonic in x, with x and y in `[0, 1]`.
+    public var toneCurvePoints: [CGPoint]
+    public var redCurvePoints: [CGPoint]
+    public var greenCurvePoints: [CGPoint]
+    public var blueCurvePoints: [CGPoint]
+
     // MARK: - Crop
 
     public var cropRect: CGRect?
     public var cropAngle: Double?
 
     public static let hslIdentity: [Double] = [0, 0, 0, 0, 0, 0, 0, 0]
+    public static let identityCurve: [CGPoint] = [CGPoint(x: 0, y: 0), CGPoint(x: 1, y: 1)]
 
     public init(
         exposure: Double = 0,
@@ -77,6 +87,10 @@ public struct EditState: Codable, Sendable, Equatable {
         hueShift: [Double] = EditState.hslIdentity,
         hslSaturation: [Double] = EditState.hslIdentity,
         hslLuminance: [Double] = EditState.hslIdentity,
+        toneCurvePoints: [CGPoint] = EditState.identityCurve,
+        redCurvePoints: [CGPoint] = EditState.identityCurve,
+        greenCurvePoints: [CGPoint] = EditState.identityCurve,
+        blueCurvePoints: [CGPoint] = EditState.identityCurve,
         cropRect: CGRect? = nil,
         cropAngle: Double? = nil
     ) {
@@ -100,6 +114,10 @@ public struct EditState: Codable, Sendable, Equatable {
         self.hueShift = EditState.normalisedHSL(hueShift)
         self.hslSaturation = EditState.normalisedHSL(hslSaturation)
         self.hslLuminance = EditState.normalisedHSL(hslLuminance)
+        self.toneCurvePoints = toneCurvePoints
+        self.redCurvePoints = redCurvePoints
+        self.greenCurvePoints = greenCurvePoints
+        self.blueCurvePoints = blueCurvePoints
         self.cropRect = cropRect
         self.cropAngle = cropAngle
     }
@@ -107,8 +125,8 @@ public struct EditState: Codable, Sendable, Equatable {
     // MARK: - Codable
 
     // Hand-rolled decoder so existing catalog rows (written before sharpening,
-    // vignette, and HSL existed) decode without error — missing keys fall
-    // back to identity defaults defined in `init(...)`.
+    // vignette, HSL, and curves existed) decode without error — missing keys
+    // fall back to identity defaults defined in `init(...)`.
     private enum CodingKeys: String, CodingKey {
         case exposure, contrast, highlights, shadows, whites, blacks
         case temperature, tint
@@ -116,6 +134,7 @@ public struct EditState: Codable, Sendable, Equatable {
         case luminanceNoiseReduction, chrominanceNoiseReduction
         case vignetteAmount, vignetteRoundness, vignetteSoftness
         case hueShift, hslSaturation, hslLuminance
+        case toneCurvePoints, redCurvePoints, greenCurvePoints, blueCurvePoints
         case cropRect, cropAngle
     }
 
@@ -142,6 +161,10 @@ public struct EditState: Codable, Sendable, Equatable {
             hueShift: try c.decodeIfPresent([Double].self, forKey: .hueShift) ?? EditState.hslIdentity,
             hslSaturation: try c.decodeIfPresent([Double].self, forKey: .hslSaturation) ?? EditState.hslIdentity,
             hslLuminance: try c.decodeIfPresent([Double].self, forKey: .hslLuminance) ?? EditState.hslIdentity,
+            toneCurvePoints: try c.decodeIfPresent([CGPoint].self, forKey: .toneCurvePoints) ?? EditState.identityCurve,
+            redCurvePoints: try c.decodeIfPresent([CGPoint].self, forKey: .redCurvePoints) ?? EditState.identityCurve,
+            greenCurvePoints: try c.decodeIfPresent([CGPoint].self, forKey: .greenCurvePoints) ?? EditState.identityCurve,
+            blueCurvePoints: try c.decodeIfPresent([CGPoint].self, forKey: .blueCurvePoints) ?? EditState.identityCurve,
             cropRect: try c.decodeIfPresent(CGRect.self, forKey: .cropRect),
             cropAngle: try c.decodeIfPresent(Double.self, forKey: .cropAngle)
         )

@@ -1232,6 +1232,59 @@ final class DevelopViewModelTests: XCTestCase {
         XCTAssertNil(vm.downloadProgress)
     }
 
+    // MARK: - Curves
+
+    @MainActor
+    func testSetCurvePointsUpdatesEditState() async throws {
+        let (vm, asset, _) = try await makeViewModelWithAsset(hash: "curve-set")
+        await vm.activate(assetId: asset.id)
+
+        let curve: [CGPoint] = [
+            CGPoint(x: 0, y: 0),
+            CGPoint(x: 0.5, y: 0.7),
+            CGPoint(x: 1, y: 1)
+        ]
+        vm.setCurvePoints(.luminance, points: curve)
+
+        XCTAssertEqual(vm.editState.toneCurvePoints, curve)
+        // Other channels remain at identity.
+        XCTAssertEqual(vm.editState.redCurvePoints, EditState.identityCurve)
+        XCTAssertEqual(vm.editState.greenCurvePoints, EditState.identityCurve)
+        XCTAssertEqual(vm.editState.blueCurvePoints, EditState.identityCurve)
+    }
+
+    @MainActor
+    func testSetCurvePointsRoutesPerChannel() async throws {
+        let (vm, asset, _) = try await makeViewModelWithAsset(hash: "curve-channels")
+        await vm.activate(assetId: asset.id)
+
+        let redCurve: [CGPoint] = [
+            CGPoint(x: 0, y: 0.1),
+            CGPoint(x: 1, y: 0.95)
+        ]
+        vm.setCurvePoints(.red, points: redCurve)
+        XCTAssertEqual(vm.editState.redCurvePoints, redCurve)
+        XCTAssertEqual(vm.editState.toneCurvePoints, EditState.identityCurve)
+        XCTAssertEqual(vm.editState.greenCurvePoints, EditState.identityCurve)
+        XCTAssertEqual(vm.editState.blueCurvePoints, EditState.identityCurve)
+    }
+
+    @MainActor
+    func testResetCurveRestoresIdentity() async throws {
+        let (vm, asset, _) = try await makeViewModelWithAsset(hash: "curve-reset")
+        await vm.activate(assetId: asset.id)
+
+        vm.setCurvePoints(.luminance, points: [
+            CGPoint(x: 0, y: 0),
+            CGPoint(x: 0.5, y: 0.7),
+            CGPoint(x: 1, y: 1)
+        ])
+        XCTAssertNotEqual(vm.editState.toneCurvePoints, EditState.identityCurve)
+
+        vm.resetCurve(.luminance)
+        XCTAssertEqual(vm.editState.toneCurvePoints, EditState.identityCurve)
+    }
+
     // MARK: - Helper
 
     /// Build a viewmodel with an in-memory catalog and a single asset that

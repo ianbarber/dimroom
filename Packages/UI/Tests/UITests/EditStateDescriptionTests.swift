@@ -113,6 +113,26 @@ final class EditStateDescriptionTests: XCTestCase {
         XCTAssertNil(editParameterDescription(previous: previous, next: next))
     }
 
+    func testSplitToneHighlightHueReportsLabel() {
+        let previous = EditState()
+        var next = EditState()
+        next.splitToneHighlightHue = 30
+        XCTAssertEqual(
+            editParameterDescription(previous: previous, next: next),
+            "Split Tone Highlight Hue +30"
+        )
+    }
+
+    func testSplitToneBalanceReportsLabel() {
+        let previous = EditState()
+        var next = EditState()
+        next.splitToneBalance = -25
+        XCTAssertEqual(
+            editParameterDescription(previous: previous, next: next),
+            "Split Tone Balance -25"
+        )
+    }
+
     func testTintChangeReportsSignedLabel() {
         let previous = EditState()
         var next = EditState()

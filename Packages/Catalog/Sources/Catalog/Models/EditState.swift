@@ -37,6 +37,17 @@ public struct EditState: Codable, Sendable, Equatable {
     public var vignetteRoundness: Double
     public var vignetteSoftness: Double
 
+    // MARK: - Geometry
+
+    public var perspectiveVertical: Double
+    public var perspectiveHorizontal: Double
+    public var perspectiveRotation: Double
+
+    // MARK: - Lens Corrections
+
+    public var chromaticAberration: Bool
+    public var lensVignette: Bool
+
     // MARK: - Crop
 
     public var cropRect: CGRect?
@@ -60,6 +71,11 @@ public struct EditState: Codable, Sendable, Equatable {
         vignetteAmount: Double = 0,
         vignetteRoundness: Double = 50,
         vignetteSoftness: Double = 50,
+        perspectiveVertical: Double = 0,
+        perspectiveHorizontal: Double = 0,
+        perspectiveRotation: Double = 0,
+        chromaticAberration: Bool = false,
+        lensVignette: Bool = false,
         cropRect: CGRect? = nil,
         cropAngle: Double? = nil
     ) {
@@ -80,6 +96,11 @@ public struct EditState: Codable, Sendable, Equatable {
         self.vignetteAmount = vignetteAmount
         self.vignetteRoundness = vignetteRoundness
         self.vignetteSoftness = vignetteSoftness
+        self.perspectiveVertical = perspectiveVertical
+        self.perspectiveHorizontal = perspectiveHorizontal
+        self.perspectiveRotation = perspectiveRotation
+        self.chromaticAberration = chromaticAberration
+        self.lensVignette = lensVignette
         self.cropRect = cropRect
         self.cropAngle = cropAngle
     }
@@ -95,6 +116,8 @@ public struct EditState: Codable, Sendable, Equatable {
         case clarity, sharpening, vibrance, saturation
         case luminanceNoiseReduction, chrominanceNoiseReduction
         case vignetteAmount, vignetteRoundness, vignetteSoftness
+        case perspectiveVertical, perspectiveHorizontal, perspectiveRotation
+        case chromaticAberration, lensVignette
         case cropRect, cropAngle
     }
 
@@ -118,6 +141,11 @@ public struct EditState: Codable, Sendable, Equatable {
             vignetteAmount: try c.decodeIfPresent(Double.self, forKey: .vignetteAmount) ?? 0,
             vignetteRoundness: try c.decodeIfPresent(Double.self, forKey: .vignetteRoundness) ?? 50,
             vignetteSoftness: try c.decodeIfPresent(Double.self, forKey: .vignetteSoftness) ?? 50,
+            perspectiveVertical: try c.decodeIfPresent(Double.self, forKey: .perspectiveVertical) ?? 0,
+            perspectiveHorizontal: try c.decodeIfPresent(Double.self, forKey: .perspectiveHorizontal) ?? 0,
+            perspectiveRotation: try c.decodeIfPresent(Double.self, forKey: .perspectiveRotation) ?? 0,
+            chromaticAberration: try c.decodeIfPresent(Bool.self, forKey: .chromaticAberration) ?? false,
+            lensVignette: try c.decodeIfPresent(Bool.self, forKey: .lensVignette) ?? false,
             cropRect: try c.decodeIfPresent(CGRect.self, forKey: .cropRect),
             cropAngle: try c.decodeIfPresent(Double.self, forKey: .cropAngle)
         )

@@ -42,6 +42,11 @@ final class EditStateTests: XCTestCase {
         XCTAssertEqual(state.vignetteAmount, 0)
         XCTAssertEqual(state.vignetteRoundness, 50)
         XCTAssertEqual(state.vignetteSoftness, 50)
+        XCTAssertEqual(state.perspectiveVertical, 0)
+        XCTAssertEqual(state.perspectiveHorizontal, 0)
+        XCTAssertEqual(state.perspectiveRotation, 0)
+        XCTAssertFalse(state.chromaticAberration)
+        XCTAssertFalse(state.lensVignette)
         XCTAssertNil(state.cropRect)
         XCTAssertNil(state.cropAngle)
     }
@@ -65,6 +70,11 @@ final class EditStateTests: XCTestCase {
             vignetteAmount: -40,
             vignetteRoundness: 70,
             vignetteSoftness: 30,
+            perspectiveVertical: 35,
+            perspectiveHorizontal: -22,
+            perspectiveRotation: 4.5,
+            chromaticAberration: true,
+            lensVignette: true,
             cropRect: CGRect(x: 0.1, y: 0.2, width: 0.6, height: 0.5),
             cropAngle: 2.5
         )
@@ -107,6 +117,11 @@ final class EditStateTests: XCTestCase {
         XCTAssertEqual(decoded.vignetteAmount, 0)
         XCTAssertEqual(decoded.vignetteRoundness, 50)
         XCTAssertEqual(decoded.vignetteSoftness, 50)
+        XCTAssertEqual(decoded.perspectiveVertical, 0)
+        XCTAssertEqual(decoded.perspectiveHorizontal, 0)
+        XCTAssertEqual(decoded.perspectiveRotation, 0)
+        XCTAssertFalse(decoded.chromaticAberration)
+        XCTAssertFalse(decoded.lensVignette)
     }
 
     func testIdentityEditStateRoundTrip() throws {
@@ -128,8 +143,9 @@ final class EditStateTests: XCTestCase {
         let json = String(data: data, encoding: .utf8)!
 
         // Keys should be alphabetically ordered
-        let keys = ["blacks", "chrominanceNoiseReduction", "clarity", "contrast",
-                     "exposure", "highlights", "luminanceNoiseReduction",
+        let keys = ["blacks", "chromaticAberration", "chrominanceNoiseReduction", "clarity", "contrast",
+                     "exposure", "highlights", "lensVignette", "luminanceNoiseReduction",
+                     "perspectiveHorizontal", "perspectiveRotation", "perspectiveVertical",
                      "saturation", "shadows", "sharpening", "temperature", "tint",
                      "vibrance", "vignetteAmount", "vignetteRoundness", "vignetteSoftness",
                      "whites"]

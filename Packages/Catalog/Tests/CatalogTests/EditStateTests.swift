@@ -42,6 +42,11 @@ final class EditStateTests: XCTestCase {
         XCTAssertEqual(state.vignetteAmount, 0)
         XCTAssertEqual(state.vignetteRoundness, 50)
         XCTAssertEqual(state.vignetteSoftness, 50)
+        XCTAssertEqual(state.splitToneHighlightHue, 0)
+        XCTAssertEqual(state.splitToneHighlightSaturation, 0)
+        XCTAssertEqual(state.splitToneShadowHue, 0)
+        XCTAssertEqual(state.splitToneShadowSaturation, 0)
+        XCTAssertEqual(state.splitToneBalance, 0)
         XCTAssertNil(state.cropRect)
         XCTAssertNil(state.cropAngle)
     }
@@ -62,6 +67,11 @@ final class EditStateTests: XCTestCase {
             saturation: -5,
             luminanceNoiseReduction: 35,
             chrominanceNoiseReduction: 55,
+            splitToneHighlightHue: 30,
+            splitToneHighlightSaturation: 40,
+            splitToneShadowHue: 210,
+            splitToneShadowSaturation: 30,
+            splitToneBalance: 20,
             vignetteAmount: -40,
             vignetteRoundness: 70,
             vignetteSoftness: 30,
@@ -107,6 +117,11 @@ final class EditStateTests: XCTestCase {
         XCTAssertEqual(decoded.vignetteAmount, 0)
         XCTAssertEqual(decoded.vignetteRoundness, 50)
         XCTAssertEqual(decoded.vignetteSoftness, 50)
+        XCTAssertEqual(decoded.splitToneHighlightHue, 0)
+        XCTAssertEqual(decoded.splitToneHighlightSaturation, 0)
+        XCTAssertEqual(decoded.splitToneShadowHue, 0)
+        XCTAssertEqual(decoded.splitToneShadowSaturation, 0)
+        XCTAssertEqual(decoded.splitToneBalance, 0)
     }
 
     func testIdentityEditStateRoundTrip() throws {
@@ -130,7 +145,11 @@ final class EditStateTests: XCTestCase {
         // Keys should be alphabetically ordered
         let keys = ["blacks", "chrominanceNoiseReduction", "clarity", "contrast",
                      "exposure", "highlights", "luminanceNoiseReduction",
-                     "saturation", "shadows", "sharpening", "temperature", "tint",
+                     "saturation", "shadows", "sharpening",
+                     "splitToneBalance", "splitToneHighlightHue",
+                     "splitToneHighlightSaturation", "splitToneShadowHue",
+                     "splitToneShadowSaturation",
+                     "temperature", "tint",
                      "vibrance", "vignetteAmount", "vignetteRoundness", "vignetteSoftness",
                      "whites"]
         var lastIndex = json.startIndex

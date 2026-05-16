@@ -31,6 +31,14 @@ public struct EditState: Codable, Sendable, Equatable {
     public var luminanceNoiseReduction: Double
     public var chrominanceNoiseReduction: Double
 
+    // MARK: - Split Toning
+
+    public var splitToneHighlightHue: Double
+    public var splitToneHighlightSaturation: Double
+    public var splitToneShadowHue: Double
+    public var splitToneShadowSaturation: Double
+    public var splitToneBalance: Double
+
     // MARK: - Vignette
 
     public var vignetteAmount: Double
@@ -57,6 +65,11 @@ public struct EditState: Codable, Sendable, Equatable {
         saturation: Double = 0,
         luminanceNoiseReduction: Double = 0,
         chrominanceNoiseReduction: Double = 0,
+        splitToneHighlightHue: Double = 0,
+        splitToneHighlightSaturation: Double = 0,
+        splitToneShadowHue: Double = 0,
+        splitToneShadowSaturation: Double = 0,
+        splitToneBalance: Double = 0,
         vignetteAmount: Double = 0,
         vignetteRoundness: Double = 50,
         vignetteSoftness: Double = 50,
@@ -77,6 +90,11 @@ public struct EditState: Codable, Sendable, Equatable {
         self.saturation = saturation
         self.luminanceNoiseReduction = luminanceNoiseReduction
         self.chrominanceNoiseReduction = chrominanceNoiseReduction
+        self.splitToneHighlightHue = splitToneHighlightHue
+        self.splitToneHighlightSaturation = splitToneHighlightSaturation
+        self.splitToneShadowHue = splitToneShadowHue
+        self.splitToneShadowSaturation = splitToneShadowSaturation
+        self.splitToneBalance = splitToneBalance
         self.vignetteAmount = vignetteAmount
         self.vignetteRoundness = vignetteRoundness
         self.vignetteSoftness = vignetteSoftness
@@ -94,6 +112,8 @@ public struct EditState: Codable, Sendable, Equatable {
         case temperature, tint
         case clarity, sharpening, vibrance, saturation
         case luminanceNoiseReduction, chrominanceNoiseReduction
+        case splitToneHighlightHue, splitToneHighlightSaturation
+        case splitToneShadowHue, splitToneShadowSaturation, splitToneBalance
         case vignetteAmount, vignetteRoundness, vignetteSoftness
         case cropRect, cropAngle
     }
@@ -115,6 +135,11 @@ public struct EditState: Codable, Sendable, Equatable {
             saturation: try c.decodeIfPresent(Double.self, forKey: .saturation) ?? 0,
             luminanceNoiseReduction: try c.decodeIfPresent(Double.self, forKey: .luminanceNoiseReduction) ?? 0,
             chrominanceNoiseReduction: try c.decodeIfPresent(Double.self, forKey: .chrominanceNoiseReduction) ?? 0,
+            splitToneHighlightHue: try c.decodeIfPresent(Double.self, forKey: .splitToneHighlightHue) ?? 0,
+            splitToneHighlightSaturation: try c.decodeIfPresent(Double.self, forKey: .splitToneHighlightSaturation) ?? 0,
+            splitToneShadowHue: try c.decodeIfPresent(Double.self, forKey: .splitToneShadowHue) ?? 0,
+            splitToneShadowSaturation: try c.decodeIfPresent(Double.self, forKey: .splitToneShadowSaturation) ?? 0,
+            splitToneBalance: try c.decodeIfPresent(Double.self, forKey: .splitToneBalance) ?? 0,
             vignetteAmount: try c.decodeIfPresent(Double.self, forKey: .vignetteAmount) ?? 0,
             vignetteRoundness: try c.decodeIfPresent(Double.self, forKey: .vignetteRoundness) ?? 50,
             vignetteSoftness: try c.decodeIfPresent(Double.self, forKey: .vignetteSoftness) ?? 50,

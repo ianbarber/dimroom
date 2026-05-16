@@ -87,6 +87,8 @@ public struct DevelopView: View {
                 slider("Saturation", keyPath: \.saturation, range: -100...100, step: 1, identity: 0)
             }
 
+            curvesSection
+
             sliderSection("Noise Reduction") {
                 slider("Luminance", keyPath: \.luminanceNoiseReduction, range: 0...100, step: 1, identity: 0)
                 slider("Chrominance", keyPath: \.chrominanceNoiseReduction, range: 0...100, step: 1, identity: 0)
@@ -169,6 +171,49 @@ public struct DevelopView: View {
                     step: 0.1
                 )
             }
+        }
+    }
+
+    // MARK: - Curves
+
+    /// Curves group with Luminance / R / G / B channel switcher and a
+    /// canvas editor for the active channel. Positioned between
+    /// Presence and Vignette so the visually heavy editor sits below
+    /// the lightweight slider groups while still preceding Vignette in
+    /// the chain order ("after contrast/clarity, before vignette").
+    private var curvesSection: some View {
+        VStack(alignment: .leading, spacing: 6) {
+            Text("Curves")
+                .font(.system(size: 11, weight: .semibold))
+                .foregroundStyle(Color(white: 0.5))
+                .textCase(.uppercase)
+
+            Picker(
+                "Channel",
+                selection: Binding(
+                    get: { viewModel.selectedCurveChannel },
+                    set: { viewModel.selectedCurveChannel = $0 }
+                )
+            ) {
+                ForEach(CurveChannel.allCases, id: \.self) { channel in
+                    Text(channel.displayName).tag(channel)
+                }
+            }
+            .pickerStyle(.segmented)
+            .labelsHidden()
+            .accessibilityIdentifier("curve-channel-picker")
+
+            CurveEditorView(
+                channel: viewModel.selectedCurveChannel,
+                points: viewModel.editState[keyPath: viewModel.selectedCurveChannel.keyPath],
+                histogram: viewModel.histogram,
+                onChange: { newPoints in
+                    viewModel.setCurvePoints(viewModel.selectedCurveChannel, points: newPoints)
+                },
+                onReset: {
+                    viewModel.resetCurve(viewModel.selectedCurveChannel)
+                }
+            )
         }
     }
 

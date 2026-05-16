@@ -42,6 +42,10 @@ final class EditStateTests: XCTestCase {
         XCTAssertEqual(state.vignetteAmount, 0)
         XCTAssertEqual(state.vignetteRoundness, 50)
         XCTAssertEqual(state.vignetteSoftness, 50)
+        XCTAssertEqual(state.toneCurvePoints, EditState.identityCurve)
+        XCTAssertEqual(state.redCurvePoints, EditState.identityCurve)
+        XCTAssertEqual(state.greenCurvePoints, EditState.identityCurve)
+        XCTAssertEqual(state.blueCurvePoints, EditState.identityCurve)
         XCTAssertEqual(state.perspectiveVertical, 0)
         XCTAssertEqual(state.perspectiveHorizontal, 0)
         XCTAssertEqual(state.perspectiveRotation, 0)
@@ -49,6 +53,64 @@ final class EditStateTests: XCTestCase {
         XCTAssertFalse(state.lensVignette)
         XCTAssertNil(state.cropRect)
         XCTAssertNil(state.cropAngle)
+    }
+
+    func testIdentityCurveConstant() {
+        XCTAssertEqual(EditState.identityCurve, [CGPoint(x: 0, y: 0), CGPoint(x: 1, y: 1)])
+    }
+
+    func testCurveJSONRoundTrip() throws {
+        let sCurve: [CGPoint] = [
+            CGPoint(x: 0, y: 0),
+            CGPoint(x: 0.25, y: 0.15),
+            CGPoint(x: 0.75, y: 0.85),
+            CGPoint(x: 1, y: 1)
+        ]
+        let state = EditState(
+            toneCurvePoints: sCurve,
+            redCurvePoints: [CGPoint(x: 0, y: 0.05), CGPoint(x: 0.5, y: 0.6), CGPoint(x: 1, y: 1)],
+            greenCurvePoints: EditState.identityCurve,
+            blueCurvePoints: [CGPoint(x: 0, y: 0), CGPoint(x: 1, y: 0.92)]
+        )
+
+        let data = try JSONEncoder().encode(state)
+        let decoded = try JSONDecoder().decode(EditState.self, from: data)
+
+        XCTAssertEqual(decoded.toneCurvePoints, sCurve)
+        XCTAssertEqual(decoded.redCurvePoints, state.redCurvePoints)
+        XCTAssertEqual(decoded.greenCurvePoints, EditState.identityCurve)
+        XCTAssertEqual(decoded.blueCurvePoints, state.blueCurvePoints)
+        XCTAssertEqual(decoded, state)
+    }
+
+    func testLegacyEditStateJSONDecodesCurvesToIdentity() throws {
+        // A pre-existing catalog row written before curve fields existed.
+        // Decoder must fall back to identity curve arrays without throwing.
+        let legacy = """
+        {
+            "exposure": 0.5,
+            "contrast": 10,
+            "highlights": 0,
+            "shadows": 0,
+            "whites": 0,
+            "blacks": 0,
+            "temperature": 6500,
+            "tint": 0,
+            "clarity": 0,
+            "sharpening": 0,
+            "vibrance": 0,
+            "saturation": 0,
+            "vignetteAmount": 0,
+            "vignetteRoundness": 50,
+            "vignetteSoftness": 50
+        }
+        """
+
+        let decoded = try JSONDecoder().decode(EditState.self, from: Data(legacy.utf8))
+        XCTAssertEqual(decoded.toneCurvePoints, EditState.identityCurve)
+        XCTAssertEqual(decoded.redCurvePoints, EditState.identityCurve)
+        XCTAssertEqual(decoded.greenCurvePoints, EditState.identityCurve)
+        XCTAssertEqual(decoded.blueCurvePoints, EditState.identityCurve)
     }
 
     func testEditStateJSONRoundTrip() throws {

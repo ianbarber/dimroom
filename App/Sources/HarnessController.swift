@@ -26,6 +26,7 @@ final class HarnessController: @unchecked Sendable {
     private let undoStack: UndoStack?
     private let catalogPublisher: CatalogPublisher?
     private let driveAuthState: DriveAuthState?
+    private let changePoller: ChangePoller?
     private var server: HarnessServer?
 
     init(
@@ -42,7 +43,8 @@ final class HarnessController: @unchecked Sendable {
         originalsCoordinator: OriginalsCoordinator? = nil,
         undoStack: UndoStack? = nil,
         catalogPublisher: CatalogPublisher? = nil,
-        driveAuthState: DriveAuthState? = nil
+        driveAuthState: DriveAuthState? = nil,
+        changePoller: ChangePoller? = nil
     ) {
         self.router = router
         self.catalog = catalog
@@ -58,6 +60,7 @@ final class HarnessController: @unchecked Sendable {
         self.undoStack = undoStack
         self.catalogPublisher = catalogPublisher
         self.driveAuthState = driveAuthState
+        self.changePoller = changePoller
     }
 
     func start(socketPath: String = HarnessServer.defaultSocketPath) throws {
@@ -308,6 +311,9 @@ final class HarnessController: @unchecked Sendable {
         case .releaseHeldDownloads:
             HoldUntilReleasedHarnessDownloader.shared.release()
             return .ok()
+
+        case .syncFromDrive:
+            return await handleSyncFromDrive()
         }
     }
 
@@ -513,6 +519,58 @@ final class HarnessController: @unchecked Sendable {
             return .error("upload failed: \(message)")
         default:
             return .error("upload ended in unexpected phase")
+        }
+    }
+
+    // MARK: - Delta sync
+
+    private func handleSyncFromDrive() async -> Response {
+        guard let changePoller else {
+            return .error("change poller not configured (drive not authenticated)")
+        }
+        do {
+            let outcome = try await changePoller.pollOnce()
+            return .ok(data: Self.encode(outcome: outcome))
+        } catch let error as SyncEngineError {
+            return .error("syncFromDrive failed: \(error)")
+        } catch {
+            return .error("syncFromDrive failed: \(error.localizedDescription)")
+        }
+    }
+
+    private static func encode(outcome: DeltaSyncOutcome) -> AnyCodableValue {
+        switch outcome {
+        case .bootstrapped(let pageToken):
+            return .dictionary([
+                "status": .string("bootstrapped"),
+                "pageToken": .string(pageToken),
+            ])
+        case .noChanges(let pageToken):
+            return .dictionary([
+                "status": .string("noChanges"),
+                "pageToken": .string(pageToken),
+            ])
+        case .catalogChanged(let driveFileId, let modifiedTime, let pageToken):
+            return .dictionary([
+                "status": .string("catalogChanged"),
+                "driveFileId": .string(driveFileId),
+                "modifiedTime": modifiedTime.map(AnyCodableValue.string) ?? .null,
+                "pageToken": .string(pageToken),
+            ])
+        case .conflict(let localPending, let remoteFileId, let modifiedTime, let pageToken):
+            return .dictionary([
+                "status": .string("conflict"),
+                "localPending": .bool(localPending),
+                "remoteFileId": .string(remoteFileId),
+                "modifiedTime": modifiedTime.map(AnyCodableValue.string) ?? .null,
+                "pageToken": .string(pageToken),
+            ])
+        case .originalsChangedOnly(let addedCount, let pageToken):
+            return .dictionary([
+                "status": .string("originalsChangedOnly"),
+                "addedCount": .int(addedCount),
+                "pageToken": .string(pageToken),
+            ])
         }
     }
 

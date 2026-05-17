@@ -76,6 +76,10 @@ public enum Command: Codable, Sendable, Equatable {
     /// in-flight set so the flow can verify late-tail behaviour.
     /// No-op outside harness mode with `DIMROOM_HARNESS_STUB_DOWNLOADER=hold-until-released`.
     case releaseHeldDownloads
+    /// Force a single Drive `changes.list` poll and return the
+    /// classified outcome. Used by Layer C delta-sync flows so they
+    /// don't have to wait for the periodic 5-minute tick.
+    case syncFromDrive
 
     private enum CodingKeys: String, CodingKey {
         case type
@@ -160,6 +164,7 @@ public enum Command: Codable, Sendable, Equatable {
         case simulateDriveAuthFailure
         case postMenuAction
         case releaseHeldDownloads
+        case syncFromDrive
     }
 
     public init(from decoder: Decoder) throws {
@@ -325,6 +330,8 @@ public enum Command: Codable, Sendable, Equatable {
             self = .postMenuAction(name: name)
         case .releaseHeldDownloads:
             self = .releaseHeldDownloads
+        case .syncFromDrive:
+            self = .syncFromDrive
         }
     }
 
@@ -483,6 +490,8 @@ public enum Command: Codable, Sendable, Equatable {
             try container.encode(name, forKey: .name)
         case .releaseHeldDownloads:
             try container.encode(CommandType.releaseHeldDownloads, forKey: .type)
+        case .syncFromDrive:
+            try container.encode(CommandType.syncFromDrive, forKey: .type)
         }
     }
 }

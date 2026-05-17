@@ -58,6 +58,7 @@ struct DimroomCLI: ParsableCommand {
             SimulateDriveAuthFailure.self,
             PostMenuAction.self,
             ReleaseHeldDownloads.self,
+            SyncFromDrive.self,
         ]
     )
 }
@@ -967,6 +968,20 @@ extension DimroomCLI {
 
         func run() throws {
             try runCommand(.releaseHeldDownloads, socket: socket)
+        }
+    }
+
+    struct SyncFromDrive: ParsableCommand {
+        static let configuration = CommandConfiguration(
+            commandName: "sync-from-drive",
+            abstract: "Force a single Drive changes-list poll and return the classified outcome."
+        )
+
+        @Option(name: .long, help: "Path to the harness socket.")
+        var socket: String = HarnessServer.defaultSocketPath
+
+        func run() throws {
+            try runCommand(.syncFromDrive, socket: socket)
         }
     }
 

@@ -1124,6 +1124,28 @@ final class CommandCodingTests: XCTestCase {
         XCTAssertEqual(command, .releaseHeldDownloads)
     }
 
+    // MARK: - syncFromDrive
+
+    func testSyncFromDriveRoundTrip() throws {
+        let command = Command.syncFromDrive
+        let data = try encoder.encode(command)
+        let decoded = try decoder.decode(Command.self, from: data)
+        XCTAssertEqual(command, decoded)
+    }
+
+    func testSyncFromDriveJSON() throws {
+        let command = Command.syncFromDrive
+        let data = try encoder.encode(command)
+        let json = String(data: data, encoding: .utf8)!
+        XCTAssertEqual(json, #"{"type":"syncFromDrive"}"#)
+    }
+
+    func testDecodeSyncFromDriveFromJSON() throws {
+        let json = #"{"type":"syncFromDrive"}"#
+        let command = try decoder.decode(Command.self, from: Data(json.utf8))
+        XCTAssertEqual(command, .syncFromDrive)
+    }
+
     // MARK: - Route
 
     func testRouteAllCases() {

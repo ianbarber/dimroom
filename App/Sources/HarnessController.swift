@@ -26,6 +26,9 @@ final class HarnessController: @unchecked Sendable {
     private let undoStack: UndoStack?
     private let catalogPublisher: CatalogPublisher?
     private let driveAuthState: DriveAuthState?
+    private let catalogRestoreUploader: (any CatalogUploading)?
+    private let catalogRestorePath: String?
+    private let catalogRestoreFileIdStore: (any DriveFileIdStore)?
     private var server: HarnessServer?
 
     init(
@@ -42,7 +45,10 @@ final class HarnessController: @unchecked Sendable {
         originalsCoordinator: OriginalsCoordinator? = nil,
         undoStack: UndoStack? = nil,
         catalogPublisher: CatalogPublisher? = nil,
-        driveAuthState: DriveAuthState? = nil
+        driveAuthState: DriveAuthState? = nil,
+        catalogRestoreUploader: (any CatalogUploading)? = nil,
+        catalogRestorePath: String? = nil,
+        catalogRestoreFileIdStore: (any DriveFileIdStore)? = nil
     ) {
         self.router = router
         self.catalog = catalog
@@ -58,6 +64,9 @@ final class HarnessController: @unchecked Sendable {
         self.undoStack = undoStack
         self.catalogPublisher = catalogPublisher
         self.driveAuthState = driveAuthState
+        self.catalogRestoreUploader = catalogRestoreUploader
+        self.catalogRestorePath = catalogRestorePath
+        self.catalogRestoreFileIdStore = catalogRestoreFileIdStore
     }
 
     func start(socketPath: String = HarnessServer.defaultSocketPath) throws {
@@ -308,7 +317,60 @@ final class HarnessController: @unchecked Sendable {
         case .releaseHeldDownloads:
             HoldUntilReleasedHarnessDownloader.shared.release()
             return .ok()
+
+        case .restoreCatalogFromDrive(let confirm):
+            return await handleRestoreCatalogFromDrive(confirm: confirm)
         }
+    }
+
+    private func handleRestoreCatalogFromDrive(confirm: Bool) async -> Response {
+        guard let uploader = catalogRestoreUploader,
+              let path = catalogRestorePath,
+              let store = catalogRestoreFileIdStore else {
+            return .error("catalog restore uploader not configured (no DriveClient and no DIMROOM_HARNESS_STUB_REMOTE_CATALOG)")
+        }
+        var promptPhotoCount: Int?
+        let outcome: RestoreOutcome
+        do {
+            outcome = try await CatalogPublisher.restoreIfNeeded(
+                localPath: path,
+                uploader: uploader,
+                fileIdStore: store,
+                prompt: { prompt in
+                    promptPhotoCount = prompt.photoCount
+                    return confirm
+                }
+            )
+        } catch let error as SyncEngineError {
+            return .ok(data: .dictionary([
+                "outcome": .string("restoreFailed"),
+                "error": .string(String(describing: error)),
+            ]))
+        } catch {
+            return .ok(data: .dictionary([
+                "outcome": .string("restoreFailed"),
+                "error": .string(String(describing: error)),
+            ]))
+        }
+        var payload: [String: AnyCodableValue] = [:]
+        switch outcome {
+        case .restored(let driveFileId, let bytes):
+            payload["outcome"] = .string("restored")
+            payload["driveFileId"] = .string(driveFileId)
+            payload["downloadedBytes"] = .int(Int(bytes))
+        case .declinedByUser:
+            payload["outcome"] = .string("declinedByUser")
+        case .noRemoteCatalog:
+            payload["outcome"] = .string("noRemoteCatalog")
+        case .localCatalogPresent:
+            payload["outcome"] = .string("localCatalogPresent")
+        case .notAuthenticated:
+            payload["outcome"] = .string("notAuthenticated")
+        }
+        if let photoCount = promptPhotoCount {
+            payload["photoCount"] = .int(photoCount)
+        }
+        return .ok(data: .dictionary(payload))
     }
 
     private func handlePostMenuAction(name: String) async -> Response {

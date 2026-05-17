@@ -76,6 +76,14 @@ public enum Command: Codable, Sendable, Equatable {
     /// in-flight set so the flow can verify late-tail behaviour.
     /// No-op outside harness mode with `DIMROOM_HARNESS_STUB_DOWNLOADER=hold-until-released`.
     case releaseHeldDownloads
+    /// Runs `CatalogPublisher.restoreIfNeeded` against the live
+    /// uploader (or the local-file stub when
+    /// `DIMROOM_HARNESS_STUB_REMOTE_CATALOG` is set). `confirm`
+    /// controls the prompt's reply (`true` ≡ Restore, `false` ≡ Start
+    /// Fresh). Returns the outcome + `photoCount` + `downloadedBytes`
+    /// in the response payload so flows can assert on the restore
+    /// shape (issue #234).
+    case restoreCatalogFromDrive(confirm: Bool)
 
     private enum CodingKeys: String, CodingKey {
         case type
@@ -104,6 +112,7 @@ public enum Command: Codable, Sendable, Equatable {
         case angle
         case name
         case title
+        case confirm
     }
 
     private enum CommandType: String, Codable {
@@ -160,6 +169,7 @@ public enum Command: Codable, Sendable, Equatable {
         case simulateDriveAuthFailure
         case postMenuAction
         case releaseHeldDownloads
+        case restoreCatalogFromDrive
     }
 
     public init(from decoder: Decoder) throws {
@@ -325,6 +335,9 @@ public enum Command: Codable, Sendable, Equatable {
             self = .postMenuAction(name: name)
         case .releaseHeldDownloads:
             self = .releaseHeldDownloads
+        case .restoreCatalogFromDrive:
+            let confirm = try container.decodeIfPresent(Bool.self, forKey: .confirm) ?? true
+            self = .restoreCatalogFromDrive(confirm: confirm)
         }
     }
 
@@ -483,6 +496,9 @@ public enum Command: Codable, Sendable, Equatable {
             try container.encode(name, forKey: .name)
         case .releaseHeldDownloads:
             try container.encode(CommandType.releaseHeldDownloads, forKey: .type)
+        case .restoreCatalogFromDrive(let confirm):
+            try container.encode(CommandType.restoreCatalogFromDrive, forKey: .type)
+            try container.encode(confirm, forKey: .confirm)
         }
     }
 }

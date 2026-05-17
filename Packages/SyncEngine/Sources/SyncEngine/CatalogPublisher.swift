@@ -72,6 +72,15 @@ public actor CatalogPublisher {
         }
     }
 
+    /// True when an edit-driven publish is queued and waiting for the
+    /// debouncer's quiet window. The change poller reads this to detect
+    /// "local has pending changes since last sync" → emit a conflict
+    /// outcome instead of a reload prompt when remote moved too.
+    public func hasPendingChanges() async -> Bool {
+        guard let debouncer else { return false }
+        return await debouncer.hasPending
+    }
+
     /// Force an immediate publish, bypassing debounce. Used by the
     /// harness command. Returns the publish outcome on success.
     @discardableResult

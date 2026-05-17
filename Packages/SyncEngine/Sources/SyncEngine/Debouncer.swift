@@ -39,6 +39,14 @@ actor Debouncer {
         self.fire = fire
     }
 
+    /// True when a fire is queued and waiting for the quiet window to
+    /// elapse. Used by the change poller to detect "local catalog has
+    /// unwritten edits" → emit a conflict instead of prompting a
+    /// blind reload.
+    var hasPending: Bool {
+        scheduledGeneration != nil
+    }
+
     /// Record a new trigger. Bumps the generation and reschedules the
     /// wake-up task so the fire happens `interval` after this call (or
     /// `maxInterval` after the first pending trigger, whichever comes

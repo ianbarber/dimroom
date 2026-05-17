@@ -65,5 +65,12 @@ enum CatalogMigrations {
                 columns: ["importSessionId"]
             )
         }
+
+        migrator.registerMigration("004-createSyncState") { db in
+            try db.create(table: "sync_state") { t in
+                t.column("key", .text).primaryKey()
+                t.column("value", .text).notNull()
+            }
+        }
     }
 }

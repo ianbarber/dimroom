@@ -36,14 +36,26 @@ public struct CatalogUploadResult: Sendable, Equatable {
 
 /// Reference to a catalog file discovered on Drive. Used during restore
 /// so the prompt can show "found a 4 MB catalog modified 3 days ago".
+///
+/// `photoCount` is read from the file's `appProperties.dimroom_photo_count`
+/// metadata; legacy catalogs published before #234 will not have this
+/// set and surface as `nil` so the prompt falls back to a count-less
+/// message.
 public struct DriveCatalogRef: Sendable, Equatable {
     public let driveFileId: String
     public let sizeBytes: Int64
     public let modifiedTime: Date?
+    public let photoCount: Int?
 
-    public init(driveFileId: String, sizeBytes: Int64, modifiedTime: Date?) {
+    public init(
+        driveFileId: String,
+        sizeBytes: Int64,
+        modifiedTime: Date?,
+        photoCount: Int? = nil
+    ) {
         self.driveFileId = driveFileId
         self.sizeBytes = sizeBytes
         self.modifiedTime = modifiedTime
+        self.photoCount = photoCount
     }
 }

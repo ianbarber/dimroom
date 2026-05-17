@@ -36,7 +36,7 @@ public struct LibraryView: View {
     private var columns: [GridItem] {
         Array(
             repeating: GridItem(.flexible(), spacing: Self.cellSpacing),
-            count: LibraryViewModel.columnCount
+            count: viewModel.columnCount
         )
     }
 

@@ -76,6 +76,21 @@ public enum Command: Codable, Sendable, Equatable {
     /// in-flight set so the flow can verify late-tail behaviour.
     /// No-op outside harness mode with `DIMROOM_HARNESS_STUB_DOWNLOADER=hold-until-released`.
     case releaseHeldDownloads
+    /// Read a value from the `SettingsStore` by its short wire key
+    /// (e.g. "libraryGridColumns"). Returns the value as `AnyCodableValue`
+    /// under the `value` field, or an error response for unknown keys.
+    case getSetting(key: String)
+    /// Write a value into the `SettingsStore`. `valueJSON` is a JSON-
+    /// encoded scalar (`"4"`, `"true"`, `"\"text\""`). The handler
+    /// decodes it, type-checks against the key, and pushes the change
+    /// through the same `@Published` path the UI uses.
+    case setSetting(key: String, valueJSON: String)
+    /// Wipe every cached original on disk and clear the in-memory
+    /// index. Mirrors the "Clear originals cache" button in Settings.
+    case clearOriginalsCache
+    /// Wipe every cached preview JPEG (both master and display tiers).
+    /// Mirrors the "Clear preview cache" button in Settings.
+    case clearPreviewCache
 
     private enum CodingKeys: String, CodingKey {
         case type
@@ -104,6 +119,8 @@ public enum Command: Codable, Sendable, Equatable {
         case angle
         case name
         case title
+        case key
+        case valueJSON
     }
 
     private enum CommandType: String, Codable {
@@ -160,6 +177,10 @@ public enum Command: Codable, Sendable, Equatable {
         case simulateDriveAuthFailure
         case postMenuAction
         case releaseHeldDownloads
+        case getSetting
+        case setSetting
+        case clearOriginalsCache
+        case clearPreviewCache
     }
 
     public init(from decoder: Decoder) throws {
@@ -325,6 +346,17 @@ public enum Command: Codable, Sendable, Equatable {
             self = .postMenuAction(name: name)
         case .releaseHeldDownloads:
             self = .releaseHeldDownloads
+        case .getSetting:
+            let key = try container.decode(String.self, forKey: .key)
+            self = .getSetting(key: key)
+        case .setSetting:
+            let key = try container.decode(String.self, forKey: .key)
+            let valueJSON = try container.decode(String.self, forKey: .valueJSON)
+            self = .setSetting(key: key, valueJSON: valueJSON)
+        case .clearOriginalsCache:
+            self = .clearOriginalsCache
+        case .clearPreviewCache:
+            self = .clearPreviewCache
         }
     }
 
@@ -483,6 +515,17 @@ public enum Command: Codable, Sendable, Equatable {
             try container.encode(name, forKey: .name)
         case .releaseHeldDownloads:
             try container.encode(CommandType.releaseHeldDownloads, forKey: .type)
+        case .getSetting(let key):
+            try container.encode(CommandType.getSetting, forKey: .type)
+            try container.encode(key, forKey: .key)
+        case .setSetting(let key, let valueJSON):
+            try container.encode(CommandType.setSetting, forKey: .type)
+            try container.encode(key, forKey: .key)
+            try container.encode(valueJSON, forKey: .valueJSON)
+        case .clearOriginalsCache:
+            try container.encode(CommandType.clearOriginalsCache, forKey: .type)
+        case .clearPreviewCache:
+            try container.encode(CommandType.clearPreviewCache, forKey: .type)
         }
     }
 }

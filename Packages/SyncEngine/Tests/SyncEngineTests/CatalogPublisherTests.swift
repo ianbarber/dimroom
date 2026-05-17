@@ -259,6 +259,67 @@ final class CatalogPublisherTests: XCTestCase {
         XCTAssertEqual(uploader.uploadCallCount, 2)
     }
 
+    // MARK: - setEnabled / setDebounceInterval
+
+    func testSetEnabledFalseCancelsPendingDebounce() async throws {
+        let (db, url) = try makeOnDiskCatalog()
+        defer { try? FileManager.default.removeItem(at: url.deletingLastPathComponent()) }
+
+        let uploader = StubCatalogUploader(behavior: .alwaysSucceed(successResult()))
+        let publisher = CatalogPublisher(
+            catalog: db,
+            uploader: uploader,
+            fileIdStore: InMemoryDriveFileIdStore(),
+            snapshotDirectory: snapshotDir(),
+            debounceInterval: .milliseconds(120),
+            maxDebounceInterval: .seconds(10)
+        )
+        await publisher.start()
+        defer { Task { await publisher.stop() } }
+
+        publisher.scheduleDebouncedPublish()
+        try await Task.sleep(for: .milliseconds(20))
+        await publisher.setEnabled(false)
+        try await Task.sleep(for: .milliseconds(300))
+
+        XCTAssertEqual(uploader.uploadCallCount, 0, "setEnabled(false) must cancel in-flight debounce")
+
+        // Further triggers while disabled stay no-ops.
+        publisher.scheduleDebouncedPublish()
+        try await Task.sleep(for: .milliseconds(300))
+        XCTAssertEqual(uploader.uploadCallCount, 0)
+
+        // Re-enable; a fresh trigger should publish now.
+        await publisher.setEnabled(true)
+        publisher.scheduleDebouncedPublish()
+        try await Task.sleep(for: .milliseconds(400))
+        XCTAssertEqual(uploader.uploadCallCount, 1)
+    }
+
+    func testSetDebounceIntervalAppliesToNextTrigger() async throws {
+        let (db, url) = try makeOnDiskCatalog()
+        defer { try? FileManager.default.removeItem(at: url.deletingLastPathComponent()) }
+
+        let uploader = StubCatalogUploader(behavior: .alwaysSucceed(successResult()))
+        let publisher = CatalogPublisher(
+            catalog: db,
+            uploader: uploader,
+            fileIdStore: InMemoryDriveFileIdStore(),
+            snapshotDirectory: snapshotDir(),
+            debounceInterval: .seconds(2),
+            maxDebounceInterval: .seconds(10)
+        )
+        await publisher.start()
+        defer { Task { await publisher.stop() } }
+
+        // Shorten to 80 ms; the next trigger should fire fast enough
+        // that we observe an upload inside the 300 ms window below.
+        await publisher.setDebounceInterval(.milliseconds(80))
+        publisher.scheduleDebouncedPublish()
+        try await Task.sleep(for: .milliseconds(300))
+        XCTAssertEqual(uploader.uploadCallCount, 1)
+    }
+
     // MARK: - Idempotency
 
     func testStartIsIdempotent() async throws {

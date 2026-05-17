@@ -29,6 +29,17 @@ struct DimroomApp: App {
                 originalFetcher: appDelegate.originalFetcher
             )
         }
+        Settings {
+            SettingsRootView(
+                store: appDelegate.settingsStore,
+                driveAuthState: appDelegate.driveAuthState,
+                libraryLocation: appDelegate.libraryLocationDescription,
+                onConnectDrive: { appDelegate.connectGoogleDriveFromMenu() },
+                onDisconnectDrive: { appDelegate.disconnectGoogleDriveFromMenu() },
+                onClearOriginalsCache: { appDelegate.clearOriginalsCacheFromSettings() },
+                onClearPreviewCache: { appDelegate.clearPreviewCacheFromSettings() }
+            )
+        }
         .commands {
             CommandGroup(after: .newItem) {
                 Button("Import Folder...") {
@@ -407,6 +418,31 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     let exportCoordinator = ExportCoordinator()
     let uploadCoordinator = UploadCoordinator()
     let editClipboard = EditClipboard()
+    /// Settings-backed configuration store. Initialised eagerly so the
+    /// SwiftUI `Settings { ... }` scene — read before
+    /// `applicationDidFinishLaunching` runs — has a real instance to
+    /// bind to. The store reads `UserDefaults` immediately, so values
+    /// the user has previously written are present at launch.
+    ///
+    /// Honours `--settings-suite <name>` on the command line so the
+    /// Layer C harness flow can run against an isolated suite without
+    /// touching the user's real preferences plist. Argv is parsed
+    /// inline rather than via `ProcessInfo.arguments` only because the
+    /// property initialiser runs before `applicationDidFinishLaunching`,
+    /// and we need the value before downstream wiring runs.
+    let settingsStore: SettingsStore = {
+        let args = ProcessInfo.processInfo.arguments
+        if let index = args.firstIndex(of: "--settings-suite"),
+           index + 1 < args.count,
+           let suite = UserDefaults(suiteName: args[index + 1]) {
+            return SettingsStore(defaults: suite)
+        }
+        return SettingsStore()
+    }()
+    /// Subscriptions that mirror SettingsStore changes into the
+    /// downstream consumers (cache, publisher, view models). Held so
+    /// they live for the lifetime of the app delegate.
+    private var settingsCancellables: Set<AnyCancellable> = []
     /// View model shared between the SwiftUI tree and the harness
     /// controller. Initialised eagerly with an in-memory empty catalog so
     /// the `@main App` scene can read it before `applicationDidFinishLaunching`
@@ -444,6 +480,20 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     /// originals cache.
     var originalFetcher: (any OriginalFetcher)? { originalsCoordinator }
 
+    /// Human-friendly path for the read-only "Library location" row in
+    /// Settings → General. Falls back to the Application Support path
+    /// when launched without a fixture catalog.
+    var libraryLocationDescription: URL? {
+        if let catalogPathURL = catalogPath { return catalogPathURL.deletingLastPathComponent() }
+        let appSupport = FileManager.default.urls(
+            for: .applicationSupportDirectory,
+            in: .userDomainMask
+        ).first
+        return appSupport?.appendingPathComponent("Dimroom", isDirectory: true)
+    }
+
+    private var catalogPath: URL?
+
     func applicationDidFinishLaunching(_ notification: Notification) {
         let args = ProcessInfo.processInfo.arguments
 
@@ -464,12 +514,22 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         let previewCacheDirectory = resolvePreviewCacheDirectory(from: args)
         let resolvedPreviewStore = PreviewStore(cacheDirectory: previewCacheDirectory)
 
+        // Seed the view models with the user-configured initial values
+        // before configuring catalog access. Subscriptions below keep
+        // them in sync with later changes from the Settings UI.
+        libraryViewModel.columnCount = settingsStore.libraryGridColumns
+        libraryViewModel.recentImportsLimit = settingsStore.recentImportsLimit
+        developViewModel.showHistogram = settingsStore.developHistogramVisible
+        developViewModel.renderDebounceMillis = settingsStore.developRenderDebounceMillis
+        developViewModel.saveDebounceMillis = settingsStore.developSaveDebounceMillis
+
         // Resolve drive client first so restoreIfNeeded can probe Drive
         // before the catalog is opened.
         let resolvedDriveClient = resolveDriveClient()
         self.driveClient = resolvedDriveClient
 
         let catalogPath = resolveCatalogPath(from: args)
+        self.catalogPath = URL(fileURLWithPath: catalogPath)
         let fileIdStore = FileSystemDriveFileIdStore(
             path: FileSystemDriveFileIdStore.defaultPath()
         )
@@ -570,9 +630,15 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
                     uploader: catalogUploader,
                     fileIdStore: driveFileIdStore ?? FileSystemDriveFileIdStore(
                         path: FileSystemDriveFileIdStore.defaultPath()
-                    )
+                    ),
+                    debounceInterval: .seconds(settingsStore.driveAutoPublishDebounceSeconds)
                 )
                 self.catalogPublisher = publisher
+                // Disable up-front if the user has turned auto-publish
+                // off in Settings — the start() call below still arms
+                // the debouncer so subsequent toggling works, but no
+                // mutation will schedule a publish until enabled.
+                Task { await publisher.setEnabled(settingsStore.driveAutoPublish) }
                 // Wire onChange → debouncer trigger. Captured weakly so
                 // the catalog doesn't pin the publisher in a retain
                 // cycle after the app shuts down.
@@ -583,6 +649,14 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             }
         }
 
+        // Wire SettingsStore changes into the downstream consumers so
+        // moving a slider in Settings → Cache / Drive / Develop /
+        // Library takes effect immediately, without restart.
+        wireSettingsSubscriptions()
+
+        // Handing the harness controller a Settings handle lets Layer C
+        // flows round-trip getSetting/setSetting through the same
+        // store the UI binds to.
         guard args.contains("--harness") else { return }
 
         // Create a window explicitly for harness mode so screenshots work
@@ -630,7 +704,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             originalsCoordinator: originalsCoordinator,
             undoStack: undoStack,
             catalogPublisher: catalogPublisher,
-            driveAuthState: driveAuthState
+            driveAuthState: driveAuthState,
+            settingsStore: settingsStore
         )
         do {
             try controller.start(socketPath: socketPath)
@@ -1002,14 +1077,15 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         return resolveOriginalsDirectory()
     }
 
-    /// Byte budget for the originals cache. Defaults to 10 GB; override
-    /// via `DIMROOM_ORIGINALS_CACHE_BYTES` for tests.
+    /// Byte budget for the originals cache. `DIMROOM_ORIGINALS_CACHE_BYTES`
+    /// still wins so harness flows can pin a tiny value deterministically;
+    /// outside the harness the SettingsStore value is honoured.
     private func resolveOriginalsCacheBudget() -> Int64 {
         if let raw = ProcessInfo.processInfo.environment["DIMROOM_ORIGINALS_CACHE_BYTES"],
            let value = Int64(raw), value > 0 {
             return value
         }
-        return 10 * 1024 * 1024 * 1024
+        return settingsStore.originalsCacheBudgetBytes
     }
 
     /// Best-effort `DriveClient` construction: returns `nil` when OAuth
@@ -1037,6 +1113,97 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             tokenStore: InMemoryTokenStore(),
             browserLauncher: HarnessStubBrowserLauncher()
         )
+    }
+
+    // MARK: - Settings → live components
+
+    /// Subscribe to every relevant `@Published` property on
+    /// `settingsStore` and forward each change to the matching
+    /// downstream component. The reverse direction (UI → store) lives
+    /// in the SwiftUI binding inside each tab view.
+    private func wireSettingsSubscriptions() {
+        settingsStore.$libraryGridColumns
+            .dropFirst()
+            .sink { [weak self] newValue in
+                self?.libraryViewModel.columnCount = newValue
+            }
+            .store(in: &settingsCancellables)
+
+        settingsStore.$recentImportsLimit
+            .dropFirst()
+            .sink { [weak self] newValue in
+                guard let self else { return }
+                self.libraryViewModel.recentImportsLimit = newValue
+                self.libraryViewModel.reload()
+            }
+            .store(in: &settingsCancellables)
+
+        settingsStore.$originalsCacheBudgetBytes
+            .dropFirst()
+            .sink { [weak self] newValue in
+                guard let coordinator = self?.originalsCoordinator else { return }
+                Task { await coordinator.setCacheBudget(newValue) }
+            }
+            .store(in: &settingsCancellables)
+
+        settingsStore.$driveAutoPublish
+            .dropFirst()
+            .sink { [weak self] newValue in
+                guard let publisher = self?.catalogPublisher else { return }
+                Task { await publisher.setEnabled(newValue) }
+            }
+            .store(in: &settingsCancellables)
+
+        settingsStore.$driveAutoPublishDebounceSeconds
+            .dropFirst()
+            .sink { [weak self] newValue in
+                guard let publisher = self?.catalogPublisher else { return }
+                Task { await publisher.setDebounceInterval(.seconds(newValue)) }
+            }
+            .store(in: &settingsCancellables)
+
+        settingsStore.$developHistogramVisible
+            .dropFirst()
+            .sink { [weak self] newValue in
+                // Don't override a live user toggle; only seed the
+                // default when no asset is active so a future activation
+                // honours the new preference. Active sessions keep
+                // whatever the user just chose with the H key.
+                guard let self else { return }
+                if self.developViewModel.currentAssetId == nil {
+                    self.developViewModel.showHistogram = newValue
+                }
+            }
+            .store(in: &settingsCancellables)
+
+        settingsStore.$developRenderDebounceMillis
+            .dropFirst()
+            .sink { [weak self] newValue in
+                self?.developViewModel.renderDebounceMillis = newValue
+            }
+            .store(in: &settingsCancellables)
+
+        settingsStore.$developSaveDebounceMillis
+            .dropFirst()
+            .sink { [weak self] newValue in
+                self?.developViewModel.saveDebounceMillis = newValue
+            }
+            .store(in: &settingsCancellables)
+    }
+
+    // MARK: - Settings actions
+
+    func clearOriginalsCacheFromSettings() {
+        guard let coordinator = originalsCoordinator else { return }
+        Task { await coordinator.clearCache() }
+    }
+
+    func clearPreviewCacheFromSettings() {
+        guard let previewStore else { return }
+        Task {
+            await previewStore.removeAll()
+            await MainActor.run { self.libraryViewModel.reload() }
+        }
     }
 
     /// Returns a harness-specific downloader when the env var requests

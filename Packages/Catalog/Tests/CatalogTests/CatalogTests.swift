@@ -329,6 +329,25 @@ final class CatalogDatabaseTests: XCTestCase {
         XCTAssertNil(fetched?.importSessionId)
     }
 
+    // MARK: - countAssets
+
+    func testCountAssetsExcludesSoftDeleted() throws {
+        let db = try makeDatabase()
+        let liveIds = (0..<3).map { _ in UUID() }
+        for (i, id) in liveIds.enumerated() {
+            var a = makeSampleAsset(contentHash: "live-\(i)")
+            a.id = id
+            try db.insertAsset(a)
+        }
+        let deletedId = UUID()
+        var deleted = makeSampleAsset(contentHash: "to-delete")
+        deleted.id = deletedId
+        try db.insertAsset(deleted)
+        try db.deleteAsset(id: deletedId)
+
+        XCTAssertEqual(try db.countAssets(), 3)
+    }
+
     // MARK: - Filter by Import Session
 
     func testFetchAssetsFilteredByImportSessionId() throws {

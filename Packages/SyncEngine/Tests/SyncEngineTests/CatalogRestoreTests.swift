@@ -1,6 +1,20 @@
 import XCTest
 @testable import SyncEngine
 
+/// Captures the `CatalogRestorePrompt` argument from an async closure
+/// so a test can assert on its fields after `restoreIfNeeded` returns.
+private final class PromptCaptureBox: @unchecked Sendable {
+    private let lock = NSLock()
+    private var _value: CatalogRestorePrompt?
+    var value: CatalogRestorePrompt? {
+        lock.lock(); defer { lock.unlock() }
+        return _value
+    }
+    func set(_ v: CatalogRestorePrompt) {
+        lock.lock(); _value = v; lock.unlock()
+    }
+}
+
 final class CatalogRestoreTests: XCTestCase {
 
     private func tempLocalPath() -> String {
@@ -70,7 +84,12 @@ final class CatalogRestoreTests: XCTestCase {
             CatalogUploadResult(driveFileId: "x", uploadedBytes: 0, wasCreate: true)
         ))
         uploader.setRemoteCatalog(
-            DriveCatalogRef(driveFileId: "remote-1", sizeBytes: 1234, modifiedTime: nil)
+            DriveCatalogRef(
+                driveFileId: "remote-1",
+                sizeBytes: 1234,
+                modifiedTime: nil,
+                photoCount: 7
+            )
         )
         let payload = Data("catalog-bytes".utf8)
         uploader.setDownloadBytes(payload)
@@ -78,15 +97,59 @@ final class CatalogRestoreTests: XCTestCase {
 
         let store = InMemoryDriveFileIdStore()
 
+        // Capture the prompt argument so we can assert photoCount
+        // propagated end-to-end from DriveCatalogRef → CatalogRestorePrompt.
+        let promptBox = PromptCaptureBox()
         let outcome = try await CatalogPublisher.restoreIfNeeded(
             localPath: path,
             uploader: uploader,
             fileIdStore: store,
-            prompt: { _ in true }
+            prompt: { prompt in
+                promptBox.set(prompt)
+                return true
+            }
         )
         XCTAssertEqual(outcome, .restored(driveFileId: "remote-1", downloadedBytes: Int64(payload.count)))
         XCTAssertTrue(FileManager.default.fileExists(atPath: path))
         XCTAssertEqual(try store.load(), "remote-1")
+        XCTAssertEqual(promptBox.value?.photoCount, 7)
+        XCTAssertEqual(promptBox.value?.driveFileId, "remote-1")
+        XCTAssertEqual(promptBox.value?.sizeBytes, 1234)
+    }
+
+    func testPromptPhotoCountNilForLegacyCatalogs() async throws {
+        // Legacy catalogs published before #234 don't carry the
+        // `appProperties.dimroom_photo_count` key. The DriveCatalogRef
+        // surfaces photoCount=nil and the prompt must propagate that
+        // instead of substituting a placeholder.
+        let path = tempLocalPath()
+        defer { cleanup(path) }
+        let uploader = StubCatalogUploader(behavior: .alwaysSucceed(
+            CatalogUploadResult(driveFileId: "x", uploadedBytes: 0, wasCreate: true)
+        ))
+        uploader.setRemoteCatalog(
+            DriveCatalogRef(
+                driveFileId: "legacy",
+                sizeBytes: 4096,
+                modifiedTime: nil,
+                photoCount: nil
+            )
+        )
+        uploader.setDownloadBytes(Data("legacy-bytes".utf8))
+        uploader.setDownloadResult(.success(12))
+
+        let promptBox = PromptCaptureBox()
+        _ = try await CatalogPublisher.restoreIfNeeded(
+            localPath: path,
+            uploader: uploader,
+            fileIdStore: InMemoryDriveFileIdStore(),
+            prompt: { prompt in
+                promptBox.set(prompt)
+                return true
+            }
+        )
+        XCTAssertNotNil(promptBox.value)
+        XCTAssertNil(promptBox.value?.photoCount)
     }
 
     func testRemoteDeclinedDoesNotDownload() async throws {
@@ -110,6 +173,63 @@ final class CatalogRestoreTests: XCTestCase {
         XCTAssertEqual(uploader.downloadCalls.count, 0)
         XCTAssertFalse(FileManager.default.fileExists(atPath: path))
         XCTAssertNil(try store.load())
+    }
+
+    func testRestoreFromLocalFileStubUploaderRoundTrip() async throws {
+        // Round-trip a fixture catalog through `LocalFileStubCatalogUploader`.
+        // Asserts size, photoCount (from sidecar JSON), and the file
+        // content match what the harness flow expects.
+        let work = FileManager.default.temporaryDirectory
+            .appendingPathComponent("dimroom-stub-\(UUID().uuidString)")
+        try FileManager.default.createDirectory(at: work, withIntermediateDirectories: true)
+        defer { try? FileManager.default.removeItem(at: work) }
+
+        let remotePath = work.appendingPathComponent("remote.sqlite")
+        let payload = Data(repeating: 0x42, count: 256)
+        try payload.write(to: remotePath)
+
+        // Sidecar with the photo count — harness writes this so the
+        // stub uploader can answer the count without opening SQLite.
+        let sidecar = remotePath.appendingPathExtension("json")
+        try Data(#"{"photoCount":11}"#.utf8).write(to: sidecar)
+
+        let uploader = LocalFileStubCatalogUploader(sourcePath: remotePath.path)
+        let ref = try await uploader.findExistingCatalog()
+        XCTAssertEqual(ref?.sizeBytes, 256)
+        XCTAssertEqual(ref?.photoCount, 11)
+
+        let localPath = work.appendingPathComponent("restored.sqlite").path
+        let bytes = try await uploader.download(fileId: ref!.driveFileId, to: localPath)
+        XCTAssertEqual(bytes, 256)
+        XCTAssertEqual(try Data(contentsOf: URL(fileURLWithPath: localPath)), payload)
+    }
+
+    func testLocalFileStubUploaderUsesInjectedPhotoCountOverSidecar() async throws {
+        let work = FileManager.default.temporaryDirectory
+            .appendingPathComponent("dimroom-stub-\(UUID().uuidString)")
+        try FileManager.default.createDirectory(at: work, withIntermediateDirectories: true)
+        defer { try? FileManager.default.removeItem(at: work) }
+        let remotePath = work.appendingPathComponent("remote.sqlite")
+        try Data("x".utf8).write(to: remotePath)
+        // Sidecar present with a *different* count — the explicit init
+        // arg should win so harness env vars can override.
+        try Data(#"{"photoCount":1}"#.utf8).write(
+            to: remotePath.appendingPathExtension("json")
+        )
+        let uploader = LocalFileStubCatalogUploader(
+            sourcePath: remotePath.path,
+            photoCount: 99
+        )
+        let ref = try await uploader.findExistingCatalog()
+        XCTAssertEqual(ref?.photoCount, 99)
+    }
+
+    func testLocalFileStubUploaderReturnsNilWhenSourceAbsent() async throws {
+        let uploader = LocalFileStubCatalogUploader(
+            sourcePath: "/dev/null/no-such-file"
+        )
+        let ref = try await uploader.findExistingCatalog()
+        XCTAssertNil(ref)
     }
 
     func testNotAuthenticatedSurfacedFromFindError() async throws {

@@ -107,7 +107,9 @@ echo "=== List assets to get UUID ==="
 LIST_OUT=$("$CLI_BIN" list-assets --socket "$SOCKET")
 echo "$LIST_OUT"
 ASSET=$(printf '%s' "$LIST_OUT" | "$REPO_ROOT/bin/harness-json-extract" 'data[0].id')
-echo "  Asset: $ASSET"
+ASSET_B=$(printf '%s' "$LIST_OUT" | "$REPO_ROOT/bin/harness-json-extract" 'data[1].id')
+echo "  Asset A: $ASSET"
+echo "  Asset B: $ASSET_B"
 
 echo "=== Select asset and navigate to Develop ==="
 "$CLI_BIN" select-asset "$ASSET" --socket "$SOCKET" >/dev/null
@@ -236,6 +238,64 @@ echo "  OK: reset-crop collapsed cropRect to identity (null)"
 
 echo "=== Final screenshot ==="
 "$CLI_BIN" screenshot "$SCREENSHOT_DIR/crop-result.png" --socket "$SOCKET" || true
+
+# ---------------------------------------------------------------------
+# Issue #239 bug 2 regression: cross-asset crop state isolation. After
+# cropping asset A above, navigating to a never-cropped asset B and
+# entering crop mode must show the full frame — not asset A's leftover
+# cropRect.
+# ---------------------------------------------------------------------
+if [ -n "$ASSET_B" ] && [ "$ASSET_B" != "null" ]; then
+    echo "=== Cross-asset state isolation — set crop on A ==="
+    "$CLI_BIN" set-crop "$ASSET" \
+        --x 0.1 --y 0.1 --width 0.6 --height 0.6 --angle 0 \
+        --socket "$SOCKET" >/dev/null
+    sleep 1
+
+    echo "=== Select asset B (never cropped) ==="
+    "$CLI_BIN" select-asset "$ASSET_B" --socket "$SOCKET" >/dev/null
+    # DevelopViewModel.activate resets cropViewModel before loading.
+    sleep 1
+
+    echo "=== Enter crop mode on B ==="
+    "$CLI_BIN" enter-crop "$ASSET_B" --socket "$SOCKET" >/dev/null
+    sleep 1
+
+    echo "=== Screenshot — full-frame overlay on B ==="
+    "$CLI_BIN" screenshot "$SCREENSHOT_DIR/crop-fresh-asset.png" --socket "$SOCKET" || true
+
+    echo "=== getEdit on B — must have no cropRect ==="
+    GET_OUT_B=$("$CLI_BIN" get-edit "$ASSET_B" --socket "$SOCKET")
+    echo "$GET_OUT_B"
+    B_CROP_CHECK=$(printf '%s' "$GET_OUT_B" | /usr/bin/python3 -c "
+import json, sys
+doc = json.loads(sys.stdin.read())
+r = doc['data'].get('cropRect')
+print('absent' if r is None else f'present:{r}')
+")
+    if [ "$B_CROP_CHECK" != "absent" ]; then
+        echo "ERROR: never-cropped asset B has a cropRect after switching from A — $B_CROP_CHECK"
+        exit 1
+    fi
+    echo "  OK: asset B has no stored cropRect after switching from cropped A"
+
+    # Commit-crop on B without modifying anything — the stored state must
+    # remain identity even though the user briefly entered crop mode.
+    "$CLI_BIN" commit-crop --socket "$SOCKET" >/dev/null
+    sleep 1
+    GET_OUT_B2=$("$CLI_BIN" get-edit "$ASSET_B" --socket "$SOCKET")
+    B_CROP_CHECK2=$(printf '%s' "$GET_OUT_B2" | /usr/bin/python3 -c "
+import json, sys
+doc = json.loads(sys.stdin.read())
+r = doc['data'].get('cropRect')
+print('absent' if r is None else f'present:{r}')
+")
+    if [ "$B_CROP_CHECK2" != "absent" ]; then
+        echo "ERROR: identity commit on B wrote a non-identity cropRect — $B_CROP_CHECK2"
+        exit 1
+    fi
+    echo "  OK: identity commit on B preserved no-crop state"
+fi
 
 echo "=== Quit ==="
 "$CLI_BIN" quit --socket "$SOCKET" 2>&1 || true

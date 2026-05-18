@@ -259,6 +259,57 @@ final class CatalogPublisherTests: XCTestCase {
         XCTAssertEqual(uploader.uploadCallCount, 2)
     }
 
+    // MARK: - Photo count appProperty
+
+    func testPublishStampsLiveAssetCountIntoUploadCall() async throws {
+        let (db, url) = try makeOnDiskCatalog()
+        defer { try? FileManager.default.removeItem(at: url.deletingLastPathComponent()) }
+
+        // Seed three live assets so the publish path's countAssets()
+        // resolves to 3. One soft-deleted asset to prove the count
+        // excludes deletedAt rows (the user-visible count).
+        for i in 0..<3 {
+            try db.insertAsset(
+                Asset(
+                    id: UUID(),
+                    contentHash: "hash-\(i)",
+                    originalFilename: "p\(i).jpg",
+                    sourceType: .digital,
+                    width: 100, height: 100,
+                    bytes: 0
+                )
+            )
+        }
+        let deletedId = UUID()
+        try db.insertAsset(
+            Asset(
+                id: deletedId,
+                contentHash: "hash-del",
+                originalFilename: "del.jpg",
+                sourceType: .digital,
+                width: 100, height: 100,
+                bytes: 0
+            )
+        )
+        try db.deleteAsset(id: deletedId)
+
+        let uploader = StubCatalogUploader(behavior: .alwaysSucceed(successResult()))
+        let publisher = CatalogPublisher(
+            catalog: db,
+            uploader: uploader,
+            fileIdStore: InMemoryDriveFileIdStore(),
+            snapshotDirectory: snapshotDir(),
+            debounceInterval: .seconds(5),
+            maxDebounceInterval: .seconds(10)
+        )
+        await publisher.start()
+        defer { Task { await publisher.stop() } }
+
+        _ = try await publisher.publishNow()
+        let call = try XCTUnwrap(uploader.lastUpload)
+        XCTAssertEqual(call.photoCount, 3, "publish must stamp the live asset count (excluding soft-deleted)")
+    }
+
     // MARK: - setEnabled / setDebounceInterval
 
     func testSetEnabledFalseCancelsPendingDebounce() async throws {

@@ -27,6 +27,9 @@ final class HarnessController: @unchecked Sendable {
     private let catalogPublisher: CatalogPublisher?
     private let driveAuthState: DriveAuthState?
     private let settingsStore: SettingsStore?
+    private let catalogRestoreUploader: (any CatalogUploading)?
+    private let catalogRestorePath: String?
+    private let catalogRestoreFileIdStore: (any DriveFileIdStore)?
     private var server: HarnessServer?
 
     init(
@@ -44,7 +47,10 @@ final class HarnessController: @unchecked Sendable {
         undoStack: UndoStack? = nil,
         catalogPublisher: CatalogPublisher? = nil,
         driveAuthState: DriveAuthState? = nil,
-        settingsStore: SettingsStore? = nil
+        settingsStore: SettingsStore? = nil,
+        catalogRestoreUploader: (any CatalogUploading)? = nil,
+        catalogRestorePath: String? = nil,
+        catalogRestoreFileIdStore: (any DriveFileIdStore)? = nil
     ) {
         self.router = router
         self.catalog = catalog
@@ -61,6 +67,9 @@ final class HarnessController: @unchecked Sendable {
         self.catalogPublisher = catalogPublisher
         self.driveAuthState = driveAuthState
         self.settingsStore = settingsStore
+        self.catalogRestoreUploader = catalogRestoreUploader
+        self.catalogRestorePath = catalogRestorePath
+        self.catalogRestoreFileIdStore = catalogRestoreFileIdStore
     }
 
     func start(socketPath: String = HarnessServer.defaultSocketPath) throws {
@@ -229,6 +238,12 @@ final class HarnessController: @unchecked Sendable {
         case .resetEditParameter(let assetId, let parameter):
             return await handleResetEditParameter(assetId: assetId, parameter: parameter)
 
+        case .setEditArrayParameter(let assetId, let parameter, let index, let value):
+            return await handleSetEditArrayParameter(assetId: assetId, parameter: parameter, index: index, value: value)
+
+        case .resetEditArrayParameter(let assetId, let parameter, let index):
+            return await handleResetEditArrayParameter(assetId: assetId, parameter: parameter, index: index)
+
         case .setCurvePoints(let assetId, let channel, let pointsJSON):
             return await handleSetCurvePoints(assetId: assetId, channel: channel, pointsJSON: pointsJSON)
 
@@ -323,6 +338,9 @@ final class HarnessController: @unchecked Sendable {
 
         case .clearPreviewCache:
             return await handleClearPreviewCache()
+
+        case .restoreCatalogFromDrive(let confirm):
+            return await handleRestoreCatalogFromDrive(confirm: confirm)
         }
     }
 
@@ -395,6 +413,58 @@ final class HarnessController: @unchecked Sendable {
         if let v = value as? Double { return .double(v) }
         if let v = value as? String { return .string(v) }
         return .null
+    }
+
+    // MARK: - Catalog restore
+
+    private func handleRestoreCatalogFromDrive(confirm: Bool) async -> Response {
+        guard let uploader = catalogRestoreUploader,
+              let path = catalogRestorePath,
+              let store = catalogRestoreFileIdStore else {
+            return .error("catalog restore uploader not configured (no DriveClient and no DIMROOM_HARNESS_STUB_REMOTE_CATALOG)")
+        }
+        var promptPhotoCount: Int?
+        let outcome: RestoreOutcome
+        do {
+            outcome = try await CatalogPublisher.restoreIfNeeded(
+                localPath: path,
+                uploader: uploader,
+                fileIdStore: store,
+                prompt: { prompt in
+                    promptPhotoCount = prompt.photoCount
+                    return confirm
+                }
+            )
+        } catch let error as SyncEngineError {
+            return .ok(data: .dictionary([
+                "outcome": .string("restoreFailed"),
+                "error": .string(String(describing: error)),
+            ]))
+        } catch {
+            return .ok(data: .dictionary([
+                "outcome": .string("restoreFailed"),
+                "error": .string(String(describing: error)),
+            ]))
+        }
+        var payload: [String: AnyCodableValue] = [:]
+        switch outcome {
+        case .restored(let driveFileId, let bytes):
+            payload["outcome"] = .string("restored")
+            payload["driveFileId"] = .string(driveFileId)
+            payload["downloadedBytes"] = .int(Int(bytes))
+        case .declinedByUser:
+            payload["outcome"] = .string("declinedByUser")
+        case .noRemoteCatalog:
+            payload["outcome"] = .string("noRemoteCatalog")
+        case .localCatalogPresent:
+            payload["outcome"] = .string("localCatalogPresent")
+        case .notAuthenticated:
+            payload["outcome"] = .string("notAuthenticated")
+        }
+        if let photoCount = promptPhotoCount {
+            payload["photoCount"] = .int(photoCount)
+        }
+        return .ok(data: .dictionary(payload))
     }
 
     private func handlePostMenuAction(name: String) async -> Response {
@@ -1051,6 +1121,61 @@ final class HarnessController: @unchecked Sendable {
         }
         await MainActor.run {
             developViewModel.resetParameter(keyPath)
+        }
+        return .ok()
+    }
+
+    private func handleSetEditArrayParameter(
+        assetId: UUID,
+        parameter: String,
+        index: Int,
+        value: Double
+    ) async -> Response {
+        guard let axis = DevelopViewModel.hslAxis(forParameter: parameter) else {
+            return .error("unknown parameter: \(parameter)")
+        }
+        guard (0..<8).contains(index) else {
+            return .error("index out of range: \(index) (expected 0…7)")
+        }
+        let alreadyActive: Bool = await MainActor.run {
+            if developViewModel.currentAssetId != assetId {
+                router.route = .develop
+                return false
+            }
+            return true
+        }
+        if !alreadyActive {
+            await developViewModel.activate(assetId: assetId)
+        }
+        await MainActor.run {
+            developViewModel.setHSLParameter(axis: axis, rangeIndex: index, value: value)
+        }
+        return .ok()
+    }
+
+    private func handleResetEditArrayParameter(
+        assetId: UUID,
+        parameter: String,
+        index: Int
+    ) async -> Response {
+        guard let axis = DevelopViewModel.hslAxis(forParameter: parameter) else {
+            return .error("unknown parameter: \(parameter)")
+        }
+        guard (0..<8).contains(index) else {
+            return .error("index out of range: \(index) (expected 0…7)")
+        }
+        let alreadyActive: Bool = await MainActor.run {
+            if developViewModel.currentAssetId != assetId {
+                router.route = .develop
+                return false
+            }
+            return true
+        }
+        if !alreadyActive {
+            await developViewModel.activate(assetId: assetId)
+        }
+        await MainActor.run {
+            developViewModel.resetHSLParameter(axis: axis, rangeIndex: index)
         }
         return .ok()
     }

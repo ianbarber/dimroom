@@ -8,6 +8,7 @@ final class StubCatalogUploader: CatalogUploading, @unchecked Sendable {
     struct UploadCall: Sendable, Equatable {
         let snapshotPath: String
         let existingFileId: String?
+        let photoCount: Int?
     }
 
     enum Behavior: Sendable {
@@ -36,9 +37,19 @@ final class StubCatalogUploader: CatalogUploading, @unchecked Sendable {
 
     // MARK: - CatalogUploading
 
-    func upload(snapshotPath: String, existingFileId: String?) async throws -> CatalogUploadResult {
+    func upload(
+        snapshotPath: String,
+        existingFileId: String?,
+        photoCount: Int?
+    ) async throws -> CatalogUploadResult {
         lock.lock()
-        _uploadCalls.append(UploadCall(snapshotPath: snapshotPath, existingFileId: existingFileId))
+        _uploadCalls.append(
+            UploadCall(
+                snapshotPath: snapshotPath,
+                existingFileId: existingFileId,
+                photoCount: photoCount
+            )
+        )
         let index = _uploadCalls.count - 1
         let current = _behavior
         lock.unlock()

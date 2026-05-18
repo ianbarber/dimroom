@@ -48,7 +48,7 @@ struct LibraryCell: View {
             Image(nsImage: image)
                 .resizable()
                 .interpolation(.medium)
-                .aspectRatio(contentMode: .fill)
+                .aspectRatio(contentMode: .fit)
                 .id(rowVersion)
         } else {
             placeholder

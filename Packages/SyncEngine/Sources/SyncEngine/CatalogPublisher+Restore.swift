@@ -42,7 +42,8 @@ extension CatalogPublisher {
             CatalogRestorePrompt(
                 driveFileId: remote.driveFileId,
                 sizeBytes: remote.sizeBytes,
-                modifiedTime: remote.modifiedTime
+                modifiedTime: remote.modifiedTime,
+                photoCount: remote.photoCount
             )
         )
         if !approved {

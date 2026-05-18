@@ -126,6 +126,50 @@ func makeMidGreyImage(width: Int = 64, height: Int = 64, value: UInt8 = 128) -> 
     return CIImage(cgImage: cgImage)
 }
 
+/// Create a solid-colour test image with the given 8-bit RGB triple.
+/// Used by HSL tests where each band is exercised against a pure
+/// sample of its representative hue (e.g. pure red for the Red band).
+func makeSolidColorImage(
+    r: UInt8,
+    g: UInt8,
+    b: UInt8,
+    width: Int = 64,
+    height: Int = 64
+) -> CIImage {
+    let bytesPerPixel = 4
+    let bytesPerRow = width * bytesPerPixel
+    var pixels = [UInt8](repeating: 0, count: width * height * bytesPerPixel)
+
+    for y in 0..<height {
+        for x in 0..<width {
+            let offset = y * bytesPerRow + x * bytesPerPixel
+            pixels[offset] = r
+            pixels[offset + 1] = g
+            pixels[offset + 2] = b
+            pixels[offset + 3] = 255
+        }
+    }
+
+    let data = Data(pixels)
+    let colorSpace = CGColorSpace(name: CGColorSpace.sRGB)!
+    let bitmapInfo = CGBitmapInfo(rawValue: CGImageAlphaInfo.premultipliedLast.rawValue)
+    let provider = CGDataProvider(data: data as CFData)!
+    let cgImage = CGImage(
+        width: width,
+        height: height,
+        bitsPerComponent: 8,
+        bitsPerPixel: 32,
+        bytesPerRow: bytesPerRow,
+        space: colorSpace,
+        bitmapInfo: bitmapInfo,
+        provider: provider,
+        decode: nil,
+        shouldInterpolate: false,
+        intent: .defaultIntent
+    )!
+    return CIImage(cgImage: cgImage)
+}
+
 /// A single RGBA pixel value with 8-bit components.
 struct PixelRGBA {
     let r: UInt8

@@ -5,6 +5,7 @@ struct ParameterSlider: View {
     let range: ClosedRange<Double>
     let step: Double
     let identity: Double
+    var trackTint: Color? = nil
     @Binding var value: Double
     var onReset: () -> Void
 
@@ -15,10 +16,17 @@ struct ParameterSlider: View {
                 .foregroundStyle(Color(white: 0.85))
                 .font(.system(size: 11))
 
-            Slider(value: $value, in: range, step: step)
-                .simultaneousGesture(
-                    TapGesture(count: 2).onEnded { onReset() }
-                )
+            ZStack {
+                if let trackTint {
+                    Capsule()
+                        .fill(trackTint.opacity(0.45))
+                        .frame(height: 4)
+                }
+                Slider(value: $value, in: range, step: step)
+                    .simultaneousGesture(
+                        TapGesture(count: 2).onEnded { onReset() }
+                    )
+            }
 
             Text(formattedValue)
                 .frame(width: 50, alignment: .trailing)

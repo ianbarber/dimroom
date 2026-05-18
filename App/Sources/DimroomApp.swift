@@ -439,6 +439,14 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     private var changePoller: ChangePoller?
     private var changePollerEventsTask: Task<Void, Never>?
     private var driveReauthCancellable: AnyCancellable?
+    /// Catalog path resolved at launch. Stashed so the harness restore
+    /// command can re-run `restoreIfNeeded` against the same local path.
+    private var resolvedCatalogPath: String?
+    /// Harness-only catalog uploader (resolved from
+    /// `DIMROOM_HARNESS_STUB_REMOTE_CATALOG`). Used by the
+    /// `restoreCatalogFromDrive` command so Layer C flows don't talk
+    /// to Google.
+    private var stubCatalogUploader: (any CatalogUploading)?
 
     /// Public read-only view of the wired-up `OriginalsCoordinator` so
     /// `ContentView` can route export-with-edits through it. Returns
@@ -472,10 +480,12 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         self.driveClient = resolvedDriveClient
 
         let catalogPath = resolveCatalogPath(from: args)
+        self.resolvedCatalogPath = catalogPath
         let fileIdStore = FileSystemDriveFileIdStore(
             path: FileSystemDriveFileIdStore.defaultPath()
         )
         self.driveFileIdStore = fileIdStore
+        self.stubCatalogUploader = Self.resolveStubCatalogUploader()
 
         attemptCatalogRestore(
             catalogPath: catalogPath,
@@ -654,6 +664,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         let socketPath = ProcessInfo.processInfo.environment["DIMROOM_HARNESS_SOCKET"]
             ?? HarnessServer.defaultSocketPath
 
+        let restoreUploader: (any CatalogUploading)? = stubCatalogUploader ?? catalogUploader
         let controller = HarnessController(
             router: router,
             catalog: resolvedCatalog,
@@ -669,7 +680,10 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             undoStack: undoStack,
             catalogPublisher: catalogPublisher,
             driveAuthState: driveAuthState,
-            changePoller: changePoller
+            changePoller: changePoller,
+            catalogRestoreUploader: restoreUploader,
+            catalogRestorePath: catalogPath,
+            catalogRestoreFileIdStore: fileIdStore
         )
         do {
             try controller.start(socketPath: socketPath)
@@ -965,8 +979,16 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         }
     }
 
-    /// On a fresh install (no local catalog, Drive authenticated), offer
-    /// to restore the most recent catalog from Drive before opening it.
+    /// On a fresh install (no local catalog), offer to restore the most
+    /// recent catalog from Drive before opening it. Three branches:
+    ///
+    ///   - **Authenticated**: probe Drive, prompt + restore (or "Start
+    ///     Fresh").
+    ///   - **Not authenticated**: show a "Connect Google Drive?" alert
+    ///     that re-runs the probe once auth lands, or starts fresh.
+    ///   - **Restore failed**: show a "Restore Failed" alert offering
+    ///     a fresh-start fallback (deletes any half-written file).
+    ///
     /// Blocks the launch path so the catalog open below sees the
     /// restored file. The bridge from sync to async uses a semaphore;
     /// it only runs when the local catalog is missing, so the common
@@ -976,25 +998,63 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         driveClient: DriveClient?,
         fileIdStore: DriveFileIdStore
     ) {
-        if FileManager.default.fileExists(atPath: catalogPath) { return }
-        guard let driveClient else { return }
+        let localCatalogPresent = FileManager.default.fileExists(atPath: catalogPath)
+        let stubUploader = self.stubCatalogUploader
+        let isAuthenticated: Bool = {
+            guard !localCatalogPresent, stubUploader == nil, let driveClient else {
+                return false
+            }
+            return Self.runBlocking { await driveClient.isAuthenticated }
+        }()
 
-        let isAuthenticated = Self.runBlocking { await driveClient.isAuthenticated }
-        guard isAuthenticated else { return }
+        let decision = Self.launchRestoreDecision(
+            localCatalogPresent: localCatalogPresent,
+            hasStubUploader: stubUploader != nil,
+            hasDriveClient: driveClient != nil,
+            isAuthenticated: isAuthenticated
+        )
 
-        let httpClient = URLSessionHTTPClient()
-        let session = AuthorizedSession(client: httpClient, provider: driveClient)
-        let resolver = DriveFolderResolver(session: session)
-        let uploader = DriveCatalogUploader(session: session, folderResolver: resolver)
+        let uploader: (any CatalogUploading)?
+        switch decision {
+        case .skipLocalPresent:
+            return
+        case .offerConnectNoAuth:
+            // No Drive auth available — offer connect-or-skip alert.
+            // Skipping just returns and the empty local catalog is
+            // created below. The "Connect" path is a no-op for now;
+            // the user is steered to the menu-driven flow afterwards.
+            _ = Self.offerConnectForRestore()
+            return
+        case .attemptRestoreWithStub:
+            uploader = stubUploader
+        case .attemptRestoreWithDrive:
+            guard let driveClient else { return }
+            let httpClient = URLSessionHTTPClient()
+            let session = AuthorizedSession(client: httpClient, provider: driveClient)
+            let resolver = DriveFolderResolver(session: session)
+            uploader = DriveCatalogUploader(session: session, folderResolver: resolver)
+        }
 
+        guard let uploader else { return }
+
+        // `runBlocking` parks the main thread on a semaphore. The
+        // prompt callback therefore cannot `await MainActor.run { ... }`
+        // — that hop deadlocks because Main is the thread we're parked
+        // on. When a harness env var pre-answers the prompt we short-
+        // circuit to a plain boolean and skip the MainActor hop. The
+        // interactive path still goes via MainActor (real users have a
+        // main run loop running, not a launch-blocking semaphore).
         let result: Result<RestoreOutcome, Error> = Self.runBlocking { @Sendable in
             do {
                 let outcome = try await CatalogPublisher.restoreIfNeeded(
                     localPath: catalogPath,
                     uploader: uploader,
                     fileIdStore: fileIdStore,
-                    prompt: { ref in
-                        await MainActor.run { Self.confirmRestore(ref) }
+                    prompt: { prompt in
+                        if Self.shouldAutoConfirmRestorePrompt() {
+                            return Self.harnessAutoConfirmValue()
+                        }
+                        return await MainActor.run { Self.confirmRestore(prompt) }
                     }
                 )
                 return .success(outcome)
@@ -1014,7 +1074,70 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             break
         case .failure(let error):
             print("[Dimroom] catalog restore failed: \(error)")
+            // Remove any half-written file before falling back to a
+            // fresh-start catalog, otherwise the next `openCatalog`
+            // call would see a corrupt SQLite file and degrade.
+            try? FileManager.default.removeItem(atPath: catalogPath)
+            let reason = (error as? SyncEngineError).map(Self.describeRestoreError)
+                ?? String(describing: error)
+            _ = Self.offerFreshStartAfterFailure(reason: reason)
         }
+    }
+
+    private static func describeRestoreError(_ error: SyncEngineError) -> String {
+        switch error {
+        case .restoreFailed(let underlying), .uploadFailed(let underlying),
+             .snapshotFailed(let underlying), .fileIdStoreFailed(let underlying),
+             .changesFetchFailed(let underlying), .pageTokenStoreFailed(let underlying):
+            return underlying
+        case .notAuthenticated:
+            return "Not authenticated"
+        }
+    }
+
+    /// Pure decision tree for the launch-time catalog-restore branch
+    /// (#234). Extracted so the alert routing can be tested without
+    /// launching the app — see `App/Tests/CatalogRestoreDecisionTests`.
+    /// Maps the four input bits to the alert/path that should fire:
+    ///
+    ///   - `skipLocalPresent` — local catalog already exists.
+    ///   - `attemptRestoreWithStub` — harness env var supplied a local
+    ///     fixture; restore from it.
+    ///   - `attemptRestoreWithDrive` — real `DriveClient` is authed;
+    ///     probe Drive.
+    ///   - `offerConnectNoAuth` — no stub and no usable auth; show the
+    ///     "Connect Google Drive?" alert.
+    enum LaunchRestoreDecision: Equatable {
+        case skipLocalPresent
+        case attemptRestoreWithStub
+        case attemptRestoreWithDrive
+        case offerConnectNoAuth
+    }
+
+    nonisolated static func launchRestoreDecision(
+        localCatalogPresent: Bool,
+        hasStubUploader: Bool,
+        hasDriveClient: Bool,
+        isAuthenticated: Bool
+    ) -> LaunchRestoreDecision {
+        if localCatalogPresent { return .skipLocalPresent }
+        if hasStubUploader { return .attemptRestoreWithStub }
+        if hasDriveClient, isAuthenticated { return .attemptRestoreWithDrive }
+        return .offerConnectNoAuth
+    }
+
+    /// Reads `DIMROOM_HARNESS_STUB_REMOTE_CATALOG` and, if set, returns a
+    /// `LocalFileStubCatalogUploader` pointing at that path. Used by
+    /// Layer C harness flows to simulate "a published catalog exists on
+    /// Drive" without real OAuth.
+    private static func resolveStubCatalogUploader() -> LocalFileStubCatalogUploader? {
+        let env = ProcessInfo.processInfo.environment
+        guard let path = env["DIMROOM_HARNESS_STUB_REMOTE_CATALOG"], !path.isEmpty else {
+            return nil
+        }
+        let photoCount = env["DIMROOM_HARNESS_STUB_REMOTE_CATALOG_PHOTO_COUNT"]
+            .flatMap(Int.init)
+        return LocalFileStubCatalogUploader(sourcePath: path, photoCount: photoCount)
     }
 
     /// Synchronously runs an async closure on a detached task and waits
@@ -1037,22 +1160,93 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
 
     @MainActor
     private static func confirmRestore(_ ref: CatalogRestorePrompt) -> Bool {
+        if Self.shouldAutoConfirmRestorePrompt() {
+            return Self.harnessAutoConfirmValue()
+        }
         let alert = NSAlert()
         alert.messageText = "Restore Catalog From Drive?"
-        let sizeMB = Double(ref.sizeBytes) / 1_048_576
-        var info = "A catalog was found on Google Drive (\(String(format: "%.1f", sizeMB)) MB)."
-        if let modified = ref.modifiedTime {
-            let formatter = DateFormatter()
-            formatter.dateStyle = .medium
-            formatter.timeStyle = .short
-            info += " Last modified \(formatter.string(from: modified))."
-        }
-        info += "\n\nDownload it to this machine? Selecting 'Start Fresh' opens an empty local catalog instead."
-        alert.informativeText = info
+        let view = CatalogRestorePromptView(
+            style: .restoreExisting(
+                photoCount: ref.photoCount,
+                sizeBytes: ref.sizeBytes,
+                modifiedTime: ref.modifiedTime
+            )
+        )
+        alert.informativeText = view.body(now: Date())
+        alert.accessoryView = NSHostingView(rootView: view)
         alert.alertStyle = .informational
         alert.addButton(withTitle: "Restore")
         alert.addButton(withTitle: "Start Fresh")
         return alert.runModal() == .alertFirstButtonReturn
+    }
+
+    /// Alert shown when the local catalog is missing and Drive auth is
+    /// not configured. "Connect Google Drive…" returns `true`; the
+    /// caller does not in-line the OAuth flow during launch — the user
+    /// is expected to use the menu's Connect path afterwards.
+    @MainActor
+    @discardableResult
+    private static func offerConnectForRestore() -> Bool {
+        if Self.shouldAutoConfirmRestorePrompt() {
+            return false
+        }
+        let alert = NSAlert()
+        alert.messageText = "Connect Google Drive?"
+        let view = CatalogRestorePromptView(style: .offerConnect)
+        alert.informativeText = view.body(now: Date())
+        alert.accessoryView = NSHostingView(rootView: view)
+        alert.alertStyle = .informational
+        alert.addButton(withTitle: "Connect Google Drive…")
+        alert.addButton(withTitle: "Start Fresh")
+        return alert.runModal() == .alertFirstButtonReturn
+    }
+
+    /// Alert shown when `restoreIfNeeded` threw. Confirms a fresh local
+    /// catalog so the caller can drop the partial file and proceed.
+    @MainActor
+    @discardableResult
+    private static func offerFreshStartAfterFailure(reason: String) -> Bool {
+        if Self.shouldAutoConfirmRestorePrompt() {
+            return true
+        }
+        let alert = NSAlert()
+        alert.messageText = "Restore Failed"
+        let view = CatalogRestorePromptView(style: .restoreFailed(reason: reason))
+        alert.informativeText = view.body(now: Date())
+        alert.accessoryView = NSHostingView(rootView: view)
+        alert.alertStyle = .warning
+        alert.addButton(withTitle: "Start Fresh")
+        alert.addButton(withTitle: "Quit")
+        let response = alert.runModal()
+        if response != .alertFirstButtonReturn {
+            // User opted out of starting fresh — exit so they don't get
+            // a degraded "no catalog" mode they didn't ask for.
+            NSApplication.shared.terminate(nil)
+        }
+        return response == .alertFirstButtonReturn
+    }
+
+    /// Harness flows can pre-answer launch-time prompts via env vars so
+    /// the modal NSAlerts don't block headless runs. The default
+    /// "restore" prompt auto-confirms (matches the Layer C flow that
+    /// asserts the restored state); flip via env var to drive declines.
+    /// Called from the detached restore task as well as MainActor —
+    /// keep nonisolated so the harness short-circuit doesn't have to
+    /// hop into MainActor (which deadlocks under launch-time
+    /// runBlocking — see `attemptCatalogRestore`).
+    nonisolated static func shouldAutoConfirmRestorePrompt() -> Bool {
+        ProcessInfo.processInfo.environment["DIMROOM_HARNESS_AUTO_CONFIRM_RESTORE"] != nil
+    }
+
+    nonisolated static func harnessAutoConfirmValue() -> Bool {
+        // `1`/`true`/`yes` → confirm; any other non-empty value → decline.
+        guard let raw = ProcessInfo.processInfo.environment["DIMROOM_HARNESS_AUTO_CONFIRM_RESTORE"] else {
+            return true
+        }
+        switch raw.lowercased() {
+        case "0", "false", "no", "decline": return false
+        default: return true
+        }
     }
 
     /// Parses `--preview-cache <path>` out of the argument vector. Falls

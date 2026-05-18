@@ -128,11 +128,27 @@ public actor CatalogPublisher {
             throw SyncEngineError.fileIdStoreFailed(underlying: String(describing: error))
         }
 
+        // Live asset count, stamped into Drive `appProperties` so the
+        // restore prompt on another machine can show a photo count
+        // without downloading the catalog first. Counted before upload
+        // rather than from the snapshot to skip a redundant SQLite open
+        // — the publish path is debounced, so this is eventually
+        // consistent anyway and `count` is informational, not gated on.
+        let photoCount: Int?
+        do {
+            photoCount = try catalog.countAssets()
+        } catch {
+            // Don't fail the publish over a count read — fall back to
+            // `nil` and the restore prompt will use the no-count variant.
+            photoCount = nil
+        }
+
         let result: CatalogUploadResult
         do {
             result = try await uploader.upload(
                 snapshotPath: snapshotURL.path,
-                existingFileId: cachedId
+                existingFileId: cachedId,
+                photoCount: photoCount
             )
         } catch let error as SyncEngineError {
             throw error

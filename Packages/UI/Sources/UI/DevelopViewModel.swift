@@ -95,6 +95,12 @@ public final class DevelopViewModel: ObservableObject {
         guard let assetId else { return }
         guard let asset = try? catalog.fetchAsset(id: assetId) else { return }
 
+        // Drop any crop UI state carried over from the previous asset
+        // before loading the new EditState. Without this, switching from
+        // a cropped asset to an un-cropped one would leave the overlay's
+        // `cropRect` pointing at the prior asset's crop (issue #239 bug 2).
+        cropViewModel.resetToIdentity()
+
         // Drive the Develop pipeline from the master preview so the saved
         // `EditState` is applied once over unedited pixels, not over an
         // already-edited display JPEG (issue #186).
@@ -160,6 +166,7 @@ public final class DevelopViewModel: ObservableObject {
         histogram = nil
         currentAssetId = nil
         editState = EditState()
+        cropViewModel.resetToIdentity()
     }
 
     /// Re-read the latest `EditState` from the catalog for the active
@@ -200,6 +207,35 @@ public final class DevelopViewModel: ObservableObject {
         hasUnsavedChanges = true
         scheduleRender()
         scheduleSave()
+    }
+
+    /// Update a single per-band HSL slot. Mirrors `setParameter` for the
+    /// scalar sliders: snapshots the previous state for the undo entry,
+    /// flips `hasUnsavedChanges`, and schedules render + debounced save.
+    public func setHSLParameter(axis: HSLAxis, rangeIndex: Int, value: Double) {
+        guard (0..<8).contains(rangeIndex) else { return }
+        capturePendingUndoPreviousIfNeeded()
+        switch axis {
+        case .hue: editState.hueShift[rangeIndex] = value
+        case .saturation: editState.hslSaturation[rangeIndex] = value
+        case .luminance: editState.hslLuminance[rangeIndex] = value
+        }
+        hasUnsavedChanges = true
+        scheduleRender()
+        scheduleSave()
+    }
+
+    public func resetHSLParameter(axis: HSLAxis, rangeIndex: Int) {
+        setHSLParameter(axis: axis, rangeIndex: rangeIndex, value: 0)
+    }
+
+    public func hslValue(axis: HSLAxis, rangeIndex: Int) -> Double {
+        guard (0..<8).contains(rangeIndex) else { return 0 }
+        switch axis {
+        case .hue: return editState.hueShift[rangeIndex]
+        case .saturation: return editState.hslSaturation[rangeIndex]
+        case .luminance: return editState.hslLuminance[rangeIndex]
+        }
     }
 
     /// Currently-selected curve channel (Luminance / R / G / B). The
@@ -362,6 +398,19 @@ public final class DevelopViewModel: ObservableObject {
         case "vignetteAmount": return \.vignetteAmount
         case "vignetteRoundness": return \.vignetteRoundness
         case "vignetteSoftness": return \.vignetteSoftness
+        default: return nil
+        }
+    }
+
+    /// Lookup the `HSLAxis` for a harness array-parameter name. Used by
+    /// `setEditArrayParameter` / `resetEditArrayParameter` so the harness
+    /// can address `hueShift`, `hslSaturation`, and `hslLuminance` by
+    /// string without exposing key paths to per-array elements.
+    nonisolated public static func hslAxis(forParameter name: String) -> HSLAxis? {
+        switch name {
+        case "hueShift": return .hue
+        case "hslSaturation": return .saturation
+        case "hslLuminance": return .luminance
         default: return nil
         }
     }

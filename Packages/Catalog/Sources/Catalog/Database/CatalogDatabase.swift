@@ -97,6 +97,15 @@ public final class CatalogDatabase: @unchecked Sendable {
         }
     }
 
+    /// Count of live assets (excludes soft-deleted rows). Used by the
+    /// catalog publisher to stamp `appProperties.dimroom_photo_count`
+    /// on Drive without materialising every asset row.
+    public func countAssets() throws -> Int {
+        try dbQueue.read { db in
+            try Asset.filter(Column("deletedAt") == nil).fetchCount(db)
+        }
+    }
+
     public func fetchAssets(filter: AssetFilter = AssetFilter()) throws -> [Asset] {
         try dbQueue.read { db in
             var request = Asset.all()

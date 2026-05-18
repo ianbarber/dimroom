@@ -66,7 +66,11 @@ final class DriveCatalogUploaderTests: XCTestCase {
             retryPolicy: RetryPolicy(maxAttempts: 1, baseDelay: .zero, maxDelay: .zero)
         )
 
-        let result = try await uploader.upload(snapshotPath: snapshotPath, existingFileId: nil)
+        let result = try await uploader.upload(
+            snapshotPath: snapshotPath,
+            existingFileId: nil,
+            photoCount: 42
+        )
         XCTAssertEqual(result.driveFileId, "drive-new-1")
         XCTAssertTrue(result.wasCreate)
         XCTAssertGreaterThan(result.uploadedBytes, 0)
@@ -83,6 +87,16 @@ final class DriveCatalogUploaderTests: XCTestCase {
         XCTAssertTrue(body.contains("\"name\":\"catalog.sqlite\""), body)
         XCTAssertTrue(body.contains("\"parents\":[\"id-cat\"]"), body)
         XCTAssertTrue(body.contains("application/x-sqlite3"), body)
+        // appProperties stamped on create so a fresh machine's restore
+        // prompt can read the photo count back without downloading.
+        XCTAssertTrue(
+            body.contains("\"appProperties\""),
+            "expected appProperties in metadata: \(body)"
+        )
+        XCTAssertTrue(
+            body.contains("\"dimroom_photo_count\":\"42\""),
+            "expected dimroom_photo_count='42' (string-typed appProperty): \(body)"
+        )
     }
 
     // MARK: - Upload: update
@@ -110,7 +124,8 @@ final class DriveCatalogUploaderTests: XCTestCase {
 
         let result = try await uploader.upload(
             snapshotPath: snapshotPath,
-            existingFileId: "drive-existing"
+            existingFileId: "drive-existing",
+            photoCount: 17
         )
         XCTAssertEqual(result.driveFileId, "drive-existing")
         XCTAssertFalse(result.wasCreate)
@@ -124,6 +139,10 @@ final class DriveCatalogUploaderTests: XCTestCase {
         let body = String(data: patches[0].body ?? Data(), encoding: .utf8) ?? ""
         XCTAssertFalse(body.contains("\"parents\""), "PATCH body must not include parents: \(body)")
         XCTAssertTrue(body.contains("application/x-sqlite3"), body)
+        XCTAssertTrue(
+            body.contains("\"dimroom_photo_count\":\"17\""),
+            "PATCH must refresh photo count: \(body)"
+        )
     }
 
     // MARK: - Errors
@@ -152,7 +171,11 @@ final class DriveCatalogUploaderTests: XCTestCase {
         )
 
         do {
-            _ = try await uploader.upload(snapshotPath: snapshotPath, existingFileId: nil)
+            _ = try await uploader.upload(
+                snapshotPath: snapshotPath,
+                existingFileId: nil,
+                photoCount: nil
+            )
             XCTFail("expected upload error")
         } catch let error as SyncEngineError {
             guard case .uploadFailed = error else {
@@ -171,6 +194,7 @@ final class DriveCatalogUploaderTests: XCTestCase {
                 "name": "catalog.sqlite",
                 "modifiedTime": "2025-01-01T12:00:00Z",
                 "size": "4096",
+                "appProperties": ["dimroom_photo_count": "27"],
             ]],
         ])
 
@@ -197,6 +221,43 @@ final class DriveCatalogUploaderTests: XCTestCase {
         XCTAssertEqual(ref?.driveFileId, "remote-cat")
         XCTAssertEqual(ref?.sizeBytes, 4096)
         XCTAssertNotNil(ref?.modifiedTime)
+        XCTAssertEqual(ref?.photoCount, 27, "photoCount must come from appProperties")
+    }
+
+    func testFindExistingCatalogTreatsMissingAppPropertiesAsNilPhotoCount() async throws {
+        // Legacy catalogs published before #234 lack `appProperties`.
+        // Parser must surface photoCount=nil rather than 0 so the UI
+        // can drop the count fragment from the prompt body.
+        let body = try JSONSerialization.data(withJSONObject: [
+            "files": [[
+                "id": "legacy-cat",
+                "name": "catalog.sqlite",
+                "modifiedTime": "2025-01-01T12:00:00Z",
+                "size": "4096",
+            ]],
+        ])
+        let http = RoutingStubHTTPClient()
+        http.route(method: "GET", urlContains: "'PhotoTool'",
+                   response: .init(status: 200, body: folderListBody(id: "id-photo", name: "PhotoTool")))
+        http.route(method: "GET", urlContains: "'catalog'",
+                   response: .init(status: 200, body: folderListBody(id: "id-cat", name: "catalog")))
+        http.route(method: "GET", urlContains: "name%20%3D%20'catalog.sqlite'",
+                   response: .init(status: 200, body: body))
+
+        let resolver = DriveFolderResolver(
+            session: sessionWith(client: http),
+            root: .folderId("root"),
+            retryPolicy: RetryPolicy(maxAttempts: 1, baseDelay: .zero, maxDelay: .zero)
+        )
+        let uploader = DriveCatalogUploader(
+            session: sessionWith(client: http),
+            folderResolver: resolver,
+            retryPolicy: RetryPolicy(maxAttempts: 1, baseDelay: .zero, maxDelay: .zero)
+        )
+
+        let ref = try await uploader.findExistingCatalog()
+        XCTAssertEqual(ref?.driveFileId, "legacy-cat")
+        XCTAssertNil(ref?.photoCount)
     }
 
     func testFindExistingCatalogReturnsNilWhenAbsent() async throws {

@@ -894,43 +894,86 @@ final class RendererTests: XCTestCase {
         XCTAssertEqual(srcPx.a, resPx.a)
     }
 
-    func testStrongLuminanceNoiseReductionSmoothsImage() {
-        // CINoiseReduction's luminance smoothing crops a few pixels around
-        // the edge of the output. Sample on an interior pixel and assert
-        // the rendered output deviates from the source — luma denoising
-        // at full strength must be a visible operation.
-        let source = makeColorImage()
-        let edgeX = Int(source.extent.width) / 2 - 1
-        let midY = Int(source.extent.height) / 2
+    func testStrongLuminanceNoiseReductionDecreasesVariance() {
+        // Strong luminance NR must do two things at once: drop the per-pixel
+        // luma variance across a patch (smoothing actually happened) AND
+        // preserve the patch mean (overall brightness/detail not destroyed).
+        // The old single-pixel "did anything change" check passed for any
+        // perturbation; this pins the smoothing property the slider promises.
+        let source = makeNoisyImage(
+            baseLuma: 128,
+            lumaJitter: 20,
+            chromaJitter: 0,
+            seed: 0xC0FFEE
+        )
+        // 8×8 patch from the interior — CINoiseReduction crops a few pixels
+        // off the edges, so stay well inside.
+        let patch = CGRect(x: 28, y: 28, width: 8, height: 8)
 
-        let srcPx = samplePixel(image: source, x: edgeX, y: midY, context: ctx)
+        let srcPixels = samplePatch(image: source, rect: patch, context: ctx)
         let result = Renderer.render(
             source: source,
             editState: EditState(luminanceNoiseReduction: 100)
         )
-        let resPx = samplePixel(image: result, x: edgeX, y: midY, context: ctx)
+        let resPixels = samplePatch(image: result, rect: patch, context: ctx)
 
-        let changed = srcPx.r != resPx.r || srcPx.g != resPx.g || srcPx.b != resPx.b
-        XCTAssertTrue(changed, "Strong luminance NR should visibly change edge pixels")
+        let srcLuma = srcPixels.map(luma)
+        let resLuma = resPixels.map(luma)
+        let srcVar = variance(srcLuma)
+        let resVar = variance(resLuma)
+        let srcMean = mean(srcLuma)
+        let resMean = mean(resLuma)
+
+        XCTAssertLessThan(
+            resVar,
+            srcVar * 0.5,
+            "Strong luma NR should drop patch luma variance by at least half (src=\(srcVar), res=\(resVar))"
+        )
+        XCTAssertEqual(
+            resMean,
+            srcMean,
+            accuracy: 2.0,
+            "Strong luma NR should preserve patch mean brightness (src=\(srcMean), res=\(resMean))"
+        )
     }
 
-    func testStrongChrominanceNoiseReductionShiftsColour() {
-        // Chroma denoising acts on the colour channels — pushing it to
-        // full strength on a high-saturation patch should perturb at
-        // least one RGB channel.
-        let source = makeColorImage()
-        let edgeX = Int(source.extent.width) / 2 - 1
-        let midY = Int(source.extent.height) / 2
+    func testStrongChrominanceNoiseReductionDecreasesChromaVariance() {
+        // Strong chroma NR should flatten the B−R chroma proxy across a
+        // chroma-jittered patch while leaving its mean (the patch's overall
+        // colour balance) effectively unchanged.
+        let source = makeNoisyImage(
+            baseLuma: 128,
+            lumaJitter: 0,
+            chromaJitter: 20,
+            seed: 0xBADF00D
+        )
+        let patch = CGRect(x: 28, y: 28, width: 8, height: 8)
 
-        let srcPx = samplePixel(image: source, x: edgeX, y: midY, context: ctx)
+        let srcPixels = samplePatch(image: source, rect: patch, context: ctx)
         let result = Renderer.render(
             source: source,
             editState: EditState(chrominanceNoiseReduction: 100)
         )
-        let resPx = samplePixel(image: result, x: edgeX, y: midY, context: ctx)
+        let resPixels = samplePatch(image: result, rect: patch, context: ctx)
 
-        let changed = srcPx.r != resPx.r || srcPx.g != resPx.g || srcPx.b != resPx.b
-        XCTAssertTrue(changed, "Strong chrominance NR should visibly change saturated edge pixels")
+        let srcChroma = srcPixels.map(chromaBR)
+        let resChroma = resPixels.map(chromaBR)
+        let srcVar = variance(srcChroma)
+        let resVar = variance(resChroma)
+        let srcMean = mean(srcChroma)
+        let resMean = mean(resChroma)
+
+        XCTAssertLessThan(
+            resVar,
+            srcVar * 0.5,
+            "Strong chroma NR should drop patch B−R variance by at least half (src=\(srcVar), res=\(resVar))"
+        )
+        XCTAssertEqual(
+            resMean,
+            srcMean,
+            accuracy: 3.0,
+            "Strong chroma NR should preserve patch chroma mean (src=\(srcMean), res=\(resMean))"
+        )
     }
 
     func testNoiseReductionExtentUnchanged() {

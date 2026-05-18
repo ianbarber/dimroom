@@ -124,6 +124,13 @@ jobs:
             exit 0
           fi
           bin/harness-develop-hsl-flow.sh
+      - name: Run harness develop vignette range flow
+        run: |
+          if [ ! -x bin/harness-develop-vignette-range.sh ]; then
+            echo "No harness develop vignette range script yet — skipping."
+            exit 0
+          fi
+          bin/harness-develop-vignette-range.sh
       - name: Run harness develop asset-switch mid-fetch flow
         run: |
           if [ ! -x bin/harness-develop-asset-switch-mid-fetch.sh ]; then

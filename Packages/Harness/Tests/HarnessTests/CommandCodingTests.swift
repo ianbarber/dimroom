@@ -1102,6 +1102,66 @@ final class CommandCodingTests: XCTestCase {
         )
     }
 
+    // MARK: - triggerExportMenu / completeExportSheet (#242)
+
+    func testTriggerExportMenuRoundTrip() throws {
+        let command = Command.triggerExportMenu
+        let data = try encoder.encode(command)
+        let decoded = try decoder.decode(Command.self, from: data)
+        XCTAssertEqual(command, decoded)
+    }
+
+    func testTriggerExportMenuJSON() throws {
+        let command = Command.triggerExportMenu
+        let data = try encoder.encode(command)
+        let json = String(data: data, encoding: .utf8)!
+        XCTAssertEqual(json, #"{"type":"triggerExportMenu"}"#)
+    }
+
+    func testDecodeTriggerExportMenuFromJSON() throws {
+        let json = #"{"type":"triggerExportMenu"}"#
+        let command = try decoder.decode(Command.self, from: Data(json.utf8))
+        XCTAssertEqual(command, .triggerExportMenu)
+    }
+
+    func testCompleteExportSheetRoundTrip() throws {
+        for format in ["original", "jpeg", "tiff"] {
+            for applyEdits in [true, false] {
+                let command = Command.completeExportSheet(
+                    destinationPath: "/tmp/export-menu",
+                    format: format,
+                    applyEdits: applyEdits
+                )
+                let data = try encoder.encode(command)
+                let decoded = try decoder.decode(Command.self, from: data)
+                XCTAssertEqual(command, decoded)
+            }
+        }
+    }
+
+    func testCompleteExportSheetJSON() throws {
+        let command = Command.completeExportSheet(
+            destinationPath: "/tmp/out",
+            format: "jpeg",
+            applyEdits: true
+        )
+        let data = try encoder.encode(command)
+        let json = String(data: data, encoding: .utf8)!
+        XCTAssertEqual(
+            json,
+            #"{"applyEdits":true,"destinationPath":"\/tmp\/out","format":"jpeg","type":"completeExportSheet"}"#
+        )
+    }
+
+    func testDecodeCompleteExportSheetFromJSON() throws {
+        let json = #"{"type":"completeExportSheet","destinationPath":"/tmp/out","format":"tiff","applyEdits":false}"#
+        let command = try decoder.decode(Command.self, from: Data(json.utf8))
+        XCTAssertEqual(
+            command,
+            .completeExportSheet(destinationPath: "/tmp/out", format: "tiff", applyEdits: false)
+        )
+    }
+
     // MARK: - releaseHeldDownloads
 
     func testReleaseHeldDownloadsRoundTrip() throws {

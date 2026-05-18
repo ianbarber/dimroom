@@ -18,6 +18,11 @@ struct ContentView: View {
     /// fully-wired production app (e.g. early-init before
     /// `applicationDidFinishLaunching` finishes).
     let originalFetcher: (any OriginalFetcher)?
+    /// Owner of the unified export entry point. Both the SwiftUI sheet
+    /// closure and the harness `completeExportSheet` command route
+    /// through `appDelegate.startExport(...)` (#242) so a regression in
+    /// either path is caught by the same harness flow.
+    let appDelegate: AppDelegate
     @State private var showExportSheet = false
     /// True while the "Export all N photos?" confirmation is on screen.
     /// Set when File → Export is triggered with no selection / filter
@@ -100,22 +105,20 @@ struct ContentView: View {
             )
             ExportSheetView(
                 assetCount: scopedAssets.count,
-                onExport: { [catalog, originalFetcher] destinationURL, format, jpegQuality, applyEdits in
+                onExport: { [appDelegate] destinationURL, format, jpegQuality, applyEdits in
+                    ExportLog.logger.info("ContentView sheet onExport — count=\(scopedAssets.count, privacy: .public) destination=\(destinationURL.path, privacy: .public)")
                     showExportSheet = false
-                    guard let catalog else { return }
-                    Task {
-                        await exportCoordinator.run(
-                            assets: scopedAssets,
-                            catalog: catalog,
+                    Task { @MainActor in
+                        await appDelegate.startExport(
+                            destinationURL: destinationURL,
                             format: format,
                             jpegQuality: jpegQuality,
-                            applyEdits: applyEdits,
-                            destinationDirectory: destinationURL,
-                            originalFetcher: originalFetcher
+                            applyEdits: applyEdits
                         )
                     }
                 },
                 onCancel: {
+                    ExportLog.logger.info("ContentView sheet onCancel")
                     showExportSheet = false
                 }
             )
@@ -126,9 +129,21 @@ struct ContentView: View {
             titleVisibility: .visible
         ) {
             Button("Export") {
-                showExportSheet = true
+                ExportLog.logger.info("ContentView confirmation Export tapped — deferring showExportSheet by one runloop")
+                // macOS SwiftUI sometimes coalesces a `.confirmationDialog`
+                // dismissal and a `.sheet` presentation into the same
+                // transaction, dropping the sheet (#242 — the silent
+                // "nothing happens"). Hopping one runloop turn out lets
+                // the dialog's dismiss animation start before the sheet
+                // mounts, so both presentations land.
+                Task { @MainActor in
+                    try? await Task.sleep(nanoseconds: 1)
+                    showExportSheet = true
+                }
             }
-            Button("Cancel", role: .cancel) {}
+            Button("Cancel", role: .cancel) {
+                ExportLog.logger.info("ContentView confirmation Cancel tapped")
+            }
         } message: {
             Text("No selection or filter is active. This will export every photo in your library.")
         }
@@ -157,14 +172,20 @@ struct ContentView: View {
                 rowCount: libraryViewModel.rows.count
             )
             if shouldPrompt {
+                ExportLog.logger.info("ContentView exportSheetPublisher — routing to confirmationDialog (rows=\(libraryViewModel.rows.count, privacy: .public))")
                 showExportConfirmation = true
             } else {
+                ExportLog.logger.info("ContentView exportSheetPublisher — presenting sheet directly (selection=\(libraryViewModel.selectedAssetIds.count, privacy: .public) rows=\(libraryViewModel.rows.count, privacy: .public))")
                 showExportSheet = true
             }
+        }
+        .onChange(of: showExportSheet) { _, newValue in
+            appDelegate.setExportSheetVisible(newValue)
         }
         .onChange(of: exportCoordinator.phase) { _, newPhase in
             switch newPhase {
             case .done(let exported, let skipped, let failures):
+                ExportLog.logger.info("ContentView coordinator phase=.done exported=\(exported, privacy: .public) skipped=\(skipped, privacy: .public) failures=\(failures.count, privacy: .public)")
                 let built = ExportCompletionMessage.forCompletion(
                     exported: exported,
                     skipped: skipped,
@@ -175,6 +196,7 @@ struct ContentView: View {
                     message: built.body
                 )
             case .failed(let message):
+                ExportLog.logger.error("ContentView coordinator phase=.failed message=\(message, privacy: .public)")
                 exportAlert = ExportAlertPayload(
                     title: "Export failed",
                     message: message

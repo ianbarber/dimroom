@@ -247,6 +247,9 @@ final class HarnessController: @unchecked Sendable {
         case .resetCurve(let assetId, let channel):
             return await handleResetCurve(assetId: assetId, channel: channel)
 
+        case .selectCurveChannel(let channel):
+            return await handleSelectCurveChannel(channel: channel)
+
         case .undo:
             return await handleUndo()
 
@@ -1013,6 +1016,17 @@ final class HarnessController: @unchecked Sendable {
         }
         await MainActor.run {
             developViewModel.resetCurve(curveChannel)
+        }
+        return .ok()
+    }
+
+    private func handleSelectCurveChannel(channel: String) async -> Response {
+        guard let curveChannel = DevelopViewModel.curveChannel(named: channel) else {
+            let valid = CurveChannel.allCases.map(\.rawValue).joined(separator: ", ")
+            return .error("unknown curve channel '\(channel)'; expected one of: \(valid)")
+        }
+        await MainActor.run {
+            developViewModel.selectedCurveChannel = curveChannel
         }
         return .ok()
     }

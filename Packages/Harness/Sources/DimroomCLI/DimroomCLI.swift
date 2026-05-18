@@ -40,6 +40,7 @@ struct DimroomCLI: ParsableCommand {
             ResetEditArrayParameter.self,
             SetCurvePoints.self,
             ResetCurve.self,
+            SelectCurveChannel.self,
             Undo.self,
             Redo.self,
             SelectAssets.self,
@@ -678,6 +679,23 @@ extension DimroomCLI {
                 throw ValidationError("Invalid UUID '\(id)'.")
             }
             try runCommand(.resetCurve(assetId: uuid, channel: channel), socket: socket)
+        }
+    }
+
+    struct SelectCurveChannel: ParsableCommand {
+        static let configuration = CommandConfiguration(
+            commandName: "select-curve-channel",
+            abstract: "Switch the Develop curve-editor channel picker (luminance, red, green, blue)."
+        )
+
+        @Argument(help: "Channel name: luminance, red, green, blue.")
+        var channel: String
+
+        @Option(name: .long, help: "Path to the harness socket.")
+        var socket: String = HarnessServer.defaultSocketPath
+
+        func run() throws {
+            try runCommand(.selectCurveChannel(channel: channel), socket: socket)
         }
     }
 

@@ -446,6 +446,14 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     /// to Google.
     private var stubCatalogUploader: (any CatalogUploading)?
 
+    /// One-shot flag set by `attemptCatalogRestore` when the launch-time
+    /// "Connect Google Drive?" alert returns `true`. Consumed at the
+    /// tail of `applicationDidFinishLaunching` to kick off the same menu
+    /// Connect flow (#256). Re-entering the restore probe inside the
+    /// launch-blocking semaphore is out of scope; the next launch picks
+    /// up the refreshed token and restores the catalog normally.
+    private var pendingDriveConnectAfterLaunch = false
+
     /// Public read-only view of the wired-up `OriginalsCoordinator` so
     /// `ContentView` can route export-with-edits through it. Returns
     /// `nil` before `applicationDidFinishLaunching` has wired the
@@ -525,6 +533,15 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             Task { @MainActor in
                 await driveAuthState.hydrate()
             }
+        }
+
+        // If the user clicked "Connect Google Drive…" on the launch-time
+        // restore alert (#256), kick off the same OAuth flow the menu
+        // uses. Safe to call here: the launch-blocking semaphore has
+        // been released, and `connectGoogleDriveFromMenu()` itself
+        // dispatches to `Task { @MainActor in ... }`.
+        if Self.consumePendingConnectFlag(&pendingDriveConnectAfterLaunch) {
+            connectGoogleDriveFromMenu()
         }
 
         // Surface stale-token refresh failures (issue #195). When any
@@ -919,9 +936,14 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         case .offerConnectNoAuth:
             // No Drive auth available — offer connect-or-skip alert.
             // Skipping just returns and the empty local catalog is
-            // created below. The "Connect" path is a no-op for now;
-            // the user is steered to the menu-driven flow afterwards.
-            _ = Self.offerConnectForRestore()
+            // created below. The "Connect" path stashes a one-shot
+            // flag; the consumer at the tail of
+            // `applicationDidFinishLaunching` kicks off the menu
+            // Connect flow once the launch-blocking semaphore has
+            // been released (#256).
+            if Self.offerConnectForRestore() {
+                pendingDriveConnectAfterLaunch = true
+            }
             return
         case .attemptRestoreWithStub:
             uploader = stubUploader
@@ -1078,12 +1100,18 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     }
 
     /// Alert shown when the local catalog is missing and Drive auth is
-    /// not configured. "Connect Google Drive…" returns `true`; the
-    /// caller does not in-line the OAuth flow during launch — the user
-    /// is expected to use the menu's Connect path afterwards.
+    /// not configured. Returns `true` when the user picks
+    /// "Connect Google Drive…", which the caller turns into a one-shot
+    /// flag consumed at the tail of `applicationDidFinishLaunching`
+    /// (post-semaphore) — that flag triggers the same OAuth flow as
+    /// the Drive menu's Connect item (#256). The next launch picks up
+    /// the refreshed token and restores the catalog normally.
     @MainActor
     @discardableResult
     private static func offerConnectForRestore() -> Bool {
+        if Self.shouldAutoConfirmConnectForRestorePrompt() {
+            return Self.harnessConnectForRestoreValue()
+        }
         if Self.shouldAutoConfirmRestorePrompt() {
             return false
         }
@@ -1144,6 +1172,34 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         case "0", "false", "no", "decline": return false
         default: return true
         }
+    }
+
+    /// Sibling of `shouldAutoConfirmRestorePrompt` for the connect-or-skip
+    /// alert (#256). Lets Layer C flows pre-answer the launch-time
+    /// "Connect Google Drive?" prompt without showing a modal NSAlert.
+    /// Values: `connect` → click Connect, `skip` → click Start Fresh.
+    nonisolated static func shouldAutoConfirmConnectForRestorePrompt() -> Bool {
+        ProcessInfo.processInfo.environment["DIMROOM_HARNESS_AUTO_CONFIRM_CONNECT_FOR_RESTORE"] != nil
+    }
+
+    nonisolated static func harnessConnectForRestoreValue() -> Bool {
+        guard let raw = ProcessInfo.processInfo.environment["DIMROOM_HARNESS_AUTO_CONFIRM_CONNECT_FOR_RESTORE"] else {
+            return false
+        }
+        switch raw.lowercased() {
+        case "connect", "1", "true", "yes": return true
+        default: return false
+        }
+    }
+
+    /// One-shot read-and-clear for the pending Drive-connect flag.
+    /// Extracted as a `nonisolated static` helper so the set/consume
+    /// semantics can be pinned by a Layer A test without spinning up
+    /// `NSApplication` — see `PendingDriveConnectAtLaunchTests`.
+    nonisolated static func consumePendingConnectFlag(_ flag: inout Bool) -> Bool {
+        let was = flag
+        flag = false
+        return was
     }
 
     /// Parses `--preview-cache <path>` out of the argument vector. Falls

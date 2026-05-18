@@ -32,6 +32,12 @@ public enum Renderer {
         image = applySharpening(image, sharpening: editState.sharpening)
         image = applyVibrance(image, vibrance: editState.vibrance)
         image = applySaturation(image, saturation: editState.saturation)
+        image = applyHSL(
+            image,
+            hueShift: editState.hueShift,
+            saturation: editState.hslSaturation,
+            luminance: editState.hslLuminance
+        )
         image = applySplitTone(
             image,
             highlightHue: editState.splitToneHighlightHue,
@@ -306,6 +312,28 @@ public enum Renderer {
         blend.setValue(image, forKey: kCIInputBackgroundImageKey)
         blend.setValue(mask, forKey: "inputMaskImage")
         return blend.outputImage!.cropped(to: extent)
+    }
+
+    /// Apply per-band hue / saturation / luminance shifts via the
+    /// `HSLKernel` custom Core Image color kernel. Fast-path returns the
+    /// input unchanged when every per-band value across all three axes
+    /// is zero — common in the identity / pre-HSL catalogs.
+    private static func applyHSL(
+        _ image: CIImage,
+        hueShift: [Double],
+        saturation: [Double],
+        luminance: [Double]
+    ) -> CIImage {
+        let allZero = hueShift.allSatisfy { $0 == 0 }
+            && saturation.allSatisfy { $0 == 0 }
+            && luminance.allSatisfy { $0 == 0 }
+        guard !allZero else { return image }
+        return HSLKernel.apply(
+            image,
+            hueShift: hueShift,
+            saturation: saturation,
+            luminance: luminance
+        )
     }
 
     /// Apply luminance + per-channel curves as a single composed 256-entry

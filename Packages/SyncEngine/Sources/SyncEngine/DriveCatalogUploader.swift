@@ -20,6 +20,12 @@ public actor DriveCatalogUploader: CatalogUploading {
     public static let catalogFolderSegments: [String] = ["PhotoTool", "catalog"]
     public static let catalogFilename: String = "catalog.sqlite"
     public static let catalogMimeType: String = "application/x-sqlite3"
+    /// `appProperties` key holding the live asset count at publish time.
+    /// Read back during `findExistingCatalog` so the restore prompt can
+    /// show "Existing catalog found on Drive (N photos…)" without
+    /// downloading. Drive keeps `appProperties` private to the OAuth
+    /// client that wrote them.
+    static let photoCountAppPropertyKey: String = "dimroom_photo_count"
 
     private let session: AuthorizedSession
     private let folderResolver: DriveFolderResolver
@@ -40,7 +46,8 @@ public actor DriveCatalogUploader: CatalogUploading {
 
     public func upload(
         snapshotPath: String,
-        existingFileId: String?
+        existingFileId: String?,
+        photoCount: Int?
     ) async throws -> CatalogUploadResult {
         let url = URL(fileURLWithPath: snapshotPath)
         let data = try Data(contentsOf: url)
@@ -48,7 +55,8 @@ public actor DriveCatalogUploader: CatalogUploading {
         if let existingFileId {
             let id = try await updateExistingFile(
                 fileId: existingFileId,
-                bytes: data
+                bytes: data,
+                photoCount: photoCount
             )
             return CatalogUploadResult(
                 driveFileId: id,
@@ -59,7 +67,11 @@ public actor DriveCatalogUploader: CatalogUploading {
         let folderId = try await folderResolver.resolve(
             segments: Self.catalogFolderSegments
         )
-        let id = try await createFile(parentId: folderId, bytes: data)
+        let id = try await createFile(
+            parentId: folderId,
+            bytes: data,
+            photoCount: photoCount
+        )
         return CatalogUploadResult(
             driveFileId: id,
             uploadedBytes: Int64(data.count),
@@ -130,7 +142,7 @@ public actor DriveCatalogUploader: CatalogUploading {
         let query = "name = '\(escape(Self.catalogFilename))' and '\(folderId)' in parents and trashed = false"
         components.queryItems = [
             URLQueryItem(name: "q", value: query),
-            URLQueryItem(name: "fields", value: "files(id,name,modifiedTime,size)"),
+            URLQueryItem(name: "fields", value: "files(id,name,modifiedTime,size,appProperties)"),
             URLQueryItem(name: "pageSize", value: "10"),
             URLQueryItem(name: "spaces", value: "drive"),
         ]
@@ -172,19 +184,42 @@ public actor DriveCatalogUploader: CatalogUploading {
         } else {
             modified = nil
         }
-        return DriveCatalogRef(driveFileId: id, sizeBytes: size, modifiedTime: modified)
+        // appProperties values are always strings on the wire — see
+        // https://developers.google.com/drive/api/reference/rest/v3/files#File.FIELDS.app_properties
+        let photoCount: Int?
+        if let appProperties = first["appProperties"] as? [String: String],
+           let raw = appProperties[Self.photoCountAppPropertyKey],
+           let parsed = Int(raw),
+           parsed >= 0 {
+            photoCount = parsed
+        } else {
+            photoCount = nil
+        }
+        return DriveCatalogRef(
+            driveFileId: id,
+            sizeBytes: size,
+            modifiedTime: modified,
+            photoCount: photoCount
+        )
     }
 
     // MARK: - Upload internals
 
-    private func createFile(parentId: String, bytes: Data) async throws -> String {
+    private func createFile(
+        parentId: String,
+        bytes: Data,
+        photoCount: Int?
+    ) async throws -> String {
         let boundary = "dimroom-catalog-\(UUID().uuidString)"
         let endpoint = Self.uploadEndpoint(multipart: true, fileId: nil)
-        let metadata: [String: Any] = [
+        var metadata: [String: Any] = [
             "name": Self.catalogFilename,
             "parents": [parentId],
             "mimeType": Self.catalogMimeType,
         ]
+        if let appProperties = Self.appPropertiesPayload(photoCount: photoCount) {
+            metadata["appProperties"] = appProperties
+        }
         let request = try Self.multipartRequest(
             url: endpoint,
             method: "POST",
@@ -195,15 +230,22 @@ public actor DriveCatalogUploader: CatalogUploading {
         return try await performUpload(request: request)
     }
 
-    private func updateExistingFile(fileId: String, bytes: Data) async throws -> String {
+    private func updateExistingFile(
+        fileId: String,
+        bytes: Data,
+        photoCount: Int?
+    ) async throws -> String {
         let boundary = "dimroom-catalog-\(UUID().uuidString)"
         let endpoint = Self.uploadEndpoint(multipart: true, fileId: fileId)
         // On update we don't re-send `parents` (it's owned by the file
         // and Drive rejects parent changes via this endpoint). Only
         // metadata fields the client may legitimately tweak are sent.
-        let metadata: [String: Any] = [
+        var metadata: [String: Any] = [
             "mimeType": Self.catalogMimeType,
         ]
+        if let appProperties = Self.appPropertiesPayload(photoCount: photoCount) {
+            metadata["appProperties"] = appProperties
+        }
         let request = try Self.multipartRequest(
             url: endpoint,
             method: "PATCH",
@@ -212,6 +254,11 @@ public actor DriveCatalogUploader: CatalogUploading {
             boundary: boundary
         )
         return try await performUpload(request: request)
+    }
+
+    static func appPropertiesPayload(photoCount: Int?) -> [String: String]? {
+        guard let photoCount, photoCount >= 0 else { return nil }
+        return [photoCountAppPropertyKey: String(photoCount)]
     }
 
     private func performUpload(request: URLRequest) async throws -> String {

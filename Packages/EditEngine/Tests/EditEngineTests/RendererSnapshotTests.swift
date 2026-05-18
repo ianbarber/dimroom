@@ -143,6 +143,34 @@ final class RendererSnapshotTests: XCTestCase {
         assertSnapshot(of: image, as: .image(precision: 0.99, perceptualPrecision: 0.98))
     }
 
+    func testHSLHueShiftRedSnapshot() {
+        let source = makeColorImage()
+        var hue = EditState.hslIdentity
+        hue[0] = 80
+        let image = renderToNSImage(source: source, editState: EditState(hueShift: hue))
+        assertSnapshot(of: image, as: .image(precision: 0.99, perceptualPrecision: 0.98))
+    }
+
+    func testHSLSaturationGreenSnapshot() {
+        // Source must contain green pixels for the green-band saturation to
+        // produce a visible effect; `makeColorImage` (red + blue) leaves the
+        // snapshot indistinguishable from identity. A pure-green sample
+        // exercises the band's actual desaturation.
+        let source = makeSolidColorImage(r: 30, g: 200, b: 30)
+        var sat = EditState.hslIdentity
+        sat[3] = -80 // Green band
+        let image = renderToNSImage(source: source, editState: EditState(hslSaturation: sat))
+        assertSnapshot(of: image, as: .image(precision: 0.99, perceptualPrecision: 0.98))
+    }
+
+    func testHSLLuminanceBlueSnapshot() {
+        let source = makeColorImage()
+        var lum = EditState.hslIdentity
+        lum[5] = -60 // Blue band
+        let image = renderToNSImage(source: source, editState: EditState(hslLuminance: lum))
+        assertSnapshot(of: image, as: .image(precision: 0.99, perceptualPrecision: 0.98))
+    }
+
     func testLuminanceSCurveSnapshot() {
         // Lock the visual output of a non-trivial luminance curve so a
         // future LUT-composition or interpolation change is caught.

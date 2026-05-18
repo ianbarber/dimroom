@@ -21,14 +21,25 @@ public enum RestoreOutcome: Sendable, Equatable {
 /// Information shown to the user when the restore flow finds a
 /// catalog on Drive. The `prompt` callback maps this to an `NSAlert`
 /// in production and to a stub in tests.
+///
+/// `photoCount` may be nil for legacy catalogs published before
+/// `appProperties.dimroom_photo_count` was stamped on upload — the
+/// prompt UI degrades gracefully to a count-less message in that case.
 public struct CatalogRestorePrompt: Sendable, Equatable {
     public let driveFileId: String
     public let sizeBytes: Int64
     public let modifiedTime: Date?
+    public let photoCount: Int?
 
-    public init(driveFileId: String, sizeBytes: Int64, modifiedTime: Date?) {
+    public init(
+        driveFileId: String,
+        sizeBytes: Int64,
+        modifiedTime: Date?,
+        photoCount: Int? = nil
+    ) {
         self.driveFileId = driveFileId
         self.sizeBytes = sizeBytes
         self.modifiedTime = modifiedTime
+        self.photoCount = photoCount
     }
 }

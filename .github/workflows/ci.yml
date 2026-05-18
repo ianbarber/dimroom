@@ -166,3 +166,10 @@ jobs:
             exit 0
           fi
           bin/harness-export-flow.sh
+      - name: Run harness restore catalog flow
+        run: |
+          if [ ! -x bin/harness-restore-catalog-flow.sh ]; then
+            echo "No harness restore-catalog flow script yet — skipping."
+            exit 0
+          fi
+          bin/harness-restore-catalog-flow.sh

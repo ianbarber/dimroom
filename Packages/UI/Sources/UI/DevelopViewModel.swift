@@ -202,6 +202,35 @@ public final class DevelopViewModel: ObservableObject {
         scheduleSave()
     }
 
+    /// Update a single per-band HSL slot. Mirrors `setParameter` for the
+    /// scalar sliders: snapshots the previous state for the undo entry,
+    /// flips `hasUnsavedChanges`, and schedules render + debounced save.
+    public func setHSLParameter(axis: HSLAxis, rangeIndex: Int, value: Double) {
+        guard (0..<8).contains(rangeIndex) else { return }
+        capturePendingUndoPreviousIfNeeded()
+        switch axis {
+        case .hue: editState.hueShift[rangeIndex] = value
+        case .saturation: editState.hslSaturation[rangeIndex] = value
+        case .luminance: editState.hslLuminance[rangeIndex] = value
+        }
+        hasUnsavedChanges = true
+        scheduleRender()
+        scheduleSave()
+    }
+
+    public func resetHSLParameter(axis: HSLAxis, rangeIndex: Int) {
+        setHSLParameter(axis: axis, rangeIndex: rangeIndex, value: 0)
+    }
+
+    public func hslValue(axis: HSLAxis, rangeIndex: Int) -> Double {
+        guard (0..<8).contains(rangeIndex) else { return 0 }
+        switch axis {
+        case .hue: return editState.hueShift[rangeIndex]
+        case .saturation: return editState.hslSaturation[rangeIndex]
+        case .luminance: return editState.hslLuminance[rangeIndex]
+        }
+    }
+
     /// Currently-selected curve channel (Luminance / R / G / B). The
     /// curve editor binds to this so the channel tabs and the canvas
     /// stay in sync, and the harness can drive it through
@@ -362,6 +391,19 @@ public final class DevelopViewModel: ObservableObject {
         case "vignetteAmount": return \.vignetteAmount
         case "vignetteRoundness": return \.vignetteRoundness
         case "vignetteSoftness": return \.vignetteSoftness
+        default: return nil
+        }
+    }
+
+    /// Lookup the `HSLAxis` for a harness array-parameter name. Used by
+    /// `setEditArrayParameter` / `resetEditArrayParameter` so the harness
+    /// can address `hueShift`, `hslSaturation`, and `hslLuminance` by
+    /// string without exposing key paths to per-array elements.
+    nonisolated public static func hslAxis(forParameter name: String) -> HSLAxis? {
+        switch name {
+        case "hueShift": return .hue
+        case "hslSaturation": return .saturation
+        case "hslLuminance": return .luminance
         default: return nil
         }
     }

@@ -95,6 +95,12 @@ public final class DevelopViewModel: ObservableObject {
         guard let assetId else { return }
         guard let asset = try? catalog.fetchAsset(id: assetId) else { return }
 
+        // Drop any crop UI state carried over from the previous asset
+        // before loading the new EditState. Without this, switching from
+        // a cropped asset to an un-cropped one would leave the overlay's
+        // `cropRect` pointing at the prior asset's crop (issue #239 bug 2).
+        cropViewModel.resetToIdentity()
+
         // Drive the Develop pipeline from the master preview so the saved
         // `EditState` is applied once over unedited pixels, not over an
         // already-edited display JPEG (issue #186).
@@ -160,6 +166,7 @@ public final class DevelopViewModel: ObservableObject {
         histogram = nil
         currentAssetId = nil
         editState = EditState()
+        cropViewModel.resetToIdentity()
     }
 
     /// Re-read the latest `EditState` from the catalog for the active

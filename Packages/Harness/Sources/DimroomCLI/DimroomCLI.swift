@@ -38,6 +38,8 @@ struct DimroomCLI: ParsableCommand {
             ResetEditParameter.self,
             SetEditFlag.self,
             ResetEditFlag.self,
+            SetEditArrayParameter.self,
+            ResetEditArrayParameter.self,
             SetCurvePoints.self,
             ResetCurve.self,
             Undo.self,
@@ -60,6 +62,7 @@ struct DimroomCLI: ParsableCommand {
             SimulateDriveAuthFailure.self,
             PostMenuAction.self,
             ReleaseHeldDownloads.self,
+            RestoreCatalogFromDrive.self,
         ]
     )
 }
@@ -622,6 +625,61 @@ extension DimroomCLI {
         }
     }
 
+    struct SetEditArrayParameter: ParsableCommand {
+        static let configuration = CommandConfiguration(
+            commandName: "set-edit-array-parameter",
+            abstract: "Set a single index of an array-valued edit parameter (e.g. hueShift, hslSaturation, hslLuminance)."
+        )
+
+        @Argument(help: "The UUID of the asset.")
+        var id: String
+
+        @Argument(help: "Parameter name (hueShift, hslSaturation, hslLuminance).")
+        var parameter: String
+
+        @Argument(help: "Array index (0…7 for HSL: red, orange, yellow, green, aqua, blue, purple, magenta).")
+        var index: Int
+
+        @Argument(help: "The value to set.")
+        var value: Double
+
+        @Option(name: .long, help: "Path to the harness socket.")
+        var socket: String = HarnessServer.defaultSocketPath
+
+        func run() throws {
+            guard let uuid = UUID(uuidString: id) else {
+                throw ValidationError("Invalid UUID '\(id)'.")
+            }
+            try runCommand(.setEditArrayParameter(assetId: uuid, parameter: parameter, index: index, value: value), socket: socket)
+        }
+    }
+
+    struct ResetEditArrayParameter: ParsableCommand {
+        static let configuration = CommandConfiguration(
+            commandName: "reset-edit-array-parameter",
+            abstract: "Reset a single index of an array-valued edit parameter to its identity value (0)."
+        )
+
+        @Argument(help: "The UUID of the asset.")
+        var id: String
+
+        @Argument(help: "Parameter name (hueShift, hslSaturation, hslLuminance).")
+        var parameter: String
+
+        @Argument(help: "Array index (0…7).")
+        var index: Int
+
+        @Option(name: .long, help: "Path to the harness socket.")
+        var socket: String = HarnessServer.defaultSocketPath
+
+        func run() throws {
+            guard let uuid = UUID(uuidString: id) else {
+                throw ValidationError("Invalid UUID '\(id)'.")
+            }
+            try runCommand(.resetEditArrayParameter(assetId: uuid, parameter: parameter, index: index), socket: socket)
+        }
+    }
+
     struct SetCurvePoints: ParsableCommand {
         static let configuration = CommandConfiguration(
             commandName: "set-curve-points",
@@ -1018,6 +1076,32 @@ extension DimroomCLI {
 
         func run() throws {
             try runCommand(.releaseHeldDownloads, socket: socket)
+        }
+    }
+
+    struct RestoreCatalogFromDrive: ParsableCommand {
+        static let configuration = CommandConfiguration(
+            commandName: "restore-catalog-from-drive",
+            abstract: "Run the first-launch catalog-restore probe against Drive (or the local-file stub) and return the outcome (#234)."
+        )
+
+        @Flag(name: .long, help: "Confirm the restore prompt (default).")
+        var confirm: Bool = false
+
+        @Flag(name: .long, help: "Decline the restore prompt — equivalent to clicking 'Start Fresh'.")
+        var decline: Bool = false
+
+        @Option(name: .long, help: "Path to the harness socket.")
+        var socket: String = HarnessServer.defaultSocketPath
+
+        func run() throws {
+            if confirm && decline {
+                throw ValidationError("--confirm and --decline are mutually exclusive")
+            }
+            // Default is confirm so the no-flag invocation matches the
+            // launch-time auto-confirm path used by the Layer C flow.
+            let approve = !decline
+            try runCommand(.restoreCatalogFromDrive(confirm: approve), socket: socket)
         }
     }
 

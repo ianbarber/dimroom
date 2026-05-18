@@ -35,6 +35,13 @@ public enum Command: Codable, Sendable, Equatable {
     case resetEditParameter(assetId: UUID, parameter: String)
     case setEditFlag(assetId: UUID, parameter: String, value: Bool)
     case resetEditFlag(assetId: UUID, parameter: String)
+    /// Set a single index of an array-valued edit parameter (e.g.
+    /// `hueShift`, `hslSaturation`, `hslLuminance`). Separate from
+    /// `setEditParameter` because the keypath surface only addresses
+    /// scalar `Double` fields; an array index needs an explicit `index`
+    /// payload to stay statically typed.
+    case setEditArrayParameter(assetId: UUID, parameter: String, index: Int, value: Double)
+    case resetEditArrayParameter(assetId: UUID, parameter: String, index: Int)
     /// Replace the curve points for a single channel on an asset.
     /// `pointsJSON` is a JSON-encoded `[[Double, Double]]` array
     /// (e.g. `"[[0,0],[0.5,0.6],[1,1]]"`). Matches the wire convention
@@ -78,6 +85,14 @@ public enum Command: Codable, Sendable, Equatable {
     /// in-flight set so the flow can verify late-tail behaviour.
     /// No-op outside harness mode with `DIMROOM_HARNESS_STUB_DOWNLOADER=hold-until-released`.
     case releaseHeldDownloads
+    /// Runs `CatalogPublisher.restoreIfNeeded` against the live
+    /// uploader (or the local-file stub when
+    /// `DIMROOM_HARNESS_STUB_REMOTE_CATALOG` is set). `confirm`
+    /// controls the prompt's reply (`true` ≡ Restore, `false` ≡ Start
+    /// Fresh). Returns the outcome + `photoCount` + `downloadedBytes`
+    /// in the response payload so flows can assert on the restore
+    /// shape (issue #234).
+    case restoreCatalogFromDrive(confirm: Bool)
 
     private enum CodingKeys: String, CodingKey {
         case type
@@ -98,6 +113,7 @@ public enum Command: Codable, Sendable, Equatable {
         case parameter
         case value
         case flagValue
+        case index
         case channel
         case pointsJSON
         case x
@@ -107,6 +123,7 @@ public enum Command: Codable, Sendable, Equatable {
         case angle
         case name
         case title
+        case confirm
     }
 
     private enum CommandType: String, Codable {
@@ -142,6 +159,8 @@ public enum Command: Codable, Sendable, Equatable {
         case resetEditParameter
         case setEditFlag
         case resetEditFlag
+        case setEditArrayParameter
+        case resetEditArrayParameter
         case setCurvePoints
         case resetCurve
         case undo
@@ -165,6 +184,7 @@ public enum Command: Codable, Sendable, Equatable {
         case simulateDriveAuthFailure
         case postMenuAction
         case releaseHeldDownloads
+        case restoreCatalogFromDrive
     }
 
     public init(from decoder: Decoder) throws {
@@ -278,6 +298,17 @@ public enum Command: Codable, Sendable, Equatable {
             let assetId = try container.decode(UUID.self, forKey: .assetId)
             let parameter = try container.decode(String.self, forKey: .parameter)
             self = .resetEditFlag(assetId: assetId, parameter: parameter)
+        case .setEditArrayParameter:
+            let assetId = try container.decode(UUID.self, forKey: .assetId)
+            let parameter = try container.decode(String.self, forKey: .parameter)
+            let index = try container.decode(Int.self, forKey: .index)
+            let value = try container.decode(Double.self, forKey: .value)
+            self = .setEditArrayParameter(assetId: assetId, parameter: parameter, index: index, value: value)
+        case .resetEditArrayParameter:
+            let assetId = try container.decode(UUID.self, forKey: .assetId)
+            let parameter = try container.decode(String.self, forKey: .parameter)
+            let index = try container.decode(Int.self, forKey: .index)
+            self = .resetEditArrayParameter(assetId: assetId, parameter: parameter, index: index)
         case .setCurvePoints:
             let assetId = try container.decode(UUID.self, forKey: .assetId)
             let channel = try container.decode(String.self, forKey: .channel)
@@ -339,6 +370,9 @@ public enum Command: Codable, Sendable, Equatable {
             self = .postMenuAction(name: name)
         case .releaseHeldDownloads:
             self = .releaseHeldDownloads
+        case .restoreCatalogFromDrive:
+            let confirm = try container.decodeIfPresent(Bool.self, forKey: .confirm) ?? true
+            self = .restoreCatalogFromDrive(confirm: confirm)
         }
     }
 
@@ -445,6 +479,17 @@ public enum Command: Codable, Sendable, Equatable {
             try container.encode(CommandType.resetEditFlag, forKey: .type)
             try container.encode(assetId, forKey: .assetId)
             try container.encode(parameter, forKey: .parameter)
+        case .setEditArrayParameter(let assetId, let parameter, let index, let value):
+            try container.encode(CommandType.setEditArrayParameter, forKey: .type)
+            try container.encode(assetId, forKey: .assetId)
+            try container.encode(parameter, forKey: .parameter)
+            try container.encode(index, forKey: .index)
+            try container.encode(value, forKey: .value)
+        case .resetEditArrayParameter(let assetId, let parameter, let index):
+            try container.encode(CommandType.resetEditArrayParameter, forKey: .type)
+            try container.encode(assetId, forKey: .assetId)
+            try container.encode(parameter, forKey: .parameter)
+            try container.encode(index, forKey: .index)
         case .setCurvePoints(let assetId, let channel, let pointsJSON):
             try container.encode(CommandType.setCurvePoints, forKey: .type)
             try container.encode(assetId, forKey: .assetId)
@@ -506,6 +551,9 @@ public enum Command: Codable, Sendable, Equatable {
             try container.encode(name, forKey: .name)
         case .releaseHeldDownloads:
             try container.encode(CommandType.releaseHeldDownloads, forKey: .type)
+        case .restoreCatalogFromDrive(let confirm):
+            try container.encode(CommandType.restoreCatalogFromDrive, forKey: .type)
+            try container.encode(confirm, forKey: .confirm)
         }
     }
 }

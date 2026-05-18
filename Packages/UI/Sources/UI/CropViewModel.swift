@@ -57,6 +57,21 @@ public final class CropViewModel: ObservableObject {
         isActive = false
     }
 
+    /// Clear all crop state back to identity — used by the parent
+    /// DevelopViewModel when switching to a different asset so the
+    /// overlay never shows the prior asset's crop as a leftover. Also
+    /// drops the cancel snapshot so a stale `cancel()` can't revive a
+    /// previous asset's rect after the reset.
+    public func resetToIdentity() {
+        cropRect = CGRect(x: 0, y: 0, width: 1, height: 1)
+        cropAngle = 0
+        selectedPreset = .free
+        imageAspect = 1.0
+        isActive = false
+        previousCropRect = nil
+        previousCropAngle = nil
+    }
+
     /// Update the crop rect, applying the active aspect-ratio preset and
     /// clamping to the 0…1 image bounds. The caller passes the handle
     /// `anchor` that must stay fixed (e.g. the opposite corner when

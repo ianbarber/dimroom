@@ -1,5 +1,6 @@
 import AppKit
 import Catalog
+import EditEngine
 import Foundation
 import Previews
 import SnapshotTesting
@@ -274,6 +275,103 @@ final class DevelopSnapshotTests: XCTestCase {
             )
         }
     }
+
+    /// Develop view with HSL Hue axis selected and one band pushed.
+    /// Locks the new HSL section's segmented picker, the tinted slider
+    /// tracks, and the slider ordering.
+    @MainActor
+    func test_develop_hsl_hue() async throws {
+        let vm = try await makeActivatedViewModel(hash: "snap-hsl-hue")
+
+        vm.setHSLParameter(axis: .hue, rangeIndex: 0, value: 40)
+        try await Task.sleep(nanoseconds: 300_000_000)
+
+        let image = renderFixedPixelImage(for: DevelopView(viewModel: vm))
+
+        runAssertSnapshot {
+            assertSnapshot(
+                of: image,
+                as: .image(
+                    precision: Self.snapshotPrecision,
+                    perceptualPrecision: Self.snapshotPerceptualPrecision
+                )
+            )
+        }
+    }
+
+    /// Develop view with HSL Saturation axis selected, exercising the
+    /// segmented picker's middle tab and one negative-direction slider.
+    @MainActor
+    func test_develop_hsl_saturation() async throws {
+        let vm = try await makeActivatedViewModel(hash: "snap-hsl-sat")
+
+        vm.setHSLParameter(axis: .saturation, rangeIndex: 3, value: -50)
+        try await Task.sleep(nanoseconds: 300_000_000)
+
+        let panel = HSLPanelView(
+            selectedAxis: .saturation,
+            value: { axis, idx in vm.hslValue(axis: axis, rangeIndex: idx) },
+            setValue: { axis, idx, value in
+                vm.setHSLParameter(axis: axis, rangeIndex: idx, value: value)
+            },
+            reset: { axis, idx in vm.resetHSLParameter(axis: axis, rangeIndex: idx) }
+        )
+        .frame(width: 256)
+        .padding(12)
+        .background(Color(white: 0.1))
+
+        let image = renderFixedPixelImage(
+            for: panel,
+            size: CGSize(width: 280, height: 380)
+        )
+
+        runAssertSnapshot {
+            assertSnapshot(
+                of: image,
+                as: .image(
+                    precision: Self.snapshotPrecision,
+                    perceptualPrecision: Self.snapshotPerceptualPrecision
+                )
+            )
+        }
+    }
+
+    /// Develop view with HSL Luminance axis selected.
+    @MainActor
+    func test_develop_hsl_luminance() async throws {
+        let vm = try await makeActivatedViewModel(hash: "snap-hsl-lum")
+
+        vm.setHSLParameter(axis: .luminance, rangeIndex: 5, value: -30)
+        try await Task.sleep(nanoseconds: 300_000_000)
+
+        let panel = HSLPanelView(
+            selectedAxis: .luminance,
+            value: { axis, idx in vm.hslValue(axis: axis, rangeIndex: idx) },
+            setValue: { axis, idx, value in
+                vm.setHSLParameter(axis: axis, rangeIndex: idx, value: value)
+            },
+            reset: { axis, idx in vm.resetHSLParameter(axis: axis, rangeIndex: idx) }
+        )
+        .frame(width: 256)
+        .padding(12)
+        .background(Color(white: 0.1))
+
+        let image = renderFixedPixelImage(
+            for: panel,
+            size: CGSize(width: 280, height: 380)
+        )
+
+        runAssertSnapshot {
+            assertSnapshot(
+                of: image,
+                as: .image(
+                    precision: Self.snapshotPrecision,
+                    perceptualPrecision: Self.snapshotPerceptualPrecision
+                )
+            )
+        }
+    }
+
 
     /// Develop view with no selected asset — placeholder state.
     @MainActor

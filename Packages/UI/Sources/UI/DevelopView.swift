@@ -1,4 +1,5 @@
 import Catalog
+import EditEngine
 import SwiftUI
 
 public struct DevelopView: View {
@@ -100,6 +101,8 @@ public struct DevelopView: View {
                 slider("Softness", keyPath: \.vignetteSoftness, range: 0...100, step: 1, identity: 50)
             }
 
+            hslSection
+
             sliderSection("Geometry") {
                 slider("Vertical", keyPath: \.perspectiveVertical, range: -100...100, step: 1, identity: 0)
                 slider("Horizontal", keyPath: \.perspectiveHorizontal, range: -100...100, step: 1, identity: 0)
@@ -109,6 +112,18 @@ public struct DevelopView: View {
             }
         }
         .animation(.easeOut(duration: 0.25), value: viewModel.replaySequence)
+    }
+
+    private var hslSection: some View {
+        HSLPanelView(
+            value: { axis, index in viewModel.hslValue(axis: axis, rangeIndex: index) },
+            setValue: { axis, index, value in
+                viewModel.setHSLParameter(axis: axis, rangeIndex: index, value: value)
+            },
+            reset: { axis, index in
+                viewModel.resetHSLParameter(axis: axis, rangeIndex: index)
+            }
+        )
     }
 
     private var cropToggle: some View {
@@ -272,18 +287,23 @@ public struct DevelopView: View {
                 .ignoresSafeArea()
 
             if let image = viewModel.renderedImage {
-                Image(nsImage: image)
-                    .resizable()
-                    .aspectRatio(contentMode: .fit)
-                    .frame(maxWidth: .infinity, maxHeight: .infinity)
-                    .overlay(alignment: .center) {
-                        if cropViewModel.isActive {
-                            GeometryReader { geo in
+                GeometryReader { geo in
+                    let imageRect = Self.fittedRect(
+                        frame: geo.size,
+                        sourceAspect: previewSourceAspect(fallback: image)
+                    )
+                    Image(nsImage: image)
+                        .resizable()
+                        .frame(width: imageRect.width, height: imageRect.height)
+                        .offset(x: imageRect.minX, y: imageRect.minY)
+                        .overlay(alignment: .topLeading) {
+                            if cropViewModel.isActive {
                                 CropOverlayView(viewModel: cropViewModel)
-                                    .frame(width: geo.size.width, height: geo.size.height)
+                                    .frame(width: imageRect.width, height: imageRect.height)
+                                    .offset(x: imageRect.minX, y: imageRect.minY)
                             }
                         }
-                    }
+                }
             }
 
             if viewModel.showHistogram, let data = viewModel.histogram {
@@ -298,6 +318,46 @@ public struct DevelopView: View {
             }
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity)
+    }
+
+    /// Aspect ratio of the source image the Develop pipeline is rendering
+    /// from. Prefers `viewModel.sourceImageSize` (the CIImage extent the
+    /// renderer is fed) because the rendered `NSImage` may already have
+    /// been cropped by the EditState — falling back to the rendered image
+    /// when the view model has no source set keeps the overlay sized
+    /// sensibly during the brief window before the first preview load.
+    private func previewSourceAspect(fallback image: NSImage) -> Double {
+        if let size = viewModel.sourceImageSize, size.width > 0, size.height > 0 {
+            return Double(size.width / size.height)
+        }
+        if image.size.width > 0, image.size.height > 0 {
+            return Double(image.size.width / image.size.height)
+        }
+        return 1.0
+    }
+
+    /// Compute the `aspectRatio(.fit)` letterboxed rect for an image of
+    /// `sourceAspect` inside `frame`. The crop overlay must bind to this
+    /// rect (not the full frame) so normalised crop coordinates map onto
+    /// the pixels the user actually sees — otherwise a 1:1 crop on a
+    /// non-square frame would draw landscape (issue #239 bugs 1 & 3).
+    static func fittedRect(frame: CGSize, sourceAspect: Double) -> CGRect {
+        guard frame.width > 0, frame.height > 0, sourceAspect > 0 else {
+            return CGRect(origin: .zero, size: frame)
+        }
+        let frameAspect = Double(frame.width / frame.height)
+        let width: CGFloat
+        let height: CGFloat
+        if sourceAspect > frameAspect {
+            width = frame.width
+            height = CGFloat(Double(frame.width) / sourceAspect)
+        } else {
+            height = frame.height
+            width = CGFloat(Double(frame.height) * sourceAspect)
+        }
+        let originX = (frame.width - width) / 2
+        let originY = (frame.height - height) / 2
+        return CGRect(x: originX, y: originY, width: width, height: height)
     }
 
     // MARK: - Placeholder

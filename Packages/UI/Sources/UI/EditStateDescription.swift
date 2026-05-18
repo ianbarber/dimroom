@@ -1,5 +1,6 @@
 import Catalog
 import CoreGraphics
+import EditEngine
 import Foundation
 
 /// Build a short per-parameter label for an `.editSave` undo action
@@ -66,6 +67,37 @@ func editParameterDescription(previous: EditState?, next: EditState) -> String? 
     }
     flag("Chromatic Aberration", \.chromaticAberration)
     flag("Lens Vignette", \.lensVignette)
+
+    // HSL: each axis is an 8-array. Treat a change to a single band as
+    // one logical change ("Hue (Red) +12"); a change spanning multiple
+    // bands or axes rolls up to a generic "HSL" label so the count rule
+    // below still picks it up as a single change.
+    let hslDiffs: [(axis: String, label: String, base: [Double], next: [Double])] = [
+        ("Hue", "Hue", base.hueShift, next.hueShift),
+        ("Saturation", "HSL Saturation", base.hslSaturation, next.hslSaturation),
+        ("Luminance", "Luminance", base.hslLuminance, next.hslLuminance),
+    ]
+    var hslSingleBand: (axis: String, range: HSLColorRange, value: Double)?
+    var hslChangeCount = 0
+    for diff in hslDiffs {
+        for index in 0..<min(diff.base.count, diff.next.count) {
+            guard diff.base[index] != diff.next[index] else { continue }
+            hslChangeCount += 1
+            if hslChangeCount == 1,
+               let range = HSLColorRange(rawValue: index) {
+                hslSingleBand = (axis: diff.axis, range: range, value: diff.next[index])
+            } else {
+                hslSingleBand = nil
+            }
+        }
+    }
+    if hslChangeCount == 1, let band = hslSingleBand {
+        changes.append(Change(
+            label: "\(band.axis) (\(band.range.displayName)) \(String(format: "%+.0f", band.value))"
+        ))
+    } else if hslChangeCount > 1 {
+        changes.append(Change(label: "HSL"))
+    }
 
     // Crop: rect + angle roll up into one logical change.
     if base.cropRect != next.cropRect || base.cropAngle != next.cropAngle {

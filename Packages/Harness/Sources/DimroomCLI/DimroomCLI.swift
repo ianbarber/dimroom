@@ -60,6 +60,7 @@ struct DimroomCLI: ParsableCommand {
             SimulateDriveAuthFailure.self,
             PostMenuAction.self,
             ReleaseHeldDownloads.self,
+            RestoreCatalogFromDrive.self,
         ]
     )
 }
@@ -1024,6 +1025,32 @@ extension DimroomCLI {
 
         func run() throws {
             try runCommand(.releaseHeldDownloads, socket: socket)
+        }
+    }
+
+    struct RestoreCatalogFromDrive: ParsableCommand {
+        static let configuration = CommandConfiguration(
+            commandName: "restore-catalog-from-drive",
+            abstract: "Run the first-launch catalog-restore probe against Drive (or the local-file stub) and return the outcome (#234)."
+        )
+
+        @Flag(name: .long, help: "Confirm the restore prompt (default).")
+        var confirm: Bool = false
+
+        @Flag(name: .long, help: "Decline the restore prompt — equivalent to clicking 'Start Fresh'.")
+        var decline: Bool = false
+
+        @Option(name: .long, help: "Path to the harness socket.")
+        var socket: String = HarnessServer.defaultSocketPath
+
+        func run() throws {
+            if confirm && decline {
+                throw ValidationError("--confirm and --decline are mutually exclusive")
+            }
+            // Default is confirm so the no-flag invocation matches the
+            // launch-time auto-confirm path used by the Layer C flow.
+            let approve = !decline
+            try runCommand(.restoreCatalogFromDrive(confirm: approve), socket: socket)
         }
     }
 

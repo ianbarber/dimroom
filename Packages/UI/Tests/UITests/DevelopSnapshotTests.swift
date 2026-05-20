@@ -201,6 +201,34 @@ final class DevelopSnapshotTests: XCTestCase {
         }
     }
 
+    /// Develop view with non-identity split-toning settings. Locks the
+    /// Split Toning section layout (Balance → Highlights{Hue,Sat} →
+    /// Shadows{Hue,Sat}) and the rendered preview's tint.
+    @MainActor
+    func test_develop_split_toning() async throws {
+        let vm = try await makeActivatedViewModel(hash: "snap-split-tone")
+
+        vm.setParameter(\.splitToneHighlightHue, value: 30)
+        vm.setParameter(\.splitToneHighlightSaturation, value: 50)
+        vm.setParameter(\.splitToneShadowHue, value: 210)
+        vm.setParameter(\.splitToneShadowSaturation, value: 50)
+        vm.setParameter(\.splitToneBalance, value: 20)
+        // Give the debounced render time to publish.
+        try await Task.sleep(nanoseconds: 300_000_000)
+
+        let image = renderFixedPixelImage(for: DevelopView(viewModel: vm))
+
+        runAssertSnapshot {
+            assertSnapshot(
+                of: image,
+                as: .image(
+                    precision: Self.snapshotPrecision,
+                    perceptualPrecision: Self.snapshotPerceptualPrecision
+                )
+            )
+        }
+    }
+
     /// Develop view on a Drive-only asset, frozen mid-download: the
     /// indicator should overlay the preview area and the slider sidebar
     /// should be disabled (greyed). Mirrors the holding-fetcher pattern

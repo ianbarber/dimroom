@@ -95,6 +95,22 @@ public struct DevelopView: View {
                 slider("Chrominance", keyPath: \.chrominanceNoiseReduction, range: 0...100, step: 1, identity: 0)
             }
 
+            hslSection
+
+            sliderSection("Split Toning") {
+                slider("Balance", keyPath: \.splitToneBalance, range: -100...100, step: 1, identity: 0)
+                Text("Highlights")
+                    .font(.system(size: 10, weight: .medium))
+                    .foregroundStyle(Color(white: 0.55))
+                slider("Hue", keyPath: \.splitToneHighlightHue, range: 0...360, step: 1, identity: 0)
+                slider("Saturation", keyPath: \.splitToneHighlightSaturation, range: 0...100, step: 1, identity: 0)
+                Text("Shadows")
+                    .font(.system(size: 10, weight: .medium))
+                    .foregroundStyle(Color(white: 0.55))
+                slider("Hue", keyPath: \.splitToneShadowHue, range: 0...360, step: 1, identity: 0)
+                slider("Saturation", keyPath: \.splitToneShadowSaturation, range: 0...100, step: 1, identity: 0)
+            }
+
             sliderSection("Vignette") {
                 slider("Amount", keyPath: \.vignetteAmount, range: -100...100, step: 1, identity: 0)
                 slider("Roundness", keyPath: \.vignetteRoundness, range: 0...100, step: 1, identity: 50)

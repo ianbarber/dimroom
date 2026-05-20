@@ -42,6 +42,11 @@ final class EditStateTests: XCTestCase {
         XCTAssertEqual(state.vignetteAmount, 0)
         XCTAssertEqual(state.vignetteRoundness, 50)
         XCTAssertEqual(state.vignetteSoftness, 50)
+        XCTAssertEqual(state.splitToneHighlightHue, 0)
+        XCTAssertEqual(state.splitToneHighlightSaturation, 0)
+        XCTAssertEqual(state.splitToneShadowHue, 0)
+        XCTAssertEqual(state.splitToneShadowSaturation, 0)
+        XCTAssertEqual(state.splitToneBalance, 0)
         XCTAssertEqual(state.hueShift, EditState.hslIdentity)
         XCTAssertEqual(state.hslSaturation, EditState.hslIdentity)
         XCTAssertEqual(state.hslLuminance, EditState.hslIdentity)
@@ -133,6 +138,11 @@ final class EditStateTests: XCTestCase {
             saturation: -5,
             luminanceNoiseReduction: 35,
             chrominanceNoiseReduction: 55,
+            splitToneHighlightHue: 30,
+            splitToneHighlightSaturation: 40,
+            splitToneShadowHue: 210,
+            splitToneShadowSaturation: 30,
+            splitToneBalance: 20,
             vignetteAmount: -40,
             vignetteRoundness: 70,
             vignetteSoftness: 30,
@@ -186,6 +196,11 @@ final class EditStateTests: XCTestCase {
         XCTAssertEqual(decoded.vignetteAmount, 0)
         XCTAssertEqual(decoded.vignetteRoundness, 50)
         XCTAssertEqual(decoded.vignetteSoftness, 50)
+        XCTAssertEqual(decoded.splitToneHighlightHue, 0)
+        XCTAssertEqual(decoded.splitToneHighlightSaturation, 0)
+        XCTAssertEqual(decoded.splitToneShadowHue, 0)
+        XCTAssertEqual(decoded.splitToneShadowSaturation, 0)
+        XCTAssertEqual(decoded.splitToneBalance, 0)
         XCTAssertEqual(decoded.hueShift, EditState.hslIdentity)
         XCTAssertEqual(decoded.hslSaturation, EditState.hslIdentity)
         XCTAssertEqual(decoded.hslLuminance, EditState.hslIdentity)
@@ -231,8 +246,12 @@ final class EditStateTests: XCTestCase {
                      "hslLuminance", "hslSaturation", "hueShift", "lensVignette",
                      "luminanceNoiseReduction",
                      "perspectiveHorizontal", "perspectiveRotation", "perspectiveVertical",
-                     "redCurvePoints", "saturation", "shadows", "sharpening", "temperature", "tint",
-                     "toneCurvePoints", "vibrance", "vignetteAmount", "vignetteRoundness",
+                     "redCurvePoints", "saturation", "shadows", "sharpening",
+                     "splitToneBalance", "splitToneHighlightHue",
+                     "splitToneHighlightSaturation", "splitToneShadowHue",
+                     "splitToneShadowSaturation",
+                     "temperature", "tint", "toneCurvePoints",
+                     "vibrance", "vignetteAmount", "vignetteRoundness",
                      "vignetteSoftness", "whites"]
         var lastIndex = json.startIndex
         for key in keys {

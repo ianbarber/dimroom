@@ -46,6 +46,14 @@ public enum Renderer {
             saturation: editState.hslSaturation,
             luminance: editState.hslLuminance
         )
+        image = applySplitTone(
+            image,
+            highlightHue: editState.splitToneHighlightHue,
+            highlightSaturation: editState.splitToneHighlightSaturation,
+            shadowHue: editState.splitToneShadowHue,
+            shadowSaturation: editState.splitToneShadowSaturation,
+            balance: editState.splitToneBalance
+        )
         image = applyChromaticAberrationCorrection(image, enabled: editState.chromaticAberration)
         image = applyGeometryCorrections(
             image,
@@ -213,6 +221,47 @@ public enum Renderer {
         filter.setValue(chrominance / 1000.0, forKey: "inputNoiseLevel")
         filter.setValue(0.9 - (luminance / 100.0) * 0.5, forKey: "inputSharpness")
         return filter.outputImage!.cropped(to: image.extent)
+    }
+
+    private static func applySplitTone(
+        _ image: CIImage,
+        highlightHue: Double,
+        highlightSaturation: Double,
+        shadowHue: Double,
+        shadowSaturation: Double,
+        balance: Double
+    ) -> CIImage {
+        // Fast path: both saturations at 0 means no tint to add. Hue and
+        // balance alone are no-ops in that case.
+        guard highlightSaturation > 0 || shadowSaturation > 0 else { return image }
+        guard let kernel = SplitToneKernel.kernel else { return image }
+
+        let highlight = SplitToneKernel.hslToRGB(
+            hue: highlightHue,
+            saturation: highlightSaturation / 100.0
+        )
+        let shadow = SplitToneKernel.hslToRGB(
+            hue: shadowHue,
+            saturation: shadowSaturation / 100.0
+        )
+
+        let highlightVec = CIVector(
+            x: CGFloat(highlight.0),
+            y: CGFloat(highlight.1),
+            z: CGFloat(highlight.2)
+        )
+        let shadowVec = CIVector(
+            x: CGFloat(shadow.0),
+            y: CGFloat(shadow.1),
+            z: CGFloat(shadow.2)
+        )
+        let balanceArg = max(-1.0, min(1.0, balance / 100.0))
+
+        let result = kernel.apply(
+            extent: image.extent,
+            arguments: [image, highlightVec, shadowVec, balanceArg]
+        )
+        return result ?? image
     }
 
     private static func applySharpening(_ image: CIImage, sharpening: Double) -> CIImage {

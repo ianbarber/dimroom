@@ -414,6 +414,11 @@ public final class DevelopViewModel: ObservableObject {
         case "vignetteAmount": return \.vignetteAmount
         case "vignetteRoundness": return \.vignetteRoundness
         case "vignetteSoftness": return \.vignetteSoftness
+        case "splitToneHighlightHue": return \.splitToneHighlightHue
+        case "splitToneHighlightSaturation": return \.splitToneHighlightSaturation
+        case "splitToneShadowHue": return \.splitToneShadowHue
+        case "splitToneShadowSaturation": return \.splitToneShadowSaturation
+        case "splitToneBalance": return \.splitToneBalance
         case "perspectiveVertical": return \.perspectiveVertical
         case "perspectiveHorizontal": return \.perspectiveHorizontal
         case "perspectiveRotation": return \.perspectiveRotation

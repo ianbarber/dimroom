@@ -1,11 +1,14 @@
 #!/usr/bin/env bash
-# harness-develop-noise-flow.sh — Layer C flow for the new Noise Reduction
+# harness-develop-split-tone-flow.sh — Layer C flow for the new Split Toning
 # group in Develop.
 #
 # Seeds a throwaway catalog, launches the app in harness mode, enters Develop
-# on the first asset and drives the luminance + chrominance sliders to a few
-# meaningful states, asserting get-edit round-trips each value and capturing
-# screenshots for human review.
+# on the first asset and drives the five split-toning parameters
+# (Balance + Highlights{Hue,Sat} + Shadows{Hue,Sat}) through a classic
+# orange-teal grade plus balance-shift variants. Each set-edit-parameter is
+# round-tripped through get-edit so the harness-layer string surface is
+# exercised end-to-end and screenshots land in SCREENSHOT_DIR for human
+# review.
 #
 # Assumes the capture-screenshots skill already built the app, CLI, and
 # fixture seeder — this script must not rebuild. SCREENSHOT_DIR is set by
@@ -13,12 +16,12 @@
 set -euo pipefail
 
 REPO_ROOT="$(cd "$(dirname "$0")/.." && pwd)"
-SCREENSHOT_DIR="${SCREENSHOT_DIR:-$REPO_ROOT/.artifacts/develop-noise}"
+SCREENSHOT_DIR="${SCREENSHOT_DIR:-$REPO_ROOT/.artifacts/develop-split-tone}"
 SEED_SRC="$REPO_ROOT/fixtures/library-seed"
-WORK_DIR="$REPO_ROOT/.artifacts/harness-develop-noise"
+WORK_DIR="$REPO_ROOT/.artifacts/harness-develop-split-tone"
 CATALOG_PATH="$WORK_DIR/catalog.sqlite"
 PREVIEW_CACHE="$WORK_DIR/previews"
-SOCKET="/tmp/dimroom-harness-develop-noise-$$.sock"
+SOCKET="/tmp/dimroom-harness-develop-split-tone-$$.sock"
 APP_PID=""
 
 cleanup() {
@@ -56,8 +59,6 @@ fi
 
 echo "=== Launching app in harness mode ==="
 DIMROOM_HARNESS_SOCKET="$SOCKET" \
-DIMROOM_HARNESS_DISABLE_DRIVE=1 \
-DIMROOM_HARNESS_AUTO_CONFIRM_RESTORE=0 \
     "$APP_BIN" --harness \
     --fixture-catalog "$CATALOG_PATH" \
     --preview-cache "$PREVIEW_CACHE" &
@@ -102,12 +103,14 @@ echo "=== navigate develop ==="
 sleep 1
 
 # drive <parameter> <value> — set the parameter, wait for debounced render,
-# then assert get-edit reports the value.
+# then assert get-edit reports the value. Uses `--` so negative values
+# (e.g. splitToneBalance -50) are treated as positionals rather than
+# option flags by swift-argument-parser.
 drive() {
     local param="$1"
     local value="$2"
     local set_out
-    set_out=$("$CLI_BIN" set-edit-parameter "$ASSET_ID" "$param" "$value" --socket "$SOCKET")
+    set_out=$("$CLI_BIN" set-edit-parameter "$ASSET_ID" "$param" --socket "$SOCKET" -- "$value")
     if ! echo "$set_out" | grep -q '"ok"'; then
         echo "ERROR: set-edit-parameter $param $value did not return ok"
         echo "$set_out"
@@ -127,37 +130,40 @@ drive() {
     echo "  OK: $param == $actual_f"
 }
 
-echo "=== luminance NR only @ 80 ==="
-drive luminanceNoiseReduction 80
-"$CLI_BIN" screenshot "$SCREENSHOT_DIR/develop-noise-luma-80.png" --socket "$SOCKET" >/dev/null
-if [ ! -f "$SCREENSHOT_DIR/develop-noise-luma-80.png" ]; then
-    echo "ERROR: luma screenshot not created"
+echo "=== orange-teal grade, balanced ==="
+drive splitToneHighlightHue 30
+drive splitToneHighlightSaturation 50
+drive splitToneShadowHue 210
+drive splitToneShadowSaturation 50
+drive splitToneBalance 0
+"$CLI_BIN" screenshot "$SCREENSHOT_DIR/develop-split-tone-orange-teal.png" --socket "$SOCKET" >/dev/null
+if [ ! -f "$SCREENSHOT_DIR/develop-split-tone-orange-teal.png" ]; then
+    echo "ERROR: orange-teal screenshot not created"
     exit 1
 fi
 
-echo "=== reset luminance NR ==="
-drive luminanceNoiseReduction 0
-
-echo "=== chrominance NR only @ 80 ==="
-drive chrominanceNoiseReduction 80
-"$CLI_BIN" screenshot "$SCREENSHOT_DIR/develop-noise-chroma-80.png" --socket "$SOCKET" >/dev/null
-if [ ! -f "$SCREENSHOT_DIR/develop-noise-chroma-80.png" ]; then
-    echo "ERROR: chroma screenshot not created"
+echo "=== balance shift toward highlights ==="
+drive splitToneBalance -50
+"$CLI_BIN" screenshot "$SCREENSHOT_DIR/develop-split-tone-balance-minus-50.png" --socket "$SOCKET" >/dev/null
+if [ ! -f "$SCREENSHOT_DIR/develop-split-tone-balance-minus-50.png" ]; then
+    echo "ERROR: balance-minus-50 screenshot not created"
     exit 1
 fi
 
-echo "=== both NR sliders @ 100 ==="
-drive luminanceNoiseReduction 100
-drive chrominanceNoiseReduction 100
-"$CLI_BIN" screenshot "$SCREENSHOT_DIR/develop-noise-both-100.png" --socket "$SOCKET" >/dev/null
-if [ ! -f "$SCREENSHOT_DIR/develop-noise-both-100.png" ]; then
-    echo "ERROR: combined screenshot not created"
+echo "=== balance shift toward shadows ==="
+drive splitToneBalance 50
+"$CLI_BIN" screenshot "$SCREENSHOT_DIR/develop-split-tone-balance-plus-50.png" --socket "$SOCKET" >/dev/null
+if [ ! -f "$SCREENSHOT_DIR/develop-split-tone-balance-plus-50.png" ]; then
+    echo "ERROR: balance-plus-50 screenshot not created"
     exit 1
 fi
 
-echo "=== reset both NR sliders ==="
-drive luminanceNoiseReduction 0
-drive chrominanceNoiseReduction 0
+echo "=== reset all split-tone sliders ==="
+drive splitToneHighlightHue 0
+drive splitToneHighlightSaturation 0
+drive splitToneShadowHue 0
+drive splitToneShadowSaturation 0
+drive splitToneBalance 0
 
 echo "=== quit ==="
 "$CLI_BIN" quit --socket "$SOCKET" 2>&1 || true
@@ -169,4 +175,4 @@ if kill -0 "$APP_PID" 2>/dev/null; then
 fi
 APP_PID=""
 
-echo "=== Harness develop-noise flow PASSED ==="
+echo "=== Harness develop-split-tone flow PASSED ==="

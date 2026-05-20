@@ -1220,6 +1220,17 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     /// `fetchAccountEmail()` end-to-end without real Google traffic, so
     /// Layer C flows can exercise the connect path.
     ///
+    /// When `DIMROOM_HARNESS_DISABLE_DRIVE` is set (issue #278), returns
+    /// `nil` *before* `OAuthConfig.load()` is consulted. This is the
+    /// "skip Drive entirely at launch" knob for harness flows that don't
+    /// exercise Drive — without it, dev machines with a previously
+    /// authenticated keychain entry hang at `attemptCatalogRestore` →
+    /// `runBlocking { await driveClient.isAuthenticated }` →
+    /// `SecItemCopyMatching` (the keychain prompt can't be served
+    /// because Main is parked on the semaphore). `DIMROOM_HARNESS_DRIVE_STUB`
+    /// takes precedence so flows that explicitly want a stub client
+    /// keep working.
+    ///
     /// In `--harness` mode (with or without the stub) the `DriveClient`
     /// is constructed with an `InMemoryTokenStore` so the Keychain is
     /// never touched. SPM debug builds resign on every rebuild, which
@@ -1228,16 +1239,50 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     private func resolveDriveClient() -> DriveClient? {
         let args = ProcessInfo.processInfo.arguments
         let env = ProcessInfo.processInfo.environment
-        if env["DIMROOM_HARNESS_DRIVE_STUB"] != nil {
+        switch Self.harnessDriveStrategy(env: env) {
+        case .stubClient:
             return makeHarnessStubDriveClient()
+        case .disabled:
+            return nil
+        case .useOAuthConfig:
+            guard let config = try? OAuthConfig.load() else { return nil }
+            switch Self.chooseTokenStoreKind(args: args, env: env) {
+            case .inMemory, .stubInMemory:
+                return DriveClient(config: config, tokenStore: InMemoryTokenStore())
+            case .keychain:
+                return DriveClient(config: config)
+            }
         }
-        guard let config = try? OAuthConfig.load() else { return nil }
-        switch Self.chooseTokenStoreKind(args: args, env: env) {
-        case .inMemory, .stubInMemory:
-            return DriveClient(config: config, tokenStore: InMemoryTokenStore())
-        case .keychain:
-            return DriveClient(config: config)
-        }
+    }
+
+    /// Outcome of the harness env-var dispatch inside `resolveDriveClient`.
+    /// Extracted so #278's "skip Drive at launch" knob and its precedence
+    /// against `DIMROOM_HARNESS_DRIVE_STUB` are pinned in Layer A.
+    enum HarnessDriveStrategy: Equatable {
+        /// `DIMROOM_HARNESS_DRIVE_STUB` — fake `DriveClient` wired to
+        /// in-memory stubs so flows can exercise `authenticate()`.
+        case stubClient
+        /// `DIMROOM_HARNESS_DISABLE_DRIVE` — return `nil` before
+        /// `OAuthConfig.load()` so the keychain probe never fires.
+        case disabled
+        /// Production path: try `OAuthConfig.load()` and wire a real
+        /// `DriveClient` if it succeeds, otherwise `nil`.
+        case useOAuthConfig
+    }
+
+    nonisolated static func harnessDriveStrategy(env: [String: String]) -> HarnessDriveStrategy {
+        if env["DIMROOM_HARNESS_DRIVE_STUB"] != nil { return .stubClient }
+        if shouldDisableDriveForHarness(env: env) { return .disabled }
+        return .useOAuthConfig
+    }
+
+    /// Matches `shouldAutoConfirmRestorePrompt`'s "is set" semantics:
+    /// the variable being present in the env (even with an empty value)
+    /// is enough to opt in. Pinned by `HarnessDriveDisableTests`.
+    nonisolated static func shouldDisableDriveForHarness(
+        env: [String: String]
+    ) -> Bool {
+        env["DIMROOM_HARNESS_DISABLE_DRIVE"] != nil
     }
 
     private func makeHarnessStubDriveClient() -> DriveClient {

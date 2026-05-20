@@ -67,8 +67,9 @@ echo "=== Launching app in harness mode (empty catalog) ==="
 # Same auto-confirm short-circuit as harness-export-flow.sh — see that
 # script for the explanation.
 DIMROOM_HARNESS_SOCKET="$SOCKET" \
-DIMROOM_ORIGINALS_DIR="$ORIGINALS_DIR" \
+DIMROOM_HARNESS_DISABLE_DRIVE=1 \
 DIMROOM_HARNESS_AUTO_CONFIRM_RESTORE=0 \
+DIMROOM_ORIGINALS_DIR="$ORIGINALS_DIR" \
 "$APP_BIN" --harness --fixture-catalog "$CATALOG_COPY" &
 APP_PID=$!
 

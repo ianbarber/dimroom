@@ -1,0 +1,290 @@
+import XCTest
+import Catalog
+@testable import SyncEngine
+
+final class ChangePollerTests: XCTestCase {
+
+    // MARK: - Helpers
+
+    private func makeCatalog() throws -> CatalogDatabase {
+        try CatalogDatabase.inMemory()
+    }
+
+    private func makePoller(
+        catalog: CatalogDatabase,
+        fetcher: StubDriveChangesFetcher,
+        cachedCatalogFileId: String? = nil
+    ) -> (ChangePoller, InMemoryDriveFileIdStore) {
+        let store = InMemoryDriveFileIdStore(initial: cachedCatalogFileId)
+        let poller = ChangePoller(
+            catalog: catalog,
+            fetcher: fetcher,
+            publisher: nil,
+            fileIdStore: store
+        )
+        return (poller, store)
+    }
+
+    // MARK: - Bootstrap
+
+    func testBootstrapPersistsTokenWhenNoneStored() async throws {
+        let catalog = try makeCatalog()
+        let fetcher = StubDriveChangesFetcher(bootstrapToken: "first-token")
+        let (poller, _) = makePoller(catalog: catalog, fetcher: fetcher)
+
+        let outcome = try await poller.pollOnce()
+
+        switch outcome {
+        case .bootstrapped(let token):
+            XCTAssertEqual(token, "first-token")
+        default:
+            XCTFail("expected .bootstrapped, got \(outcome)")
+        }
+        XCTAssertEqual(try catalog.loadDrivePageToken(), "first-token")
+        XCTAssertEqual(fetcher.bootstrapCalls, 1)
+        XCTAssertTrue(fetcher.listCalls.isEmpty)
+    }
+
+    // MARK: - Steady-state
+
+    func testSteadyStateNoChangesPersistsNewToken() async throws {
+        let catalog = try makeCatalog()
+        try catalog.saveDrivePageToken("stored-token")
+        let fetcher = StubDriveChangesFetcher()
+        fetcher.enqueueListResponse(DriveChangesPage(
+            changes: [],
+            newStartPageToken: "next-token"
+        ))
+        let (poller, _) = makePoller(catalog: catalog, fetcher: fetcher)
+
+        let outcome = try await poller.pollOnce()
+
+        switch outcome {
+        case .noChanges(let token):
+            XCTAssertEqual(token, "next-token")
+        default:
+            XCTFail("expected .noChanges, got \(outcome)")
+        }
+        XCTAssertEqual(try catalog.loadDrivePageToken(), "next-token")
+        XCTAssertEqual(fetcher.listCalls, ["stored-token"])
+        XCTAssertEqual(fetcher.bootstrapCalls, 0)
+    }
+
+    // MARK: - Catalog-file change classification
+
+    func testCatalogFileChangeProducesCatalogChanged() async throws {
+        let catalog = try makeCatalog()
+        try catalog.saveDrivePageToken("stored")
+        let fetcher = StubDriveChangesFetcher()
+        let cachedId = "drive-catalog-abc"
+        fetcher.enqueueListResponse(DriveChangesPage(
+            changes: [
+                DriveChange(
+                    fileId: cachedId,
+                    modifiedTime: "2026-05-17T08:00:00.000Z",
+                    parents: ["catalog-folder"]
+                )
+            ],
+            newStartPageToken: "after-catalog-change"
+        ))
+        let (poller, _) = makePoller(
+            catalog: catalog,
+            fetcher: fetcher,
+            cachedCatalogFileId: cachedId
+        )
+
+        let outcome = try await poller.pollOnce()
+
+        switch outcome {
+        case .catalogChanged(let driveFileId, let modifiedTime, let pageToken):
+            XCTAssertEqual(driveFileId, cachedId)
+            XCTAssertEqual(modifiedTime, "2026-05-17T08:00:00.000Z")
+            XCTAssertEqual(pageToken, "after-catalog-change")
+        default:
+            XCTFail("expected .catalogChanged, got \(outcome)")
+        }
+    }
+
+    func testCatalogChangeWithStaleLastPublishProducesConflict() async throws {
+        // Conflict detection has two branches: (a) `Debouncer.hasPending`
+        // is true (covers in-flight edits in the current session) and
+        // (b) the remote `modifiedTime` doesn't match the one we
+        // recorded on our last publish (covers "another machine wrote
+        // after us"). This test exercises (b); (a) is tested via the
+        // CatalogPublisher.hasPendingChanges path in
+        // CatalogPublisherTests.
+        let catalog = try makeCatalog()
+        try catalog.saveDrivePageToken("stored")
+        try catalog.saveLastPublishedCatalogModifiedTime("2026-05-16T08:00:00.000Z")
+        let fetcher = StubDriveChangesFetcher()
+        let cachedId = "drive-catalog-abc"
+        fetcher.enqueueListResponse(DriveChangesPage(
+            changes: [
+                DriveChange(
+                    fileId: cachedId,
+                    modifiedTime: "2026-05-17T08:00:00.000Z"
+                )
+            ],
+            newStartPageToken: "after-catalog-change"
+        ))
+        let (poller, _) = makePoller(
+            catalog: catalog,
+            fetcher: fetcher,
+            cachedCatalogFileId: cachedId
+        )
+
+        let outcome = try await poller.pollOnce()
+
+        switch outcome {
+        case .conflict(let localPending, let remoteFileId, let modifiedTime, _):
+            XCTAssertFalse(localPending)
+            XCTAssertEqual(remoteFileId, cachedId)
+            XCTAssertEqual(modifiedTime, "2026-05-17T08:00:00.000Z")
+        default:
+            XCTFail("expected .conflict, got \(outcome)")
+        }
+    }
+
+    func testCatalogChangeWithPendingDebouncerProducesConflict() async throws {
+        // Exercises the (a) branch of conflict detection: the publisher
+        // has a debounced publish queued (so we have unwritten local
+        // edits since the last successful publish). A naive reload here
+        // would clobber those edits, so the poller flags conflict.
+        let catalog = try makeCatalog()
+        try catalog.saveDrivePageToken("stored")
+        let fetcher = StubDriveChangesFetcher()
+        let cachedId = "drive-catalog-abc"
+        fetcher.enqueueListResponse(DriveChangesPage(
+            changes: [
+                DriveChange(
+                    fileId: cachedId,
+                    modifiedTime: "2026-05-17T08:00:00.000Z"
+                )
+            ],
+            newStartPageToken: "after-catalog-change"
+        ))
+        // A long-debounce publisher with a queued trigger but a stub
+        // uploader so the fire path never actually runs.
+        let uploader = StubCatalogUploader(behavior: .alwaysSucceed(
+            CatalogUploadResult(driveFileId: "x", uploadedBytes: 0, wasCreate: false)
+        ))
+        let publisher = CatalogPublisher(
+            catalog: catalog,
+            uploader: uploader,
+            fileIdStore: InMemoryDriveFileIdStore(),
+            snapshotDirectory: FileManager.default.temporaryDirectory,
+            debounceInterval: .seconds(60),
+            maxDebounceInterval: .seconds(600)
+        )
+        await publisher.start()
+        publisher.scheduleDebouncedPublish()
+        // Allow the detached task that bridges into the publisher actor
+        // to land before we poll — otherwise `hasPendingChanges()` may
+        // race and return false.
+        try await Task.sleep(for: .milliseconds(50))
+
+        let store = InMemoryDriveFileIdStore(initial: cachedId)
+        let poller = ChangePoller(
+            catalog: catalog,
+            fetcher: fetcher,
+            publisher: publisher,
+            fileIdStore: store
+        )
+
+        let outcome = try await poller.pollOnce()
+
+        switch outcome {
+        case .conflict(let localPending, let remoteFileId, _, _):
+            XCTAssertTrue(localPending)
+            XCTAssertEqual(remoteFileId, cachedId)
+        default:
+            XCTFail("expected .conflict, got \(outcome)")
+        }
+        await publisher.stop()
+    }
+
+    func testOriginalsOnlyChangeProducesOriginalsChangedOnly() async throws {
+        let catalog = try makeCatalog()
+        try catalog.saveDrivePageToken("stored")
+        let fetcher = StubDriveChangesFetcher()
+        fetcher.enqueueListResponse(DriveChangesPage(
+            changes: [
+                DriveChange(fileId: "asset-1"),
+                DriveChange(fileId: "asset-2"),
+            ],
+            newStartPageToken: "after-originals"
+        ))
+        let (poller, _) = makePoller(
+            catalog: catalog,
+            fetcher: fetcher,
+            cachedCatalogFileId: "drive-catalog-abc"
+        )
+
+        let outcome = try await poller.pollOnce()
+
+        switch outcome {
+        case .originalsChangedOnly(let addedCount, let pageToken):
+            XCTAssertEqual(addedCount, 2)
+            XCTAssertEqual(pageToken, "after-originals")
+        default:
+            XCTFail("expected .originalsChangedOnly, got \(outcome)")
+        }
+    }
+
+    // MARK: - Pagination
+
+    func testPaginatedChangesFollowNextPageTokenBeforePersisting() async throws {
+        let catalog = try makeCatalog()
+        try catalog.saveDrivePageToken("stored")
+        let fetcher = StubDriveChangesFetcher()
+        fetcher.enqueueListResponse(DriveChangesPage(
+            changes: [DriveChange(fileId: "asset-1")],
+            nextPageToken: "page-2-token",
+            newStartPageToken: nil
+        ))
+        fetcher.enqueueListResponse(DriveChangesPage(
+            changes: [DriveChange(fileId: "asset-2")],
+            newStartPageToken: "final-token"
+        ))
+        let (poller, _) = makePoller(catalog: catalog, fetcher: fetcher)
+
+        let outcome = try await poller.pollOnce()
+
+        switch outcome {
+        case .originalsChangedOnly(let addedCount, let pageToken):
+            XCTAssertEqual(addedCount, 2)
+            XCTAssertEqual(pageToken, "final-token")
+        default:
+            XCTFail("expected .originalsChangedOnly, got \(outcome)")
+        }
+        XCTAssertEqual(fetcher.listCalls, ["stored", "page-2-token"])
+        XCTAssertEqual(try catalog.loadDrivePageToken(), "final-token")
+    }
+
+    // MARK: - Error path
+
+    func testListChangesFailurePreservesStoredToken() async throws {
+        let catalog = try makeCatalog()
+        try catalog.saveDrivePageToken("stored")
+        let fetcher = StubDriveChangesFetcher()
+        fetcher.enqueueListError(.changesFetchFailed(underlying: "boom"))
+        let (poller, _) = makePoller(catalog: catalog, fetcher: fetcher)
+
+        do {
+            _ = try await poller.pollOnce()
+            XCTFail("expected throw")
+        } catch let error as SyncEngineError {
+            if case .changesFetchFailed = error {
+                // expected
+            } else {
+                XCTFail("expected .changesFetchFailed, got \(error)")
+            }
+        }
+        XCTAssertEqual(
+            try catalog.loadDrivePageToken(),
+            "stored",
+            "stored token must not be mutated on failure"
+        )
+    }
+}
+

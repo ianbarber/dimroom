@@ -33,6 +33,8 @@ public enum Command: Codable, Sendable, Equatable {
     case fetchOriginal(assetId: UUID)
     case setEditParameter(assetId: UUID, parameter: String, value: Double)
     case resetEditParameter(assetId: UUID, parameter: String)
+    case setEditFlag(assetId: UUID, parameter: String, value: Bool)
+    case resetEditFlag(assetId: UUID, parameter: String)
     /// Set a single index of an array-valued edit parameter (e.g.
     /// `hueShift`, `hslSaturation`, `hslLuminance`). Separate from
     /// `setEditParameter` because the keypath surface only addresses
@@ -47,6 +49,10 @@ public enum Command: Codable, Sendable, Equatable {
     /// CGPoint type.
     case setCurvePoints(assetId: UUID, channel: String, pointsJSON: String)
     case resetCurve(assetId: UUID, channel: String)
+    /// Switch the Develop curve-editor channel picker
+    /// (Luminance / Red / Green / Blue). Affects which curve is rendered
+    /// on the editor canvas; does not mutate `EditState`.
+    case selectCurveChannel(channel: String)
     case undo
     case redo
     case selectAssets(ids: [UUID])
@@ -83,6 +89,10 @@ public enum Command: Codable, Sendable, Equatable {
     /// in-flight set so the flow can verify late-tail behaviour.
     /// No-op outside harness mode with `DIMROOM_HARNESS_STUB_DOWNLOADER=hold-until-released`.
     case releaseHeldDownloads
+    /// Force a single Drive `changes.list` poll and return the
+    /// classified outcome. Used by Layer C delta-sync flows so they
+    /// don't have to wait for the periodic 5-minute tick.
+    case syncFromDrive
     /// Runs `CatalogPublisher.restoreIfNeeded` against the live
     /// uploader (or the local-file stub when
     /// `DIMROOM_HARNESS_STUB_REMOTE_CATALOG` is set). `confirm`
@@ -127,6 +137,7 @@ public enum Command: Codable, Sendable, Equatable {
         case applyEdits
         case parameter
         case value
+        case flagValue
         case index
         case channel
         case pointsJSON
@@ -171,10 +182,13 @@ public enum Command: Codable, Sendable, Equatable {
         case fetchOriginal
         case setEditParameter
         case resetEditParameter
+        case setEditFlag
+        case resetEditFlag
         case setEditArrayParameter
         case resetEditArrayParameter
         case setCurvePoints
         case resetCurve
+        case selectCurveChannel
         case undo
         case redo
         case selectAssets
@@ -196,6 +210,7 @@ public enum Command: Codable, Sendable, Equatable {
         case simulateDriveAuthFailure
         case postMenuAction
         case releaseHeldDownloads
+        case syncFromDrive
         case restoreCatalogFromDrive
         case triggerExportMenu
         case completeExportSheet
@@ -303,6 +318,15 @@ public enum Command: Codable, Sendable, Equatable {
             let assetId = try container.decode(UUID.self, forKey: .assetId)
             let parameter = try container.decode(String.self, forKey: .parameter)
             self = .resetEditParameter(assetId: assetId, parameter: parameter)
+        case .setEditFlag:
+            let assetId = try container.decode(UUID.self, forKey: .assetId)
+            let parameter = try container.decode(String.self, forKey: .parameter)
+            let value = try container.decode(Bool.self, forKey: .flagValue)
+            self = .setEditFlag(assetId: assetId, parameter: parameter, value: value)
+        case .resetEditFlag:
+            let assetId = try container.decode(UUID.self, forKey: .assetId)
+            let parameter = try container.decode(String.self, forKey: .parameter)
+            self = .resetEditFlag(assetId: assetId, parameter: parameter)
         case .setEditArrayParameter:
             let assetId = try container.decode(UUID.self, forKey: .assetId)
             let parameter = try container.decode(String.self, forKey: .parameter)
@@ -323,6 +347,9 @@ public enum Command: Codable, Sendable, Equatable {
             let assetId = try container.decode(UUID.self, forKey: .assetId)
             let channel = try container.decode(String.self, forKey: .channel)
             self = .resetCurve(assetId: assetId, channel: channel)
+        case .selectCurveChannel:
+            let channel = try container.decode(String.self, forKey: .channel)
+            self = .selectCurveChannel(channel: channel)
         case .undo:
             self = .undo
         case .redo:
@@ -375,6 +402,8 @@ public enum Command: Codable, Sendable, Equatable {
             self = .postMenuAction(name: name)
         case .releaseHeldDownloads:
             self = .releaseHeldDownloads
+        case .syncFromDrive:
+            self = .syncFromDrive
         case .restoreCatalogFromDrive:
             let confirm = try container.decodeIfPresent(Bool.self, forKey: .confirm) ?? true
             self = .restoreCatalogFromDrive(confirm: confirm)
@@ -482,6 +511,15 @@ public enum Command: Codable, Sendable, Equatable {
             try container.encode(CommandType.resetEditParameter, forKey: .type)
             try container.encode(assetId, forKey: .assetId)
             try container.encode(parameter, forKey: .parameter)
+        case .setEditFlag(let assetId, let parameter, let value):
+            try container.encode(CommandType.setEditFlag, forKey: .type)
+            try container.encode(assetId, forKey: .assetId)
+            try container.encode(parameter, forKey: .parameter)
+            try container.encode(value, forKey: .flagValue)
+        case .resetEditFlag(let assetId, let parameter):
+            try container.encode(CommandType.resetEditFlag, forKey: .type)
+            try container.encode(assetId, forKey: .assetId)
+            try container.encode(parameter, forKey: .parameter)
         case .setEditArrayParameter(let assetId, let parameter, let index, let value):
             try container.encode(CommandType.setEditArrayParameter, forKey: .type)
             try container.encode(assetId, forKey: .assetId)
@@ -501,6 +539,9 @@ public enum Command: Codable, Sendable, Equatable {
         case .resetCurve(let assetId, let channel):
             try container.encode(CommandType.resetCurve, forKey: .type)
             try container.encode(assetId, forKey: .assetId)
+            try container.encode(channel, forKey: .channel)
+        case .selectCurveChannel(let channel):
+            try container.encode(CommandType.selectCurveChannel, forKey: .type)
             try container.encode(channel, forKey: .channel)
         case .undo:
             try container.encode(CommandType.undo, forKey: .type)
@@ -554,6 +595,8 @@ public enum Command: Codable, Sendable, Equatable {
             try container.encode(name, forKey: .name)
         case .releaseHeldDownloads:
             try container.encode(CommandType.releaseHeldDownloads, forKey: .type)
+        case .syncFromDrive:
+            try container.encode(CommandType.syncFromDrive, forKey: .type)
         case .restoreCatalogFromDrive(let confirm):
             try container.encode(CommandType.restoreCatalogFromDrive, forKey: .type)
             try container.encode(confirm, forKey: .confirm)

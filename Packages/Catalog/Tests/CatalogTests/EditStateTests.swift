@@ -42,6 +42,11 @@ final class EditStateTests: XCTestCase {
         XCTAssertEqual(state.vignetteAmount, 0)
         XCTAssertEqual(state.vignetteRoundness, 50)
         XCTAssertEqual(state.vignetteSoftness, 50)
+        XCTAssertEqual(state.splitToneHighlightHue, 0)
+        XCTAssertEqual(state.splitToneHighlightSaturation, 0)
+        XCTAssertEqual(state.splitToneShadowHue, 0)
+        XCTAssertEqual(state.splitToneShadowSaturation, 0)
+        XCTAssertEqual(state.splitToneBalance, 0)
         XCTAssertEqual(state.hueShift, EditState.hslIdentity)
         XCTAssertEqual(state.hslSaturation, EditState.hslIdentity)
         XCTAssertEqual(state.hslLuminance, EditState.hslIdentity)
@@ -50,6 +55,11 @@ final class EditStateTests: XCTestCase {
         XCTAssertEqual(state.redCurvePoints, EditState.identityCurve)
         XCTAssertEqual(state.greenCurvePoints, EditState.identityCurve)
         XCTAssertEqual(state.blueCurvePoints, EditState.identityCurve)
+        XCTAssertEqual(state.perspectiveVertical, 0)
+        XCTAssertEqual(state.perspectiveHorizontal, 0)
+        XCTAssertEqual(state.perspectiveRotation, 0)
+        XCTAssertFalse(state.chromaticAberration)
+        XCTAssertFalse(state.lensVignette)
         XCTAssertNil(state.cropRect)
         XCTAssertNil(state.cropAngle)
     }
@@ -128,12 +138,22 @@ final class EditStateTests: XCTestCase {
             saturation: -5,
             luminanceNoiseReduction: 35,
             chrominanceNoiseReduction: 55,
+            splitToneHighlightHue: 30,
+            splitToneHighlightSaturation: 40,
+            splitToneShadowHue: 210,
+            splitToneShadowSaturation: 30,
+            splitToneBalance: 20,
             vignetteAmount: -40,
             vignetteRoundness: 70,
             vignetteSoftness: 30,
             hueShift: [12, -8, 0, 25, 0, -40, 6, 0],
             hslSaturation: [0, 50, 0, 0, -30, 0, 0, 20],
             hslLuminance: [-10, 0, 0, 15, 0, 0, 0, 0],
+            perspectiveVertical: 35,
+            perspectiveHorizontal: -22,
+            perspectiveRotation: 4.5,
+            chromaticAberration: true,
+            lensVignette: true,
             cropRect: CGRect(x: 0.1, y: 0.2, width: 0.6, height: 0.5),
             cropAngle: 2.5
         )
@@ -176,9 +196,19 @@ final class EditStateTests: XCTestCase {
         XCTAssertEqual(decoded.vignetteAmount, 0)
         XCTAssertEqual(decoded.vignetteRoundness, 50)
         XCTAssertEqual(decoded.vignetteSoftness, 50)
+        XCTAssertEqual(decoded.splitToneHighlightHue, 0)
+        XCTAssertEqual(decoded.splitToneHighlightSaturation, 0)
+        XCTAssertEqual(decoded.splitToneShadowHue, 0)
+        XCTAssertEqual(decoded.splitToneShadowSaturation, 0)
+        XCTAssertEqual(decoded.splitToneBalance, 0)
         XCTAssertEqual(decoded.hueShift, EditState.hslIdentity)
         XCTAssertEqual(decoded.hslSaturation, EditState.hslIdentity)
         XCTAssertEqual(decoded.hslLuminance, EditState.hslIdentity)
+        XCTAssertEqual(decoded.perspectiveVertical, 0)
+        XCTAssertEqual(decoded.perspectiveHorizontal, 0)
+        XCTAssertEqual(decoded.perspectiveRotation, 0)
+        XCTAssertFalse(decoded.chromaticAberration)
+        XCTAssertFalse(decoded.lensVignette)
     }
 
     func testHSLLengthMismatchPadsToEight() throws {
@@ -211,12 +241,18 @@ final class EditStateTests: XCTestCase {
         let json = String(data: data, encoding: .utf8)!
 
         // Keys should be alphabetically ordered
-        let keys = ["blacks", "blueCurvePoints", "chrominanceNoiseReduction", "clarity", "contrast",
-                     "exposure", "greenCurvePoints", "highlights", "hslLuminance", "hslSaturation",
-                     "hueShift", "luminanceNoiseReduction",
-                     "redCurvePoints", "saturation", "shadows", "sharpening", "temperature", "tint",
-                     "toneCurvePoints", "vibrance", "vignetteAmount", "vignetteRoundness", "vignetteSoftness",
-                     "whites"]
+        let keys = ["blacks", "blueCurvePoints", "chromaticAberration", "chrominanceNoiseReduction",
+                     "clarity", "contrast", "exposure", "greenCurvePoints", "highlights",
+                     "hslLuminance", "hslSaturation", "hueShift", "lensVignette",
+                     "luminanceNoiseReduction",
+                     "perspectiveHorizontal", "perspectiveRotation", "perspectiveVertical",
+                     "redCurvePoints", "saturation", "shadows", "sharpening",
+                     "splitToneBalance", "splitToneHighlightHue",
+                     "splitToneHighlightSaturation", "splitToneShadowHue",
+                     "splitToneShadowSaturation",
+                     "temperature", "tint", "toneCurvePoints",
+                     "vibrance", "vignetteAmount", "vignetteRoundness",
+                     "vignetteSoftness", "whites"]
         var lastIndex = json.startIndex
         for key in keys {
             guard let range = json.range(of: "\"\(key)\"", range: lastIndex..<json.endIndex) else {

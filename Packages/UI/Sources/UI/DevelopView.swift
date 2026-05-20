@@ -95,6 +95,22 @@ public struct DevelopView: View {
                 slider("Chrominance", keyPath: \.chrominanceNoiseReduction, range: 0...100, step: 1, identity: 0)
             }
 
+            hslSection
+
+            sliderSection("Split Toning") {
+                slider("Balance", keyPath: \.splitToneBalance, range: -100...100, step: 1, identity: 0)
+                Text("Highlights")
+                    .font(.system(size: 10, weight: .medium))
+                    .foregroundStyle(Color(white: 0.55))
+                slider("Hue", keyPath: \.splitToneHighlightHue, range: 0...360, step: 1, identity: 0)
+                slider("Saturation", keyPath: \.splitToneHighlightSaturation, range: 0...100, step: 1, identity: 0)
+                Text("Shadows")
+                    .font(.system(size: 10, weight: .medium))
+                    .foregroundStyle(Color(white: 0.55))
+                slider("Hue", keyPath: \.splitToneShadowHue, range: 0...360, step: 1, identity: 0)
+                slider("Saturation", keyPath: \.splitToneShadowSaturation, range: 0...100, step: 1, identity: 0)
+            }
+
             sliderSection("Vignette") {
                 slider("Amount", keyPath: \.vignetteAmount, range: -100...100, step: 1, identity: 0)
                 slider("Roundness", keyPath: \.vignetteRoundness, range: 0...100, step: 1, identity: 50)
@@ -102,6 +118,14 @@ public struct DevelopView: View {
             }
 
             hslSection
+
+            sliderSection("Geometry") {
+                slider("Vertical", keyPath: \.perspectiveVertical, range: -100...100, step: 1, identity: 0)
+                slider("Horizontal", keyPath: \.perspectiveHorizontal, range: -100...100, step: 1, identity: 0)
+                slider("Rotation", keyPath: \.perspectiveRotation, range: -180...180, step: 0.1, identity: 0)
+                flagToggle("Chromatic Aberration", keyPath: \.chromaticAberration)
+                flagToggle("Lens Vignette", keyPath: \.lensVignette)
+            }
         }
         .animation(.easeOut(duration: 0.25), value: viewModel.replaySequence)
     }
@@ -252,6 +276,23 @@ public struct DevelopView: View {
             ),
             onReset: { viewModel.resetParameter(keyPath) }
         )
+    }
+
+    private func flagToggle(
+        _ label: String,
+        keyPath: WritableKeyPath<EditState, Bool>
+    ) -> some View {
+        Toggle(
+            isOn: Binding(
+                get: { viewModel.editState[keyPath: keyPath] },
+                set: { viewModel.setFlag(keyPath, value: $0) }
+            )
+        ) {
+            Text(label)
+                .font(.system(size: 12))
+                .foregroundStyle(Color(white: 0.85))
+        }
+        .toggleStyle(.checkbox)
     }
 
     // MARK: - Preview

@@ -26,6 +26,7 @@ final class HarnessController: @unchecked Sendable {
     private let undoStack: UndoStack?
     private let catalogPublisher: CatalogPublisher?
     private let driveAuthState: DriveAuthState?
+    private let changePoller: ChangePoller?
     private let catalogRestoreUploader: (any CatalogUploading)?
     private let catalogRestorePath: String?
     private let catalogRestoreFileIdStore: (any DriveFileIdStore)?
@@ -46,6 +47,7 @@ final class HarnessController: @unchecked Sendable {
         undoStack: UndoStack? = nil,
         catalogPublisher: CatalogPublisher? = nil,
         driveAuthState: DriveAuthState? = nil,
+        changePoller: ChangePoller? = nil,
         catalogRestoreUploader: (any CatalogUploading)? = nil,
         catalogRestorePath: String? = nil,
         catalogRestoreFileIdStore: (any DriveFileIdStore)? = nil
@@ -64,6 +66,7 @@ final class HarnessController: @unchecked Sendable {
         self.undoStack = undoStack
         self.catalogPublisher = catalogPublisher
         self.driveAuthState = driveAuthState
+        self.changePoller = changePoller
         self.catalogRestoreUploader = catalogRestoreUploader
         self.catalogRestorePath = catalogRestorePath
         self.catalogRestoreFileIdStore = catalogRestoreFileIdStore
@@ -324,6 +327,9 @@ final class HarnessController: @unchecked Sendable {
             HoldUntilReleasedHarnessDownloader.shared.release()
             return .ok()
 
+        case .syncFromDrive:
+            return await handleSyncFromDrive()
+
         case .restoreCatalogFromDrive(let confirm):
             return await handleRestoreCatalogFromDrive(confirm: confirm)
         }
@@ -581,6 +587,58 @@ final class HarnessController: @unchecked Sendable {
             return .error("upload failed: \(message)")
         default:
             return .error("upload ended in unexpected phase")
+        }
+    }
+
+    // MARK: - Delta sync
+
+    private func handleSyncFromDrive() async -> Response {
+        guard let changePoller else {
+            return .error("change poller not configured (drive not authenticated)")
+        }
+        do {
+            let outcome = try await changePoller.pollOnce()
+            return .ok(data: Self.encode(outcome: outcome))
+        } catch let error as SyncEngineError {
+            return .error("syncFromDrive failed: \(error)")
+        } catch {
+            return .error("syncFromDrive failed: \(error.localizedDescription)")
+        }
+    }
+
+    private static func encode(outcome: DeltaSyncOutcome) -> AnyCodableValue {
+        switch outcome {
+        case .bootstrapped(let pageToken):
+            return .dictionary([
+                "status": .string("bootstrapped"),
+                "pageToken": .string(pageToken),
+            ])
+        case .noChanges(let pageToken):
+            return .dictionary([
+                "status": .string("noChanges"),
+                "pageToken": .string(pageToken),
+            ])
+        case .catalogChanged(let driveFileId, let modifiedTime, let pageToken):
+            return .dictionary([
+                "status": .string("catalogChanged"),
+                "driveFileId": .string(driveFileId),
+                "modifiedTime": modifiedTime.map(AnyCodableValue.string) ?? .null,
+                "pageToken": .string(pageToken),
+            ])
+        case .conflict(let localPending, let remoteFileId, let modifiedTime, let pageToken):
+            return .dictionary([
+                "status": .string("conflict"),
+                "localPending": .bool(localPending),
+                "remoteFileId": .string(remoteFileId),
+                "modifiedTime": modifiedTime.map(AnyCodableValue.string) ?? .null,
+                "pageToken": .string(pageToken),
+            ])
+        case .originalsChangedOnly(let addedCount, let pageToken):
+            return .dictionary([
+                "status": .string("originalsChangedOnly"),
+                "addedCount": .int(addedCount),
+                "pageToken": .string(pageToken),
+            ])
         }
     }
 

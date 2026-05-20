@@ -83,6 +83,10 @@ public enum Command: Codable, Sendable, Equatable {
     /// in-flight set so the flow can verify late-tail behaviour.
     /// No-op outside harness mode with `DIMROOM_HARNESS_STUB_DOWNLOADER=hold-until-released`.
     case releaseHeldDownloads
+    /// Force a single Drive `changes.list` poll and return the
+    /// classified outcome. Used by Layer C delta-sync flows so they
+    /// don't have to wait for the periodic 5-minute tick.
+    case syncFromDrive
     /// Runs `CatalogPublisher.restoreIfNeeded` against the live
     /// uploader (or the local-file stub when
     /// `DIMROOM_HARNESS_STUB_REMOTE_CATALOG` is set). `confirm`
@@ -179,6 +183,7 @@ public enum Command: Codable, Sendable, Equatable {
         case simulateDriveAuthFailure
         case postMenuAction
         case releaseHeldDownloads
+        case syncFromDrive
         case restoreCatalogFromDrive
     }
 
@@ -356,6 +361,8 @@ public enum Command: Codable, Sendable, Equatable {
             self = .postMenuAction(name: name)
         case .releaseHeldDownloads:
             self = .releaseHeldDownloads
+        case .syncFromDrive:
+            self = .syncFromDrive
         case .restoreCatalogFromDrive:
             let confirm = try container.decodeIfPresent(Bool.self, forKey: .confirm) ?? true
             self = .restoreCatalogFromDrive(confirm: confirm)
@@ -528,6 +535,8 @@ public enum Command: Codable, Sendable, Equatable {
             try container.encode(name, forKey: .name)
         case .releaseHeldDownloads:
             try container.encode(CommandType.releaseHeldDownloads, forKey: .type)
+        case .syncFromDrive:
+            try container.encode(CommandType.syncFromDrive, forKey: .type)
         case .restoreCatalogFromDrive(let confirm):
             try container.encode(CommandType.restoreCatalogFromDrive, forKey: .type)
             try container.encode(confirm, forKey: .confirm)

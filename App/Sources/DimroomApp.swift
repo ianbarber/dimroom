@@ -436,6 +436,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     private var catalogPublisher: CatalogPublisher?
     private var catalogUploader: DriveCatalogUploader?
     private var driveFileIdStore: FileSystemDriveFileIdStore?
+    private var changePoller: ChangePoller?
+    private var changePollerEventsTask: Task<Void, Never>?
     private var driveReauthCancellable: AnyCancellable?
     /// Catalog path resolved at launch. Stashed so the harness restore
     /// command can re-run `restoreIfNeeded` against the same local path.
@@ -590,6 +592,42 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
                     publisher?.scheduleDebouncedPublish()
                 }
                 Task { await publisher.start() }
+
+                let fetcher: any DriveChangesFetching
+                if let fixturePath = ProcessInfo.processInfo.environment[
+                    "DIMROOM_HARNESS_DRIVE_CHANGES_FIXTURE"
+                ] {
+                    fetcher = HarnessStubChangesFetcher(fixturePath: fixturePath)
+                } else {
+                    fetcher = DriveChangesClient(session: session)
+                }
+                let poller = ChangePoller(
+                    catalog: resolvedCatalog,
+                    fetcher: fetcher,
+                    publisher: publisher,
+                    fileIdStore: driveFileIdStore ?? FileSystemDriveFileIdStore(
+                        path: FileSystemDriveFileIdStore.defaultPath()
+                    )
+                )
+                self.changePoller = poller
+                // Harness flows drive `pollOnce()` directly through
+                // `syncFromDrive` and the controller encodes the
+                // outcome back to the test — racing the periodic loop
+                // would make those assertions non-deterministic, and
+                // an NSAlert on a poll-driven tick would block the
+                // harness socket.
+                if !args.contains("--harness") {
+                    // Subscribe before start() so we don't miss the
+                    // bootstrap event from the periodic loop's first
+                    // tick.
+                    changePollerEventsTask = Task { @MainActor [weak self] in
+                        let stream = await poller.events()
+                        for await outcome in stream {
+                            self?.handleDeltaSyncOutcome(outcome)
+                        }
+                    }
+                    Task { await poller.start() }
+                }
             }
         }
 
@@ -642,6 +680,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             undoStack: undoStack,
             catalogPublisher: catalogPublisher,
             driveAuthState: driveAuthState,
+            changePoller: changePoller,
             catalogRestoreUploader: restoreUploader,
             catalogRestorePath: catalogPath,
             catalogRestoreFileIdStore: fileIdStore
@@ -658,6 +697,25 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             }
         } catch {
             print("[Dimroom] Failed to start harness server: \(error)")
+        }
+    }
+
+    func applicationDidBecomeActive(_ notification: Notification) {
+        guard let poller = changePoller else { return }
+        let args = ProcessInfo.processInfo.arguments
+        if args.contains("--harness") { return }
+        Task { await poller.start() }
+    }
+
+    func applicationWillResignActive(_ notification: Notification) {
+        guard let poller = changePoller else { return }
+        Task { await poller.stop() }
+    }
+
+    func applicationWillTerminate(_ notification: Notification) {
+        changePollerEventsTask?.cancel()
+        if let poller = changePoller {
+            Task { await poller.stop() }
         }
     }
 
@@ -737,6 +795,50 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         Task { @MainActor in
             await driveAuthState.disconnect()
         }
+    }
+
+    /// Routes a `DeltaSyncOutcome` from the periodic poller into the UI.
+    /// Bootstrap and steady-state results are silent; a catalog change
+    /// surfaces a reload prompt; a conflict surfaces a warning alert.
+    /// Reload-in-place is deferred to a follow-up — for now the alert
+    /// just tells the user to relaunch (see issue #235 risks).
+    func handleDeltaSyncOutcome(_ outcome: DeltaSyncOutcome) {
+        switch outcome {
+        case .bootstrapped, .noChanges, .originalsChangedOnly:
+            return
+        case .catalogChanged(_, let modifiedTime, _):
+            presentCatalogChangedAlert(modifiedTime: modifiedTime)
+        case .conflict(let localPending, _, _, _):
+            presentSyncConflictAlert(localPending: localPending)
+        }
+    }
+
+    private func presentCatalogChangedAlert(modifiedTime: String?) {
+        let alert = NSAlert()
+        alert.messageText = "Catalog Updated on Google Drive"
+        var info = "Another machine published a newer catalog."
+        if let modifiedTime {
+            info += " Last modified \(modifiedTime)."
+        }
+        info += "\n\nRelaunch Dimroom to pick up the changes."
+        alert.informativeText = info
+        alert.alertStyle = .informational
+        alert.addButton(withTitle: "OK")
+        _ = alert.runModal()
+    }
+
+    private func presentSyncConflictAlert(localPending: Bool) {
+        let alert = NSAlert()
+        alert.messageText = "Drive Sync Conflict"
+        var info = "Both this catalog and the copy on Drive have changed since the last sync."
+        if localPending {
+            info += " You have local edits that haven't been published yet."
+        }
+        info += "\n\nLast-write-wins: the next publish will overwrite the remote catalog."
+        alert.informativeText = info
+        alert.alertStyle = .warning
+        alert.addButton(withTitle: "OK")
+        _ = alert.runModal()
     }
 
     /// Shows a one-shot alert when a DriveClient operation has failed
@@ -985,7 +1087,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     private static func describeRestoreError(_ error: SyncEngineError) -> String {
         switch error {
         case .restoreFailed(let underlying), .uploadFailed(let underlying),
-             .snapshotFailed(let underlying), .fileIdStoreFailed(let underlying):
+             .snapshotFailed(let underlying), .fileIdStoreFailed(let underlying),
+             .changesFetchFailed(let underlying), .pageTokenStoreFailed(let underlying):
             return underlying
         case .notAuthenticated:
             return "Not authenticated"

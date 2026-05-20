@@ -682,6 +682,10 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             ?? HarnessServer.defaultSocketPath
 
         let restoreUploader: (any CatalogUploading)? = stubCatalogUploader ?? catalogUploader
+        let tokenStoreKind = Self.chooseTokenStoreKind(
+            args: args,
+            env: ProcessInfo.processInfo.environment
+        ).rawValue
         let controller = HarnessController(
             router: router,
             catalog: resolvedCatalog,
@@ -700,7 +704,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             changePoller: changePoller,
             catalogRestoreUploader: restoreUploader,
             catalogRestorePath: catalogPath,
-            catalogRestoreFileIdStore: fileIdStore
+            catalogRestoreFileIdStore: fileIdStore,
+            tokenStoreKind: tokenStoreKind
         )
         do {
             try controller.start(socketPath: socketPath)
@@ -1384,15 +1389,28 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     /// because Main is parked on the semaphore). `DIMROOM_HARNESS_DRIVE_STUB`
     /// takes precedence so flows that explicitly want a stub client
     /// keep working.
+    ///
+    /// In `--harness` mode (with or without the stub) the `DriveClient`
+    /// is constructed with an `InMemoryTokenStore` so the Keychain is
+    /// never touched. SPM debug builds resign on every rebuild, which
+    /// invalidates the Keychain ACL and would otherwise pop a password
+    /// dialog on every harness run — see #260.
     private func resolveDriveClient() -> DriveClient? {
-        switch Self.harnessDriveStrategy(env: ProcessInfo.processInfo.environment) {
+        let args = ProcessInfo.processInfo.arguments
+        let env = ProcessInfo.processInfo.environment
+        switch Self.harnessDriveStrategy(env: env) {
         case .stubClient:
             return makeHarnessStubDriveClient()
         case .disabled:
             return nil
         case .useOAuthConfig:
             guard let config = try? OAuthConfig.load() else { return nil }
-            return DriveClient(config: config)
+            switch Self.chooseTokenStoreKind(args: args, env: env) {
+            case .inMemory, .stubInMemory:
+                return DriveClient(config: config, tokenStore: InMemoryTokenStore())
+            case .keychain:
+                return DriveClient(config: config)
+            }
         }
     }
 
@@ -1434,6 +1452,36 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             tokenStore: InMemoryTokenStore(),
             browserLauncher: HarnessStubBrowserLauncher()
         )
+    }
+
+    /// Pure helper that picks the token store backing `DriveClient`
+    /// from the launch arguments and environment. Extracted so Layer A
+    /// tests can pin the three branches without instantiating
+    /// `DriveClient` (which would touch the real Keychain on the
+    /// keychain branch).
+    ///
+    ///   - no `--harness` → `.keychain` (production OAuth)
+    ///   - `--harness` alone → `.inMemory` (real-OAuth-config path in
+    ///     a harness run; Keychain skipped to avoid the rebuild-resign
+    ///     prompt described in #260)
+    ///   - `--harness` + `DIMROOM_HARNESS_DRIVE_STUB` → `.stubInMemory`
+    ///     (in-memory + stub HTTPClient + stub browser; the existing
+    ///     `harness-drive-auth-flow.sh` path)
+    enum TokenStoreKind: String, Equatable {
+        case keychain
+        case inMemory = "in-memory"
+        case stubInMemory = "stub-in-memory"
+    }
+
+    nonisolated static func chooseTokenStoreKind(
+        args: [String],
+        env: [String: String]
+    ) -> TokenStoreKind {
+        let harness = args.contains("--harness")
+        let stub = env["DIMROOM_HARNESS_DRIVE_STUB"] != nil
+        if harness && stub { return .stubInMemory }
+        if harness { return .inMemory }
+        return .keychain
     }
 
     /// Returns a harness-specific downloader when the env var requests

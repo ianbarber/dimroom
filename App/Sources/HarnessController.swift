@@ -30,6 +30,11 @@ final class HarnessController: @unchecked Sendable {
     private let catalogRestoreUploader: (any CatalogUploading)?
     private let catalogRestorePath: String?
     private let catalogRestoreFileIdStore: (any DriveFileIdStore)?
+    /// Wire-format string identifying the token store backing the
+    /// `DriveClient` (`"keychain"`, `"in-memory"`, `"stub-in-memory"`).
+    /// Surfaced via `driveAuthState` so Layer C flows can assert that
+    /// harness runs never hit the Keychain (#260).
+    private let tokenStoreKind: String?
     private var server: HarnessServer?
 
     init(
@@ -50,7 +55,8 @@ final class HarnessController: @unchecked Sendable {
         changePoller: ChangePoller? = nil,
         catalogRestoreUploader: (any CatalogUploading)? = nil,
         catalogRestorePath: String? = nil,
-        catalogRestoreFileIdStore: (any DriveFileIdStore)? = nil
+        catalogRestoreFileIdStore: (any DriveFileIdStore)? = nil,
+        tokenStoreKind: String? = nil
     ) {
         self.router = router
         self.catalog = catalog
@@ -70,6 +76,7 @@ final class HarnessController: @unchecked Sendable {
         self.catalogRestoreUploader = catalogRestoreUploader
         self.catalogRestorePath = catalogRestorePath
         self.catalogRestoreFileIdStore = catalogRestoreFileIdStore
+        self.tokenStoreKind = tokenStoreKind
     }
 
     func start(socketPath: String = HarnessServer.defaultSocketPath) throws {
@@ -428,10 +435,14 @@ final class HarnessController: @unchecked Sendable {
 
     private func handleDriveAuthState() async -> Response {
         guard let driveAuthState else {
-            return .ok(data: .dictionary([
+            var payload: [String: AnyCodableValue] = [
                 "status": .string("disconnected"),
                 "configured": .bool(false),
-            ]))
+            ]
+            if let kind = tokenStoreKind {
+                payload["tokenStoreKind"] = .string(kind)
+            }
+            return .ok(data: .dictionary(payload))
         }
         let snapshot: (status: String, email: String?, needsReauthMessage: String?) = await MainActor.run {
             let message = driveAuthState.needsReauthMessage
@@ -454,6 +465,9 @@ final class HarnessController: @unchecked Sendable {
             payload["needsReauthMessage"] = .string(message)
         } else {
             payload["needsReauthMessage"] = .null
+        }
+        if let kind = tokenStoreKind {
+            payload["tokenStoreKind"] = .string(kind)
         }
         return .ok(data: .dictionary(payload))
     }

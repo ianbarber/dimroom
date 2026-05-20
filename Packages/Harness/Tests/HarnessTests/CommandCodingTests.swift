@@ -1143,6 +1143,21 @@ final class CommandCodingTests: XCTestCase {
         )
     }
 
+    func testSelectCurveChannelRoundTrip() throws {
+        for channel in ["luminance", "red", "green", "blue"] {
+            let command = Command.selectCurveChannel(channel: channel)
+            let data = try encoder.encode(command)
+            let decoded = try decoder.decode(Command.self, from: data)
+            XCTAssertEqual(command, decoded)
+        }
+    }
+
+    func testDecodeSelectCurveChannelFromJSON() throws {
+        let json = #"{"type":"selectCurveChannel","channel":"red"}"#
+        let command = try decoder.decode(Command.self, from: Data(json.utf8))
+        XCTAssertEqual(command, .selectCurveChannel(channel: "red"))
+    }
+
     // MARK: - releaseHeldDownloads
 
     func testReleaseHeldDownloadsRoundTrip() throws {

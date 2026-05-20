@@ -175,6 +175,7 @@ else:
 
 echo "=== set-curve-points luminance S-curve ==="
 "$CLI_BIN" set-curve-points "$ASSET_ID" luminance "[[0,0],[0.25,0.15],[0.75,0.85],[1,1]]" --socket "$SOCKET" >/dev/null
+"$CLI_BIN" select-curve-channel luminance --socket "$SOCKET" >/dev/null
 sleep 1
 "$CLI_BIN" screenshot "$SCREENSHOT_DIR/curves-luminance-s.png" --socket "$SOCKET" >/dev/null
 if [ ! -f "$SCREENSHOT_DIR/curves-luminance-s.png" ]; then
@@ -185,6 +186,7 @@ assert_curve_length luminance 4
 
 echo "=== set-curve-points red lift ==="
 "$CLI_BIN" set-curve-points "$ASSET_ID" red "[[0,0.05],[0.5,0.6],[1,1]]" --socket "$SOCKET" >/dev/null
+"$CLI_BIN" select-curve-channel red --socket "$SOCKET" >/dev/null
 sleep 1
 "$CLI_BIN" screenshot "$SCREENSHOT_DIR/curves-red.png" --socket "$SOCKET" >/dev/null
 if [ ! -f "$SCREENSHOT_DIR/curves-red.png" ]; then
@@ -207,6 +209,7 @@ assert_curve_identity red
 assert_curve_identity green
 assert_curve_identity blue
 
+"$CLI_BIN" select-curve-channel luminance --socket "$SOCKET" >/dev/null
 "$CLI_BIN" screenshot "$SCREENSHOT_DIR/curves-reset.png" --socket "$SOCKET" >/dev/null
 
 echo "=== quit ==="

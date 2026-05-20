@@ -49,6 +49,10 @@ public enum Command: Codable, Sendable, Equatable {
     /// CGPoint type.
     case setCurvePoints(assetId: UUID, channel: String, pointsJSON: String)
     case resetCurve(assetId: UUID, channel: String)
+    /// Switch the Develop curve-editor channel picker
+    /// (Luminance / Red / Green / Blue). Affects which curve is rendered
+    /// on the editor canvas; does not mutate `EditState`.
+    case selectCurveChannel(channel: String)
     case undo
     case redo
     case selectAssets(ids: [UUID])
@@ -167,6 +171,7 @@ public enum Command: Codable, Sendable, Equatable {
         case resetEditArrayParameter
         case setCurvePoints
         case resetCurve
+        case selectCurveChannel
         case undo
         case redo
         case selectAssets
@@ -323,6 +328,9 @@ public enum Command: Codable, Sendable, Equatable {
             let assetId = try container.decode(UUID.self, forKey: .assetId)
             let channel = try container.decode(String.self, forKey: .channel)
             self = .resetCurve(assetId: assetId, channel: channel)
+        case .selectCurveChannel:
+            let channel = try container.decode(String.self, forKey: .channel)
+            self = .selectCurveChannel(channel: channel)
         case .undo:
             self = .undo
         case .redo:
@@ -505,6 +513,9 @@ public enum Command: Codable, Sendable, Equatable {
         case .resetCurve(let assetId, let channel):
             try container.encode(CommandType.resetCurve, forKey: .type)
             try container.encode(assetId, forKey: .assetId)
+            try container.encode(channel, forKey: .channel)
+        case .selectCurveChannel(let channel):
+            try container.encode(CommandType.selectCurveChannel, forKey: .type)
             try container.encode(channel, forKey: .channel)
         case .undo:
             try container.encode(CommandType.undo, forKey: .type)

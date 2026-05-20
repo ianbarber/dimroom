@@ -56,6 +56,7 @@ fi
 
 echo "=== Launching app in harness mode ==="
 DIMROOM_HARNESS_SOCKET="$SOCKET" \
+DIMROOM_HARNESS_DISABLE_DRIVE=1 \
     "$APP_BIN" --harness \
     --fixture-catalog "$CATALOG_PATH" \
     --preview-cache "$PREVIEW_CACHE" &

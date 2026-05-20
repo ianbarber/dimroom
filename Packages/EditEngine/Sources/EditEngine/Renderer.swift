@@ -9,7 +9,9 @@ import Catalog
 ///
 /// Pipeline order:
 ///   1. Tone / colour: exposure, noise reduction, white balance, highlights+shadows,
-///      whites+blacks, contrast, clarity, sharpening, vibrance, saturation.
+///      whites+blacks, contrast, tone curves (luminance + per-channel RGB),
+///      clarity, sharpening, vibrance, saturation, HSL (hue/sat/luminance per
+///      colour range), split toning.
 ///   2. Geometric / lens stage: chromatic aberration correction, perspective +
 ///      fine rotation, lens-vignette correction, crop.
 ///   3. Creative vignette (applied after crop so the vignette tracks the

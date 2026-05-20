@@ -280,6 +280,10 @@ final class DevelopSnapshotTests: XCTestCase {
     /// Geometry group: keystone sliders pulled off zero plus both CA + lens
     /// vignette flags enabled. Pins the sidebar layout for the new group
     /// and proves the perspective transform renders into the preview.
+    ///
+    /// Renders at a taller frame than the other snapshots so the Geometry
+    /// group sits inside the sidebar's visible region — at the default
+    /// 1024×768 height the ScrollView clips above the new section.
     @MainActor
     func test_develop_geometry() async throws {
         let vm = try await makeActivatedViewModel(hash: "snap-geom")
@@ -291,7 +295,10 @@ final class DevelopSnapshotTests: XCTestCase {
         vm.setFlag(\.lensVignette, value: true)
         try await Task.sleep(nanoseconds: 300_000_000)
 
-        let image = renderFixedPixelImage(for: DevelopView(viewModel: vm))
+        let image = renderFixedPixelImage(
+            for: DevelopView(viewModel: vm),
+            size: CGSize(width: 1024, height: 1800)
+        )
 
         runAssertSnapshot {
             assertSnapshot(

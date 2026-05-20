@@ -36,6 +36,8 @@ struct DimroomCLI: ParsableCommand {
             Export.self,
             SetEditParameter.self,
             ResetEditParameter.self,
+            SetEditFlag.self,
+            ResetEditFlag.self,
             SetEditArrayParameter.self,
             ResetEditArrayParameter.self,
             SetCurvePoints.self,
@@ -535,7 +537,7 @@ extension DimroomCLI {
         @Argument(help: "The UUID of the asset.")
         var id: String
 
-        @Argument(help: "Parameter name (exposure, contrast, highlights, shadows, whites, blacks, temperature, tint, clarity, sharpening, vibrance, saturation, luminanceNoiseReduction, chrominanceNoiseReduction, splitToneHighlightHue, splitToneHighlightSaturation, splitToneShadowHue, splitToneShadowSaturation, splitToneBalance, vignetteAmount, vignetteRoundness, vignetteSoftness).")
+        @Argument(help: "Parameter name (exposure, contrast, highlights, shadows, whites, blacks, temperature, tint, clarity, sharpening, vibrance, saturation, luminanceNoiseReduction, chrominanceNoiseReduction, splitToneHighlightHue, splitToneHighlightSaturation, splitToneShadowHue, splitToneShadowSaturation, splitToneBalance, vignetteAmount, vignetteRoundness, vignetteSoftness, perspectiveVertical, perspectiveHorizontal, perspectiveRotation).")
         var parameter: String
 
         @Argument(help: "The value to set.")
@@ -561,7 +563,7 @@ extension DimroomCLI {
         @Argument(help: "The UUID of the asset.")
         var id: String
 
-        @Argument(help: "Parameter name (exposure, contrast, highlights, shadows, whites, blacks, temperature, tint, clarity, sharpening, vibrance, saturation, luminanceNoiseReduction, chrominanceNoiseReduction, splitToneHighlightHue, splitToneHighlightSaturation, splitToneShadowHue, splitToneShadowSaturation, splitToneBalance, vignetteAmount, vignetteRoundness, vignetteSoftness).")
+        @Argument(help: "Parameter name (exposure, contrast, highlights, shadows, whites, blacks, temperature, tint, clarity, sharpening, vibrance, saturation, luminanceNoiseReduction, chrominanceNoiseReduction, splitToneHighlightHue, splitToneHighlightSaturation, splitToneShadowHue, splitToneShadowSaturation, splitToneBalance, vignetteAmount, vignetteRoundness, vignetteSoftness, perspectiveVertical, perspectiveHorizontal, perspectiveRotation).")
         var parameter: String
 
         @Option(name: .long, help: "Path to the harness socket.")
@@ -572,6 +574,55 @@ extension DimroomCLI {
                 throw ValidationError("Invalid UUID '\(id)'.")
             }
             try runCommand(.resetEditParameter(assetId: uuid, parameter: parameter), socket: socket)
+        }
+    }
+
+    struct SetEditFlag: ParsableCommand {
+        static let configuration = CommandConfiguration(
+            commandName: "set-edit-flag",
+            abstract: "Set a boolean edit flag on an asset (chromaticAberration, lensVignette)."
+        )
+
+        @Argument(help: "The UUID of the asset.")
+        var id: String
+
+        @Argument(help: "Flag name (chromaticAberration, lensVignette).")
+        var parameter: String
+
+        @Argument(help: "The value to set (true or false).")
+        var value: Bool
+
+        @Option(name: .long, help: "Path to the harness socket.")
+        var socket: String = HarnessServer.defaultSocketPath
+
+        func run() throws {
+            guard let uuid = UUID(uuidString: id) else {
+                throw ValidationError("Invalid UUID '\(id)'.")
+            }
+            try runCommand(.setEditFlag(assetId: uuid, parameter: parameter, value: value), socket: socket)
+        }
+    }
+
+    struct ResetEditFlag: ParsableCommand {
+        static let configuration = CommandConfiguration(
+            commandName: "reset-edit-flag",
+            abstract: "Reset a boolean edit flag on an asset to false."
+        )
+
+        @Argument(help: "The UUID of the asset.")
+        var id: String
+
+        @Argument(help: "Flag name (chromaticAberration, lensVignette).")
+        var parameter: String
+
+        @Option(name: .long, help: "Path to the harness socket.")
+        var socket: String = HarnessServer.defaultSocketPath
+
+        func run() throws {
+            guard let uuid = UUID(uuidString: id) else {
+                throw ValidationError("Invalid UUID '\(id)'.")
+            }
+            try runCommand(.resetEditFlag(assetId: uuid, parameter: parameter), socket: socket)
         }
     }
 

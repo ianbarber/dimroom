@@ -238,6 +238,12 @@ final class HarnessController: @unchecked Sendable {
         case .resetEditParameter(let assetId, let parameter):
             return await handleResetEditParameter(assetId: assetId, parameter: parameter)
 
+        case .setEditFlag(let assetId, let parameter, let value):
+            return await handleSetEditFlag(assetId: assetId, parameter: parameter, value: value)
+
+        case .resetEditFlag(let assetId, let parameter):
+            return await handleResetEditFlag(assetId: assetId, parameter: parameter)
+
         case .setEditArrayParameter(let assetId, let parameter, let index, let value):
             return await handleSetEditArrayParameter(assetId: assetId, parameter: parameter, index: index, value: value)
 
@@ -1091,6 +1097,46 @@ final class HarnessController: @unchecked Sendable {
         }
         await MainActor.run {
             developViewModel.resetParameter(keyPath)
+        }
+        return .ok()
+    }
+
+    private func handleSetEditFlag(assetId: UUID, parameter: String, value: Bool) async -> Response {
+        guard let keyPath = DevelopViewModel.keyPath(forFlag: parameter) else {
+            return .error("unknown flag: \(parameter)")
+        }
+        let alreadyActive: Bool = await MainActor.run {
+            if developViewModel.currentAssetId != assetId {
+                router.route = .develop
+                return false
+            }
+            return true
+        }
+        if !alreadyActive {
+            await developViewModel.activate(assetId: assetId)
+        }
+        await MainActor.run {
+            developViewModel.setFlag(keyPath, value: value)
+        }
+        return .ok()
+    }
+
+    private func handleResetEditFlag(assetId: UUID, parameter: String) async -> Response {
+        guard let keyPath = DevelopViewModel.keyPath(forFlag: parameter) else {
+            return .error("unknown flag: \(parameter)")
+        }
+        let alreadyActive: Bool = await MainActor.run {
+            if developViewModel.currentAssetId != assetId {
+                router.route = .develop
+                return false
+            }
+            return true
+        }
+        if !alreadyActive {
+            await developViewModel.activate(assetId: assetId)
+        }
+        await MainActor.run {
+            developViewModel.resetFlag(keyPath)
         }
         return .ok()
     }

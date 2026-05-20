@@ -66,6 +66,17 @@ public struct EditState: Codable, Sendable, Equatable {
     public var greenCurvePoints: [CGPoint]
     public var blueCurvePoints: [CGPoint]
 
+    // MARK: - Geometry
+
+    public var perspectiveVertical: Double
+    public var perspectiveHorizontal: Double
+    public var perspectiveRotation: Double
+
+    // MARK: - Lens Corrections
+
+    public var chromaticAberration: Bool
+    public var lensVignette: Bool
+
     // MARK: - Crop
 
     public var cropRect: CGRect?
@@ -104,6 +115,11 @@ public struct EditState: Codable, Sendable, Equatable {
         redCurvePoints: [CGPoint] = EditState.identityCurve,
         greenCurvePoints: [CGPoint] = EditState.identityCurve,
         blueCurvePoints: [CGPoint] = EditState.identityCurve,
+        perspectiveVertical: Double = 0,
+        perspectiveHorizontal: Double = 0,
+        perspectiveRotation: Double = 0,
+        chromaticAberration: Bool = false,
+        lensVignette: Bool = false,
         cropRect: CGRect? = nil,
         cropAngle: Double? = nil
     ) {
@@ -136,6 +152,11 @@ public struct EditState: Codable, Sendable, Equatable {
         self.redCurvePoints = redCurvePoints
         self.greenCurvePoints = greenCurvePoints
         self.blueCurvePoints = blueCurvePoints
+        self.perspectiveVertical = perspectiveVertical
+        self.perspectiveHorizontal = perspectiveHorizontal
+        self.perspectiveRotation = perspectiveRotation
+        self.chromaticAberration = chromaticAberration
+        self.lensVignette = lensVignette
         self.cropRect = cropRect
         self.cropAngle = cropAngle
     }
@@ -155,6 +176,8 @@ public struct EditState: Codable, Sendable, Equatable {
         case vignetteAmount, vignetteRoundness, vignetteSoftness
         case hueShift, hslSaturation, hslLuminance
         case toneCurvePoints, redCurvePoints, greenCurvePoints, blueCurvePoints
+        case perspectiveVertical, perspectiveHorizontal, perspectiveRotation
+        case chromaticAberration, lensVignette
         case cropRect, cropAngle
     }
 
@@ -190,6 +213,11 @@ public struct EditState: Codable, Sendable, Equatable {
             redCurvePoints: try c.decodeIfPresent([CGPoint].self, forKey: .redCurvePoints) ?? EditState.identityCurve,
             greenCurvePoints: try c.decodeIfPresent([CGPoint].self, forKey: .greenCurvePoints) ?? EditState.identityCurve,
             blueCurvePoints: try c.decodeIfPresent([CGPoint].self, forKey: .blueCurvePoints) ?? EditState.identityCurve,
+            perspectiveVertical: try c.decodeIfPresent(Double.self, forKey: .perspectiveVertical) ?? 0,
+            perspectiveHorizontal: try c.decodeIfPresent(Double.self, forKey: .perspectiveHorizontal) ?? 0,
+            perspectiveRotation: try c.decodeIfPresent(Double.self, forKey: .perspectiveRotation) ?? 0,
+            chromaticAberration: try c.decodeIfPresent(Bool.self, forKey: .chromaticAberration) ?? false,
+            lensVignette: try c.decodeIfPresent(Bool.self, forKey: .lensVignette) ?? false,
             cropRect: try c.decodeIfPresent(CGRect.self, forKey: .cropRect),
             cropAngle: try c.decodeIfPresent(Double.self, forKey: .cropAngle)
         )

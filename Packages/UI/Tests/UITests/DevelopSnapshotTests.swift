@@ -276,6 +276,34 @@ final class DevelopSnapshotTests: XCTestCase {
         await release.signal()
     }
 
+    /// Develop view with non-identity geometry settings. Exercises the new
+    /// Geometry group: keystone sliders pulled off zero plus both CA + lens
+    /// vignette flags enabled. Pins the sidebar layout for the new group
+    /// and proves the perspective transform renders into the preview.
+    @MainActor
+    func test_develop_geometry() async throws {
+        let vm = try await makeActivatedViewModel(hash: "snap-geom")
+
+        vm.setParameter(\.perspectiveVertical, value: 60)
+        vm.setParameter(\.perspectiveHorizontal, value: -30)
+        vm.setParameter(\.perspectiveRotation, value: 5)
+        vm.setFlag(\.chromaticAberration, value: true)
+        vm.setFlag(\.lensVignette, value: true)
+        try await Task.sleep(nanoseconds: 300_000_000)
+
+        let image = renderFixedPixelImage(for: DevelopView(viewModel: vm))
+
+        runAssertSnapshot {
+            assertSnapshot(
+                of: image,
+                as: .image(
+                    precision: Self.snapshotPrecision,
+                    perceptualPrecision: Self.snapshotPerceptualPrecision
+                )
+            )
+        }
+    }
+
     /// Develop view with HSL Hue axis selected and one band pushed.
     /// Locks the new HSL section's segmented picker, the tinted slider
     /// tracks, and the slider ordering.
@@ -371,6 +399,7 @@ final class DevelopSnapshotTests: XCTestCase {
             )
         }
     }
+
 
     /// Develop view with no selected asset — placeholder state.
     @MainActor

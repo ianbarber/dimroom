@@ -143,6 +143,46 @@ final class EditStateDescriptionTests: XCTestCase {
         )
     }
 
+    func testPerspectiveVerticalReportsSignedLabel() {
+        let previous = EditState()
+        var next = EditState()
+        next.perspectiveVertical = 40
+        XCTAssertEqual(
+            editParameterDescription(previous: previous, next: next),
+            "Perspective Vertical +40"
+        )
+    }
+
+    func testPerspectiveRotationReportsOneDecimal() {
+        let previous = EditState()
+        var next = EditState()
+        next.perspectiveRotation = -4.5
+        XCTAssertEqual(
+            editParameterDescription(previous: previous, next: next),
+            "Perspective Rotation -4.5"
+        )
+    }
+
+    func testChromaticAberrationToggleOn() {
+        let previous = EditState()
+        var next = EditState()
+        next.chromaticAberration = true
+        XCTAssertEqual(
+            editParameterDescription(previous: previous, next: next),
+            "Chromatic Aberration On"
+        )
+    }
+
+    func testLensVignetteToggleOff() {
+        var previous = EditState()
+        previous.lensVignette = true
+        let next = EditState()
+        XCTAssertEqual(
+            editParameterDescription(previous: previous, next: next),
+            "Lens Vignette Off"
+        )
+    }
+
     func testHSLHueSingleBandReportsRangeName() {
         let previous = EditState()
         var next = EditState()

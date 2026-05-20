@@ -230,6 +230,38 @@ final class CommandCodingTests: XCTestCase {
         XCTAssertEqual(command, .resetEditParameter(assetId: expected, parameter: "exposure"))
     }
 
+    func testSetEditFlagRoundTrip() throws {
+        let id = UUID(uuidString: "12345678-1234-1234-1234-123456789012")!
+        for (parameter, value) in [("chromaticAberration", true), ("lensVignette", false)] {
+            let command = Command.setEditFlag(assetId: id, parameter: parameter, value: value)
+            let data = try encoder.encode(command)
+            let decoded = try decoder.decode(Command.self, from: data)
+            XCTAssertEqual(command, decoded)
+        }
+    }
+
+    func testDecodeSetEditFlagFromJSON() throws {
+        let json = #"{"type":"setEditFlag","assetId":"12345678-1234-1234-1234-123456789012","parameter":"chromaticAberration","flagValue":true}"#
+        let command = try decoder.decode(Command.self, from: Data(json.utf8))
+        let expected = UUID(uuidString: "12345678-1234-1234-1234-123456789012")!
+        XCTAssertEqual(command, .setEditFlag(assetId: expected, parameter: "chromaticAberration", value: true))
+    }
+
+    func testResetEditFlagRoundTrip() throws {
+        let id = UUID(uuidString: "12345678-1234-1234-1234-123456789012")!
+        let command = Command.resetEditFlag(assetId: id, parameter: "lensVignette")
+        let data = try encoder.encode(command)
+        let decoded = try decoder.decode(Command.self, from: data)
+        XCTAssertEqual(command, decoded)
+    }
+
+    func testDecodeResetEditFlagFromJSON() throws {
+        let json = #"{"type":"resetEditFlag","assetId":"12345678-1234-1234-1234-123456789012","parameter":"lensVignette"}"#
+        let command = try decoder.decode(Command.self, from: Data(json.utf8))
+        let expected = UUID(uuidString: "12345678-1234-1234-1234-123456789012")!
+        XCTAssertEqual(command, .resetEditFlag(assetId: expected, parameter: "lensVignette"))
+    }
+
     // MARK: - Command JSON shape
 
     func testNavigateJSON() throws {

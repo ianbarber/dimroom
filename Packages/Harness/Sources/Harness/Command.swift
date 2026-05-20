@@ -33,6 +33,8 @@ public enum Command: Codable, Sendable, Equatable {
     case fetchOriginal(assetId: UUID)
     case setEditParameter(assetId: UUID, parameter: String, value: Double)
     case resetEditParameter(assetId: UUID, parameter: String)
+    case setEditFlag(assetId: UUID, parameter: String, value: Bool)
+    case resetEditFlag(assetId: UUID, parameter: String)
     /// Set a single index of an array-valued edit parameter (e.g.
     /// `hueShift`, `hslSaturation`, `hslLuminance`). Separate from
     /// `setEditParameter` because the keypath surface only addresses
@@ -114,6 +116,7 @@ public enum Command: Codable, Sendable, Equatable {
         case applyEdits
         case parameter
         case value
+        case flagValue
         case index
         case channel
         case pointsJSON
@@ -158,6 +161,8 @@ public enum Command: Codable, Sendable, Equatable {
         case fetchOriginal
         case setEditParameter
         case resetEditParameter
+        case setEditFlag
+        case resetEditFlag
         case setEditArrayParameter
         case resetEditArrayParameter
         case setCurvePoints
@@ -289,6 +294,15 @@ public enum Command: Codable, Sendable, Equatable {
             let assetId = try container.decode(UUID.self, forKey: .assetId)
             let parameter = try container.decode(String.self, forKey: .parameter)
             self = .resetEditParameter(assetId: assetId, parameter: parameter)
+        case .setEditFlag:
+            let assetId = try container.decode(UUID.self, forKey: .assetId)
+            let parameter = try container.decode(String.self, forKey: .parameter)
+            let value = try container.decode(Bool.self, forKey: .flagValue)
+            self = .setEditFlag(assetId: assetId, parameter: parameter, value: value)
+        case .resetEditFlag:
+            let assetId = try container.decode(UUID.self, forKey: .assetId)
+            let parameter = try container.decode(String.self, forKey: .parameter)
+            self = .resetEditFlag(assetId: assetId, parameter: parameter)
         case .setEditArrayParameter:
             let assetId = try container.decode(UUID.self, forKey: .assetId)
             let parameter = try container.decode(String.self, forKey: .parameter)
@@ -461,6 +475,15 @@ public enum Command: Codable, Sendable, Equatable {
             try container.encode(value, forKey: .value)
         case .resetEditParameter(let assetId, let parameter):
             try container.encode(CommandType.resetEditParameter, forKey: .type)
+            try container.encode(assetId, forKey: .assetId)
+            try container.encode(parameter, forKey: .parameter)
+        case .setEditFlag(let assetId, let parameter, let value):
+            try container.encode(CommandType.setEditFlag, forKey: .type)
+            try container.encode(assetId, forKey: .assetId)
+            try container.encode(parameter, forKey: .parameter)
+            try container.encode(value, forKey: .flagValue)
+        case .resetEditFlag(let assetId, let parameter):
+            try container.encode(CommandType.resetEditFlag, forKey: .type)
             try container.encode(assetId, forKey: .assetId)
             try container.encode(parameter, forKey: .parameter)
         case .setEditArrayParameter(let assetId, let parameter, let index, let value):

@@ -17,7 +17,17 @@ import Catalog
 public enum Renderer {
 
     /// Apply all edits described by `editState` to `source` and return the result.
-    public static func render(source: CIImage, editState: EditState) -> CIImage {
+    ///
+    /// `lensProfile` drives the chromatic-aberration and lens-vignette
+    /// correction magnitudes when those flags are enabled. Pass `nil` (the
+    /// default) to fall back to the conservative built-in placeholder used
+    /// when no profile is registered for the asset's lens model. Resolving
+    /// the profile is the caller's job — the renderer stays Asset-agnostic.
+    public static func render(
+        source: CIImage,
+        editState: EditState,
+        lensProfile: LensProfile? = nil
+    ) -> CIImage {
         var image = source
         image = applyExposure(image, ev: editState.exposure)
         image = applyNoiseReduction(
@@ -54,14 +64,22 @@ public enum Renderer {
             shadowSaturation: editState.splitToneShadowSaturation,
             balance: editState.splitToneBalance
         )
-        image = applyChromaticAberrationCorrection(image, enabled: editState.chromaticAberration)
+        image = applyChromaticAberrationCorrection(
+            image,
+            enabled: editState.chromaticAberration,
+            profile: lensProfile
+        )
         image = applyGeometryCorrections(
             image,
             vertical: editState.perspectiveVertical,
             horizontal: editState.perspectiveHorizontal,
             rotation: editState.perspectiveRotation
         )
-        image = applyLensVignetteCorrection(image, enabled: editState.lensVignette)
+        image = applyLensVignetteCorrection(
+            image,
+            enabled: editState.lensVignette,
+            profile: lensProfile
+        )
         image = applyCrop(image, rect: editState.cropRect, angle: editState.cropAngle)
         image = applyVignette(
             image,
@@ -416,27 +434,29 @@ public enum Renderer {
         return filter.outputImage!.cropped(to: extent)
     }
 
-    /// Auto-correct chromatic aberration. Without a lens profile this is a
-    /// uniform per-channel scale about the image centre — small enough to
-    /// avoid visible softening of in-focus areas but large enough to nudge
-    /// purple/green fringes on a typical fast-prime wide-open shot.
-    ///
-    /// Real auto-correction needs an EXIF lens-model lookup; that's tracked
-    /// for a later stage. Until then this is a placeholder that's honest
-    /// about being a placeholder.
-    private static func applyChromaticAberrationCorrection(_ image: CIImage, enabled: Bool) -> CIImage {
+    /// Auto-correct chromatic aberration via a uniform per-channel radial
+    /// scale about the image centre. When `profile` is non-nil the per-channel
+    /// scales come from the lens profile; otherwise we fall back to a
+    /// conservative built-in placeholder (±0.5 %) tuned to nudge fringes on
+    /// a typical fast-prime wide-open shot without visibly softening clean
+    /// images. Callers resolve the profile via `LensProfileLibrary.lookup`.
+    private static func applyChromaticAberrationCorrection(
+        _ image: CIImage,
+        enabled: Bool,
+        profile: LensProfile?
+    ) -> CIImage {
         guard enabled else { return image }
 
         let extent = image.extent
         let cx = extent.midX
         let cy = extent.midY
 
-        // Scale R and B about the centre by ±0.5 % — typical lateral CA on
-        // mid-range lenses is well under 1 % on the worst channel. Conservative
-        // enough to avoid visible scaling on a clean image; large enough to be
-        // measurable so this placeholder isn't a silent no-op.
-        let rScale: CGFloat = 0.995
-        let bScale: CGFloat = 1.005
+        // Scale R and B about the centre. Placeholder defaults (±0.5 %) are
+        // conservative — typical lateral CA on mid-range lenses is well
+        // under 1 % on the worst channel — but small enough to be a no-op
+        // on a clean image. Lens-profile values override per-asset.
+        let rScale: CGFloat = CGFloat(profile?.caRedScale ?? 0.995)
+        let bScale: CGFloat = CGFloat(profile?.caBlueScale ?? 1.005)
 
         func scaled(_ image: CIImage, factor: CGFloat) -> CIImage {
             let transform = CGAffineTransform(translationX: cx, y: cy)
@@ -471,25 +491,30 @@ public enum Renderer {
         return add(rOnly, add(gOnly, bOnly)).cropped(to: extent)
     }
 
-    /// Auto-correct natural lens vignetting (corner darkening) with a fixed
-    /// brightening profile centred on the frame. Distinct from the creative
-    /// `applyVignette` stage which intentionally darkens or lightens corners
-    /// — this stage flattens the lens's intrinsic falloff so the creative
-    /// vignette has a known starting point.
+    /// Auto-correct natural lens vignetting (corner darkening) with an
+    /// inverted brightening profile centred on the frame. Distinct from the
+    /// creative `applyVignette` stage which intentionally darkens or lightens
+    /// corners — this stage flattens the lens's intrinsic falloff so the
+    /// creative vignette has a known starting point.
     ///
-    /// Like CA correction, this is a placeholder until lens-profile data is
-    /// wired in. Apply a small inverted vignette: bright at the corners,
-    /// neutral at centre, so the multiply lifts shadowed corners without
-    /// touching the middle of the frame.
-    private static func applyLensVignetteCorrection(_ image: CIImage, enabled: Bool) -> CIImage {
+    /// When `profile` is non-nil the `CIVignette` parameters come from the
+    /// lens profile; otherwise we fall back to a conservative built-in
+    /// placeholder (-0.3 / 1.5) tuned to lift shadowed corners on a typical
+    /// fast-prime wide-open shot without blowing them out.
+    private static func applyLensVignetteCorrection(
+        _ image: CIImage,
+        enabled: Bool,
+        profile: LensProfile?
+    ) -> CIImage {
         guard enabled else { return image }
         let filter = CIFilter(name: "CIVignette")!
         filter.setValue(image, forKey: kCIInputImageKey)
         // Negative intensity inverts the vignette: corners brighten rather
-        // than darken. Conservative magnitude — anything stronger and a clean
-        // image gets blown corners.
-        filter.setValue(-0.3, forKey: "inputIntensity")
-        filter.setValue(1.5, forKey: "inputRadius")
+        // than darken. Placeholder magnitudes are conservative — anything
+        // stronger and a clean image gets blown corners. Lens-profile values
+        // override per-asset.
+        filter.setValue(profile?.vignetteIntensity ?? -0.3, forKey: "inputIntensity")
+        filter.setValue(profile?.vignetteRadius ?? 1.5, forKey: "inputRadius")
         return filter.outputImage!.cropped(to: image.extent)
     }
 

@@ -622,6 +622,90 @@ final class RendererTests: XCTestCase {
         XCTAssertGreaterThan(resCorner.r, srcCorner.r, "Positive vignette should brighten corners")
     }
 
+    /// At the slider's full negative extreme the corners must still
+    /// show source detail — they should be darker than the centre but
+    /// never crushed all the way to RGB=0. Regression for #240, where
+    /// an alpha-driven tint made the output translucent and the
+    /// underlying dark view background showed through as pure black.
+    func testFullNegativeVignetteDoesNotCrushCornersToBlack() {
+        let source = makeMidGreyImage()
+        let cornerX = 2
+        let cornerY = 2
+        let result = Renderer.render(
+            source: source,
+            editState: EditState(vignetteAmount: -100)
+        )
+        let resCorner = samplePixel(image: result, x: cornerX, y: cornerY, context: ctx)
+
+        XCTAssertGreaterThan(
+            Int(resCorner.r), 0,
+            "Corner red channel should retain some source signal at amount=-100"
+        )
+        XCTAssertGreaterThan(
+            Int(resCorner.g), 0,
+            "Corner green channel should retain some source signal at amount=-100"
+        )
+        XCTAssertGreaterThan(
+            Int(resCorner.b), 0,
+            "Corner blue channel should retain some source signal at amount=-100"
+        )
+        // Output must be fully opaque — the previous implementation made
+        // corners translucent so the view background bled through.
+        XCTAssertEqual(Int(resCorner.a), 255, "Vignette output must stay opaque")
+    }
+
+    /// The strength of the darkening should rise monotonically with
+    /// the magnitude of `vignetteAmount`. Regression for #240 where
+    /// any negative value saturated to fully black, eliminating the
+    /// difference between -10 and -100.
+    func testNegativeVignetteIsMonotonicInStrength() {
+        let source = makeMidGreyImage()
+        let cornerX = 2
+        let cornerY = 2
+        let srcCorner = samplePixel(image: source, x: cornerX, y: cornerY, context: ctx)
+
+        let small = Renderer.render(source: source, editState: EditState(vignetteAmount: -10))
+        let large = Renderer.render(source: source, editState: EditState(vignetteAmount: -100))
+        let smallCorner = samplePixel(image: small, x: cornerX, y: cornerY, context: ctx)
+        let largeCorner = samplePixel(image: large, x: cornerX, y: cornerY, context: ctx)
+
+        let smallDelta = Int(srcCorner.r) - Int(smallCorner.r)
+        let largeDelta = Int(srcCorner.r) - Int(largeCorner.r)
+
+        XCTAssertGreaterThan(smallDelta, 0, "amount=-10 must darken corners at least slightly")
+        XCTAssertGreaterThan(
+            largeDelta, smallDelta,
+            "amount=-100 must darken corners more than amount=-10 — got -10:\(smallDelta) vs -100:\(largeDelta)"
+        )
+    }
+
+    /// Mirror of the negative test: +100 must brighten the corner
+    /// more than +10, but never push it to fully white.
+    func testPositiveVignetteIsMonotonicAndNotBlownOut() {
+        let source = makeMidGreyImage()
+        let cornerX = 2
+        let cornerY = 2
+        let srcCorner = samplePixel(image: source, x: cornerX, y: cornerY, context: ctx)
+
+        let small = Renderer.render(source: source, editState: EditState(vignetteAmount: 10))
+        let large = Renderer.render(source: source, editState: EditState(vignetteAmount: 100))
+        let smallCorner = samplePixel(image: small, x: cornerX, y: cornerY, context: ctx)
+        let largeCorner = samplePixel(image: large, x: cornerX, y: cornerY, context: ctx)
+
+        let smallDelta = Int(smallCorner.r) - Int(srcCorner.r)
+        let largeDelta = Int(largeCorner.r) - Int(srcCorner.r)
+
+        XCTAssertGreaterThan(smallDelta, 0, "amount=+10 must brighten corners at least slightly")
+        XCTAssertGreaterThan(
+            largeDelta, smallDelta,
+            "amount=+100 must brighten corners more than amount=+10"
+        )
+        XCTAssertLessThan(
+            Int(largeCorner.r), 255,
+            "Corner red should not be blown out at amount=+100"
+        )
+    }
+
     // MARK: - HSL
 
     /// All-zero HSL arrays must short-circuit the kernel and leave a

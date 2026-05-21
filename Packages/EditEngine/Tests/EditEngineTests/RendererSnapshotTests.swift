@@ -143,6 +143,19 @@ final class RendererSnapshotTests: XCTestCase {
         assertSnapshot(of: image, as: .image(precision: 0.99, perceptualPrecision: 0.98))
     }
 
+    /// Pin the mid-strength dark vignette so a future change to the
+    /// strength curve has to re-record the snapshot deliberately.
+    /// Without this, the linear amount→strength mapping introduced for
+    /// #240 has only its endpoints anchored visually.
+    func testMidStrengthDarkVignetteSnapshot() {
+        let source = makeMidGreyImage()
+        let image = renderToNSImage(
+            source: source,
+            editState: EditState(vignetteAmount: -50, vignetteRoundness: 50, vignetteSoftness: 50)
+        )
+        assertSnapshot(of: image, as: .image(precision: 0.99, perceptualPrecision: 0.98))
+    }
+
     func testHSLHueShiftRedSnapshot() {
         let source = makeColorImage()
         var hue = EditState.hslIdentity

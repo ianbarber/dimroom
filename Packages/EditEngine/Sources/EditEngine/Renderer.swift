@@ -306,21 +306,40 @@ public enum Renderer {
         let outerRadius = halfMin + (halfDiag - halfMin) * (1.0 - roundnessFraction)
         let innerRadius = max(0.0, outerRadius - halfMin * softnessFraction)
 
+        // The mask itself encodes the effect strength: outer alpha rises
+        // to `strength` (not 1) so the blend mixes only that fraction of
+        // the opaque tint over the source. Putting the strength on the
+        // mask (rather than the tint's alpha) keeps the output fully
+        // opaque — the previous alpha-driven tint produced corners with
+        // alpha < 1 that the Develop view's dark background showed
+        // through, making any negative amount read as near-black (#240).
+        //
+        // `maxStrength` caps the effect so ±100 reads as "strong but
+        // photographic" rather than crushing corners to pure black or
+        // white. The linear amount→strength mapping then gives a
+        // visible, monotonic gradient across the full slider range.
+        let maxStrength = 0.75
+        let strength = (Swift.abs(amount) / 100.0) * maxStrength
+
         let gradient = CIFilter(name: "CIRadialGradient")!
         gradient.setValue(center, forKey: "inputCenter")
         gradient.setValue(innerRadius, forKey: "inputRadius0")
         gradient.setValue(outerRadius, forKey: "inputRadius1")
-        // Mask: inner is black (no effect), outer is white (full effect).
+        // Mask: inner is fully transparent (no effect), outer reaches
+        // `strength` in both luminance and alpha so the blend factor at
+        // the corner equals `strength`.
         gradient.setValue(CIColor(red: 0, green: 0, blue: 0, alpha: 0), forKey: "inputColor0")
-        gradient.setValue(CIColor(red: 1, green: 1, blue: 1, alpha: 1), forKey: "inputColor1")
+        gradient.setValue(
+            CIColor(red: strength, green: strength, blue: strength, alpha: strength),
+            forKey: "inputColor1"
+        )
         let mask = gradient.outputImage!.cropped(to: extent)
 
-        // Blend the image with a tint image (black for dark, white for light)
-        // using the radial mask — corners converge toward the tint colour.
-        let intensity = Swift.abs(amount) / 100.0
+        // Opaque tint — alpha=1 on both channels so the blended output
+        // stays opaque regardless of the mask's strength.
         let tintColor: CIColor = amount < 0
-            ? CIColor(red: 0, green: 0, blue: 0, alpha: CGFloat(intensity))
-            : CIColor(red: 1, green: 1, blue: 1, alpha: CGFloat(intensity))
+            ? CIColor(red: 0, green: 0, blue: 0, alpha: 1)
+            : CIColor(red: 1, green: 1, blue: 1, alpha: 1)
         let tint = CIImage(color: tintColor).cropped(to: extent)
 
         let blend = CIFilter(name: "CIBlendWithMask")!

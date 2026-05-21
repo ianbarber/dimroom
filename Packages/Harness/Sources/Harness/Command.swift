@@ -101,6 +101,23 @@ public enum Command: Codable, Sendable, Equatable {
     /// in the response payload so flows can assert on the restore
     /// shape (issue #234).
     case restoreCatalogFromDrive(confirm: Bool)
+    /// Posts the same `.showExportSheet` notification the File → Export…
+    /// menu item does, exercising the SwiftUI sheet presentation path
+    /// end-to-end. Returns the post-tick value of
+    /// `AppDelegate.isExportSheetVisible` so flows can assert the sheet
+    /// actually mounted before firing `completeExportSheet`. Added for
+    /// #242 so a regression in the menu → notification → sheet hop is
+    /// caught by Layer C.
+    case triggerExportMenu
+    /// Drives the export sheet's `onExport` callback with the supplied
+    /// destination + format + applyEdits values, dismissing the sheet
+    /// and entering the coordinator through the same
+    /// `AppDelegate.startExport` entry point the UI uses. Errors out if
+    /// the sheet isn't currently visible (i.e. `triggerExportMenu`
+    /// wasn't called or the confirmation policy diverted into the
+    /// dialog branch). NSOpenPanel can't be driven from the harness, so
+    /// `destinationPath` substitutes for the panel's URL output (#242).
+    case completeExportSheet(destinationPath: String, format: String, applyEdits: Bool)
 
     private enum CodingKeys: String, CodingKey {
         case type
@@ -195,6 +212,8 @@ public enum Command: Codable, Sendable, Equatable {
         case releaseHeldDownloads
         case syncFromDrive
         case restoreCatalogFromDrive
+        case triggerExportMenu
+        case completeExportSheet
     }
 
     public init(from decoder: Decoder) throws {
@@ -388,6 +407,13 @@ public enum Command: Codable, Sendable, Equatable {
         case .restoreCatalogFromDrive:
             let confirm = try container.decodeIfPresent(Bool.self, forKey: .confirm) ?? true
             self = .restoreCatalogFromDrive(confirm: confirm)
+        case .triggerExportMenu:
+            self = .triggerExportMenu
+        case .completeExportSheet:
+            let destinationPath = try container.decode(String.self, forKey: .destinationPath)
+            let format = try container.decode(String.self, forKey: .format)
+            let applyEdits = try container.decode(Bool.self, forKey: .applyEdits)
+            self = .completeExportSheet(destinationPath: destinationPath, format: format, applyEdits: applyEdits)
         }
     }
 
@@ -574,6 +600,13 @@ public enum Command: Codable, Sendable, Equatable {
         case .restoreCatalogFromDrive(let confirm):
             try container.encode(CommandType.restoreCatalogFromDrive, forKey: .type)
             try container.encode(confirm, forKey: .confirm)
+        case .triggerExportMenu:
+            try container.encode(CommandType.triggerExportMenu, forKey: .type)
+        case .completeExportSheet(let destinationPath, let format, let applyEdits):
+            try container.encode(CommandType.completeExportSheet, forKey: .type)
+            try container.encode(destinationPath, forKey: .destinationPath)
+            try container.encode(format, forKey: .format)
+            try container.encode(applyEdits, forKey: .applyEdits)
         }
     }
 }

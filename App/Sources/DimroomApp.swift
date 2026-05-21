@@ -26,7 +26,8 @@ struct DimroomApp: App {
                 uploadCoordinator: appDelegate.uploadCoordinator,
                 undoStack: appDelegate.undoStack,
                 catalog: appDelegate.catalog,
-                originalFetcher: appDelegate.originalFetcher
+                originalFetcher: appDelegate.originalFetcher,
+                appDelegate: appDelegate
             )
         }
         .commands {
@@ -37,6 +38,7 @@ struct DimroomApp: App {
                 .keyboardShortcut("i", modifiers: [.command, .shift])
 
                 Button("Export...") {
+                    ExportLog.logger.info("File → Export menu fired — posting .showExportSheet")
                     NotificationCenter.default.post(name: .showExportSheet, object: nil)
                 }
                 .keyboardShortcut("e", modifiers: [.command, .shift])
@@ -401,12 +403,17 @@ private struct SelectAllVisibleMenuItem: View {
 }
 
 @MainActor
-final class AppDelegate: NSObject, NSApplicationDelegate {
+final class AppDelegate: NSObject, NSApplicationDelegate, ObservableObject {
     let router = AppRouter()
     let importCoordinator = ImportCoordinator()
     let exportCoordinator = ExportCoordinator()
     let uploadCoordinator = UploadCoordinator()
     let editClipboard = EditClipboard()
+    /// Mirror of the SwiftUI `showExportSheet` state owned by `ContentView`.
+    /// `ContentView` writes this via `.onChange(of: showExportSheet)` so the
+    /// harness can assert the sheet round-tripped through SwiftUI before
+    /// firing `completeExportSheet` (#242).
+    @Published private(set) var isExportSheetVisible: Bool = false
     /// View model shared between the SwiftUI tree and the harness
     /// controller. Initialised eagerly with an in-memory empty catalog so
     /// the `@main App` scene can read it before `applicationDidFinishLaunching`
@@ -669,7 +676,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
                     uploadCoordinator: uploadCoordinator,
                     undoStack: undoStack,
                     catalog: resolvedCatalog,
-                    originalFetcher: originalsCoordinator
+                    originalFetcher: originalsCoordinator,
+                    appDelegate: self
                 )
             )
             window.title = "Dimroom"
@@ -696,6 +704,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             editClipboard: editClipboard,
             exportCoordinator: exportCoordinator,
             uploadCoordinator: uploadCoordinator,
+            appDelegate: self,
             driveUploader: driveUploader,
             originalsCoordinator: originalsCoordinator,
             undoStack: undoStack,
@@ -739,6 +748,50 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         if let poller = changePoller {
             Task { await poller.stop() }
         }
+    }
+
+    // MARK: - Export
+
+    /// Updates the sheet-visibility mirror so the harness flow can
+    /// assert the sheet was actually mounted by SwiftUI before firing
+    /// `completeExportSheet`. Called from `ContentView.onChange`.
+    func setExportSheetVisible(_ visible: Bool) {
+        ExportLog.logger.info("AppDelegate.setExportSheetVisible(\(visible, privacy: .public))")
+        isExportSheetVisible = visible
+    }
+
+    /// Single entry point for kicking off an export. Both the SwiftUI
+    /// sheet's `onExport` closure and the harness `completeExportSheet`
+    /// command call this so a regression in either path is caught by
+    /// the same harness flow. Previously the two paths each held their
+    /// own copy of the `ExportScope.resolve(...) → coordinator.run(...)`
+    /// chain; #242 collapses them.
+    func startExport(
+        destinationURL: URL,
+        format: ExportFormat,
+        jpegQuality: Int,
+        applyEdits: Bool
+    ) async {
+        ExportLog.logger.info("AppDelegate.startExport entered — destination=\(destinationURL.path, privacy: .public) format=\(format.rawValue, privacy: .public) applyEdits=\(applyEdits, privacy: .public)")
+        guard let catalog else {
+            ExportLog.logger.error("AppDelegate.startExport aborted: no catalog loaded")
+            return
+        }
+        let scoped = ExportScope.resolve(
+            selectedIds: libraryViewModel.selectedAssetIds,
+            rows: libraryViewModel.rows
+        )
+        ExportLog.logger.info("AppDelegate.startExport scope resolved — count=\(scoped.count, privacy: .public) selectedIds=\(self.libraryViewModel.selectedAssetIds.count, privacy: .public) rows=\(self.libraryViewModel.rows.count, privacy: .public)")
+        await exportCoordinator.run(
+            assets: scoped,
+            catalog: catalog,
+            format: format,
+            jpegQuality: jpegQuality,
+            applyEdits: applyEdits,
+            destinationDirectory: destinationURL,
+            originalFetcher: originalsCoordinator
+        )
+        ExportLog.logger.info("AppDelegate.startExport coordinator returned — phase=\(String(describing: self.exportCoordinator.phase), privacy: .public)")
     }
 
     // MARK: - Import from menu

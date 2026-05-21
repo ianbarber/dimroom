@@ -65,6 +65,8 @@ struct DimroomCLI: ParsableCommand {
             ReleaseHeldDownloads.self,
             SyncFromDrive.self,
             RestoreCatalogFromDrive.self,
+            TriggerExportMenu.self,
+            CompleteExportSheet.self,
         ]
     )
 }
@@ -775,6 +777,50 @@ extension DimroomCLI {
                 throw ValidationError("format must be one of \(validFormats.joined(separator: ", ")), got '\(format)'.")
             }
             try runCommand(.export(destinationPath: destinationPath, format: format, applyEdits: applyEdits), socket: socket)
+        }
+    }
+
+    struct TriggerExportMenu: ParsableCommand {
+        static let configuration = CommandConfiguration(
+            commandName: "trigger-export-menu",
+            abstract: "Post the same .showExportSheet notification the File → Export… menu does, exercising the SwiftUI sheet path. Returns isExportSheetVisible so the caller can assert the sheet mounted (#242)."
+        )
+
+        @Option(name: .long, help: "Path to the harness socket.")
+        var socket: String = HarnessServer.defaultSocketPath
+
+        func run() throws {
+            try runCommand(.triggerExportMenu, socket: socket)
+        }
+    }
+
+    struct CompleteExportSheet: ParsableCommand {
+        static let configuration = CommandConfiguration(
+            commandName: "complete-export-sheet",
+            abstract: "Drive the export sheet's onExport callback (substitutes for the NSOpenPanel that the harness can't drive) and enter the unified AppDelegate.startExport entry point. Fails if the sheet isn't currently visible (#242)."
+        )
+
+        @Argument(help: "Absolute path to the destination directory (substitutes for NSOpenPanel).")
+        var destinationPath: String
+
+        @Option(name: .long, help: "Export format: original, jpeg, or tiff.")
+        var format: String = "jpeg"
+
+        @Flag(name: .long, help: "Apply edits to exported files.")
+        var applyEdits: Bool = false
+
+        @Option(name: .long, help: "Path to the harness socket.")
+        var socket: String = HarnessServer.defaultSocketPath
+
+        func run() throws {
+            let validFormats = ["original", "jpeg", "tiff"]
+            guard validFormats.contains(format) else {
+                throw ValidationError("format must be one of \(validFormats.joined(separator: ", ")), got '\(format)'.")
+            }
+            try runCommand(
+                .completeExportSheet(destinationPath: destinationPath, format: format, applyEdits: applyEdits),
+                socket: socket
+            )
         }
     }
 

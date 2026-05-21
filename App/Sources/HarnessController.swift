@@ -30,6 +30,11 @@ final class HarnessController: @unchecked Sendable {
     private let catalogRestoreUploader: (any CatalogUploading)?
     private let catalogRestorePath: String?
     private let catalogRestoreFileIdStore: (any DriveFileIdStore)?
+    /// Owner of the unified export entry point (`startExport(...)`). The
+    /// harness export commands route through it so a regression in either
+    /// the menu→sheet path or the harness path is caught by the same
+    /// Layer C flow (#242).
+    private let appDelegate: AppDelegate
     /// Wire-format string identifying the token store backing the
     /// `DriveClient` (`"keychain"`, `"in-memory"`, `"stub-in-memory"`).
     /// Surfaced via `driveAuthState` so Layer C flows can assert that
@@ -47,6 +52,7 @@ final class HarnessController: @unchecked Sendable {
         editClipboard: EditClipboard,
         exportCoordinator: ExportCoordinator,
         uploadCoordinator: UploadCoordinator,
+        appDelegate: AppDelegate,
         driveUploader: (any DriveUploading)? = nil,
         originalsCoordinator: OriginalsCoordinator? = nil,
         undoStack: UndoStack? = nil,
@@ -67,6 +73,7 @@ final class HarnessController: @unchecked Sendable {
         self.editClipboard = editClipboard
         self.exportCoordinator = exportCoordinator
         self.uploadCoordinator = uploadCoordinator
+        self.appDelegate = appDelegate
         self.driveUploader = driveUploader
         self.originalsCoordinator = originalsCoordinator
         self.undoStack = undoStack
@@ -235,6 +242,16 @@ final class HarnessController: @unchecked Sendable {
 
         case .export(let destinationPath, let format, let applyEdits):
             return await handleExport(destinationPath: destinationPath, format: format, applyEdits: applyEdits)
+
+        case .triggerExportMenu:
+            return await handleTriggerExportMenu()
+
+        case .completeExportSheet(let destinationPath, let format, let applyEdits):
+            return await handleCompleteExportSheet(
+                destinationPath: destinationPath,
+                format: format,
+                applyEdits: applyEdits
+            )
 
         case .fetchOriginal(let assetId):
             return await handleFetchOriginal(assetId: assetId)
@@ -758,9 +775,6 @@ final class HarnessController: @unchecked Sendable {
     // MARK: - Export
 
     private func handleExport(destinationPath: String, format: String, applyEdits: Bool) async -> Response {
-        guard let catalog else {
-            return .error("catalog not loaded")
-        }
         guard let exportFormat = ExportFormat(rawValue: format) else {
             return .error("invalid format '\(format)'; expected original, jpeg, or tiff")
         }
@@ -773,27 +787,92 @@ final class HarnessController: @unchecked Sendable {
             return .error("failed to create destination directory: \(error.localizedDescription)")
         }
 
-        // Selection wins when non-empty; otherwise fall back to all
-        // visible rows (which already respect the rating filter and
-        // active scope). Same rule as the File → Export… sheet so both
-        // entry points agree.
-        let assets = await MainActor.run {
-            ExportScope.resolve(
-                selectedIds: libraryViewModel.selectedAssetIds,
-                rows: libraryViewModel.rows
-            )
-        }
-
-        await exportCoordinator.run(
-            assets: assets,
-            catalog: catalog,
+        return await runExport(
+            destinationURL: destinationURL,
+            destinationPath: destinationPath,
             format: exportFormat,
-            jpegQuality: 85,
-            applyEdits: applyEdits,
-            destinationDirectory: destinationURL,
-            originalFetcher: originalsCoordinator
+            applyEdits: applyEdits
         )
+    }
 
+    /// Drives the menu → notification path (#242). Verifies the
+    /// File → Export… menu wiring posts `.showExportSheet`, which
+    /// `ContentView` should observe and flip `showExportSheet` (or
+    /// `showExportConfirmation`). Returns the SwiftUI sheet-visibility
+    /// mirror so the flow can assert the sheet actually mounted before
+    /// firing `completeExportSheet`.
+    private func handleTriggerExportMenu() async -> Response {
+        let visibleAfter = await MainActor.run { () -> Bool in
+            ExportLog.logger.info("Harness triggerExportMenu — posting .showExportSheet")
+            NotificationCenter.default.post(name: .showExportSheet, object: nil)
+            return appDelegate.isExportSheetVisible
+        }
+        // Give SwiftUI a couple of runloop ticks to swap state. The
+        // confirmationDialog path also routes through this notification
+        // (and may *not* land the sheet — that's the policy talking, not
+        // a bug), so we report the post-tick visibility and let the flow
+        // decide whether to assert true.
+        try? await Task.sleep(for: .milliseconds(150))
+        let finalVisible = await MainActor.run { appDelegate.isExportSheetVisible }
+        return .ok(data: .dictionary([
+            "exportSheetVisible": .bool(finalVisible),
+            "exportSheetVisibleImmediately": .bool(visibleAfter),
+        ]))
+    }
+
+    /// Drives the sheet's `onExport` closure: same code path the user
+    /// hits after picking a destination in the File → Export… sheet.
+    /// Asserts the sheet is currently mounted before firing so the
+    /// command can't paper over a regression that drops the sheet
+    /// presentation. NSOpenPanel itself is not harness-driveable, so
+    /// `destinationPath` substitutes for the panel's URL output.
+    private func handleCompleteExportSheet(
+        destinationPath: String,
+        format: String,
+        applyEdits: Bool
+    ) async -> Response {
+        guard let exportFormat = ExportFormat(rawValue: format) else {
+            return .error("invalid format '\(format)'; expected original, jpeg, or tiff")
+        }
+        let visible = await MainActor.run { appDelegate.isExportSheetVisible }
+        guard visible else {
+            return .error("export sheet not visible; call triggerExportMenu first or check confirmation policy")
+        }
+        let destinationURL = URL(fileURLWithPath: destinationPath)
+        do {
+            try FileManager.default.createDirectory(at: destinationURL, withIntermediateDirectories: true)
+        } catch {
+            return .error("failed to create destination directory: \(error.localizedDescription)")
+        }
+        // Mirror ContentView.onExport: dismiss the sheet, then run the
+        // coordinator through the same `appDelegate.startExport` entry.
+        await MainActor.run {
+            ExportLog.logger.info("Harness completeExportSheet — dismissing sheet, invoking startExport")
+            appDelegate.setExportSheetVisible(false)
+        }
+        return await runExport(
+            destinationURL: destinationURL,
+            destinationPath: destinationPath,
+            format: exportFormat,
+            applyEdits: applyEdits
+        )
+    }
+
+    /// Shared coordinator round-trip + response shaping. Used by both
+    /// `handleExport` (direct) and `handleCompleteExportSheet` (sheet
+    /// path) so both produce the same payload shape.
+    private func runExport(
+        destinationURL: URL,
+        destinationPath: String,
+        format: ExportFormat,
+        applyEdits: Bool
+    ) async -> Response {
+        await appDelegate.startExport(
+            destinationURL: destinationURL,
+            format: format,
+            jpegQuality: 85,
+            applyEdits: applyEdits
+        )
         let phase = await exportCoordinator.phase
         switch phase {
         case .done(let exported, let skipped, let failures):

@@ -304,6 +304,32 @@ final class DevelopSnapshotTests: XCTestCase {
         }
     }
 
+    /// Develop view at identity values, rendered tall enough that the
+    /// Geometry section's three sliders (Vertical / Horizontal / Rotation)
+    /// and two toggles (Chromatic Aberration / Lens Vignette) fit inside
+    /// the visible viewport. Locks the layout of the Geometry group on its
+    /// own — the existing `test_develop_geometry` exercises non-identity
+    /// values but at 1024×768 the panel sits below the fold.
+    @MainActor
+    func test_develop_geometry_panel() async throws {
+        let vm = try await makeActivatedViewModel(hash: "snap-geom-panel")
+
+        let image = renderFixedPixelImage(
+            for: DevelopView(viewModel: vm),
+            size: CGSize(width: 1024, height: 1800)
+        )
+
+        runAssertSnapshot {
+            assertSnapshot(
+                of: image,
+                as: .image(
+                    precision: Self.snapshotPrecision,
+                    perceptualPrecision: Self.snapshotPerceptualPrecision
+                )
+            )
+        }
+    }
+
     /// Develop view with HSL Hue axis selected and one band pushed.
     /// Locks the new HSL section's segmented picker, the tinted slider
     /// tracks, and the slider ordering.

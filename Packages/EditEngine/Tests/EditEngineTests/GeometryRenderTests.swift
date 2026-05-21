@@ -196,4 +196,40 @@ final class GeometryRenderTests: XCTestCase {
         XCTAssertEqual(srcPx.g, resPx.g)
         XCTAssertEqual(srcPx.b, resPx.b)
     }
+
+    func testLensVignetteCentreChangeIsBelowTwoPercent() {
+        let source = makeMidGreyImage(width: 64, height: 64, value: 128)
+        let result = Renderer.render(
+            source: source,
+            editState: EditState(lensVignette: true)
+        )
+        let mid = Int(source.extent.width) / 2
+        let srcPx = samplePixel(image: source, x: mid, y: mid, context: ctx)
+        let resPx = samplePixel(image: result, x: mid, y: mid, context: ctx)
+        let deltaR = abs(Int(resPx.r) - Int(srcPx.r))
+        let deltaG = abs(Int(resPx.g) - Int(srcPx.g))
+        let deltaB = abs(Int(resPx.b) - Int(srcPx.b))
+        XCTAssertLessThan(Double(deltaR) / 255.0, 0.02, "Centre R changed by >= 2% with lens vignette enabled")
+        XCTAssertLessThan(Double(deltaG) / 255.0, 0.02, "Centre G changed by >= 2% with lens vignette enabled")
+        XCTAssertLessThan(Double(deltaB) / 255.0, 0.02, "Centre B changed by >= 2% with lens vignette enabled")
+    }
+
+    func testLensVignetteCornerToCentreRatioIncreases() {
+        let source = makeMidGreyImage(width: 64, height: 64, value: 128)
+        let off = Renderer.render(source: source, editState: EditState(lensVignette: false))
+        let on = Renderer.render(source: source, editState: EditState(lensVignette: true))
+
+        let mid = Int(source.extent.width) / 2
+        let cornerX = 2
+        let cornerY = 2
+
+        let offCentre = samplePixel(image: off, x: mid, y: mid, context: ctx)
+        let offCorner = samplePixel(image: off, x: cornerX, y: cornerY, context: ctx)
+        let onCentre = samplePixel(image: on, x: mid, y: mid, context: ctx)
+        let onCorner = samplePixel(image: on, x: cornerX, y: cornerY, context: ctx)
+
+        let offRatio = Double(offCorner.r) / Double(offCentre.r)
+        let onRatio = Double(onCorner.r) / Double(onCentre.r)
+        XCTAssertGreaterThan(onRatio, offRatio, "Corner/centre ratio should increase when lens vignette correction is enabled")
+    }
 }

@@ -99,11 +99,59 @@ final class RendererSnapshotTests: XCTestCase {
         assertSnapshot(of: image, as: .image(precision: 0.99, perceptualPrecision: 0.98))
     }
 
+    func testSplitToneOrangeTealSnapshot() {
+        // Classic orange-highlights / teal-shadows colour grade applied
+        // over a black-to-white gradient — both ends pick up their
+        // respective tint while the centre region transitions through
+        // the smoothstep boundary.
+        let source = makeGradientImage()
+        let image = renderToNSImage(
+            source: source,
+            editState: EditState(
+                splitToneHighlightHue: 30,
+                splitToneHighlightSaturation: 60,
+                splitToneShadowHue: 195,
+                splitToneShadowSaturation: 60
+            )
+        )
+        assertSnapshot(of: image, as: .image(precision: 0.99, perceptualPrecision: 0.98))
+    }
+
+    func testSplitToneBalanceShiftSnapshot() {
+        // Same orange/teal tints, but with balance pushed +50 toward the
+        // shadows — the cool tint now reaches further into the midtones.
+        let source = makeGradientImage()
+        let image = renderToNSImage(
+            source: source,
+            editState: EditState(
+                splitToneHighlightHue: 30,
+                splitToneHighlightSaturation: 60,
+                splitToneShadowHue: 195,
+                splitToneShadowSaturation: 60,
+                splitToneBalance: 50
+            )
+        )
+        assertSnapshot(of: image, as: .image(precision: 0.99, perceptualPrecision: 0.98))
+    }
+
     func testLightVignetteSnapshot() {
         let source = makeMidGreyImage()
         let image = renderToNSImage(
             source: source,
             editState: EditState(vignetteAmount: 80, vignetteRoundness: 50, vignetteSoftness: 50)
+        )
+        assertSnapshot(of: image, as: .image(precision: 0.99, perceptualPrecision: 0.98))
+    }
+
+    /// Pin the mid-strength dark vignette so a future change to the
+    /// strength curve has to re-record the snapshot deliberately.
+    /// Without this, the linear amount→strength mapping introduced for
+    /// #240 has only its endpoints anchored visually.
+    func testMidStrengthDarkVignetteSnapshot() {
+        let source = makeMidGreyImage()
+        let image = renderToNSImage(
+            source: source,
+            editState: EditState(vignetteAmount: -50, vignetteRoundness: 50, vignetteSoftness: 50)
         )
         assertSnapshot(of: image, as: .image(precision: 0.99, perceptualPrecision: 0.98))
     }

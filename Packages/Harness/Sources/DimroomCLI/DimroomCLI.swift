@@ -36,10 +36,13 @@ struct DimroomCLI: ParsableCommand {
             Export.self,
             SetEditParameter.self,
             ResetEditParameter.self,
+            SetEditFlag.self,
+            ResetEditFlag.self,
             SetEditArrayParameter.self,
             ResetEditArrayParameter.self,
             SetCurvePoints.self,
             ResetCurve.self,
+            SelectCurveChannel.self,
             Undo.self,
             Redo.self,
             SelectAssets.self,
@@ -64,7 +67,10 @@ struct DimroomCLI: ParsableCommand {
             SetSetting.self,
             ClearOriginalsCache.self,
             ClearPreviewCache.self,
+            SyncFromDrive.self,
             RestoreCatalogFromDrive.self,
+            TriggerExportMenu.self,
+            CompleteExportSheet.self,
         ]
     )
 }
@@ -538,7 +544,7 @@ extension DimroomCLI {
         @Argument(help: "The UUID of the asset.")
         var id: String
 
-        @Argument(help: "Parameter name (exposure, contrast, highlights, shadows, whites, blacks, temperature, tint, clarity, sharpening, vibrance, saturation, luminanceNoiseReduction, chrominanceNoiseReduction, vignetteAmount, vignetteRoundness, vignetteSoftness).")
+        @Argument(help: "Parameter name (exposure, contrast, highlights, shadows, whites, blacks, temperature, tint, clarity, sharpening, vibrance, saturation, luminanceNoiseReduction, chrominanceNoiseReduction, splitToneHighlightHue, splitToneHighlightSaturation, splitToneShadowHue, splitToneShadowSaturation, splitToneBalance, vignetteAmount, vignetteRoundness, vignetteSoftness, perspectiveVertical, perspectiveHorizontal, perspectiveRotation).")
         var parameter: String
 
         @Argument(help: "The value to set.")
@@ -564,7 +570,7 @@ extension DimroomCLI {
         @Argument(help: "The UUID of the asset.")
         var id: String
 
-        @Argument(help: "Parameter name (exposure, contrast, highlights, shadows, whites, blacks, temperature, tint, clarity, sharpening, vibrance, saturation, luminanceNoiseReduction, chrominanceNoiseReduction, vignetteAmount, vignetteRoundness, vignetteSoftness).")
+        @Argument(help: "Parameter name (exposure, contrast, highlights, shadows, whites, blacks, temperature, tint, clarity, sharpening, vibrance, saturation, luminanceNoiseReduction, chrominanceNoiseReduction, splitToneHighlightHue, splitToneHighlightSaturation, splitToneShadowHue, splitToneShadowSaturation, splitToneBalance, vignetteAmount, vignetteRoundness, vignetteSoftness, perspectiveVertical, perspectiveHorizontal, perspectiveRotation).")
         var parameter: String
 
         @Option(name: .long, help: "Path to the harness socket.")
@@ -575,6 +581,55 @@ extension DimroomCLI {
                 throw ValidationError("Invalid UUID '\(id)'.")
             }
             try runCommand(.resetEditParameter(assetId: uuid, parameter: parameter), socket: socket)
+        }
+    }
+
+    struct SetEditFlag: ParsableCommand {
+        static let configuration = CommandConfiguration(
+            commandName: "set-edit-flag",
+            abstract: "Set a boolean edit flag on an asset (chromaticAberration, lensVignette)."
+        )
+
+        @Argument(help: "The UUID of the asset.")
+        var id: String
+
+        @Argument(help: "Flag name (chromaticAberration, lensVignette).")
+        var parameter: String
+
+        @Argument(help: "The value to set (true or false).")
+        var value: Bool
+
+        @Option(name: .long, help: "Path to the harness socket.")
+        var socket: String = HarnessServer.defaultSocketPath
+
+        func run() throws {
+            guard let uuid = UUID(uuidString: id) else {
+                throw ValidationError("Invalid UUID '\(id)'.")
+            }
+            try runCommand(.setEditFlag(assetId: uuid, parameter: parameter, value: value), socket: socket)
+        }
+    }
+
+    struct ResetEditFlag: ParsableCommand {
+        static let configuration = CommandConfiguration(
+            commandName: "reset-edit-flag",
+            abstract: "Reset a boolean edit flag on an asset to false."
+        )
+
+        @Argument(help: "The UUID of the asset.")
+        var id: String
+
+        @Argument(help: "Flag name (chromaticAberration, lensVignette).")
+        var parameter: String
+
+        @Option(name: .long, help: "Path to the harness socket.")
+        var socket: String = HarnessServer.defaultSocketPath
+
+        func run() throws {
+            guard let uuid = UUID(uuidString: id) else {
+                throw ValidationError("Invalid UUID '\(id)'.")
+            }
+            try runCommand(.resetEditFlag(assetId: uuid, parameter: parameter), socket: socket)
         }
     }
 
@@ -685,6 +740,23 @@ extension DimroomCLI {
         }
     }
 
+    struct SelectCurveChannel: ParsableCommand {
+        static let configuration = CommandConfiguration(
+            commandName: "select-curve-channel",
+            abstract: "Switch the Develop curve-editor channel picker (luminance, red, green, blue)."
+        )
+
+        @Argument(help: "Channel name: luminance, red, green, blue.")
+        var channel: String
+
+        @Option(name: .long, help: "Path to the harness socket.")
+        var socket: String = HarnessServer.defaultSocketPath
+
+        func run() throws {
+            try runCommand(.selectCurveChannel(channel: channel), socket: socket)
+        }
+    }
+
     struct Export: ParsableCommand {
         static let configuration = CommandConfiguration(
             commandName: "export",
@@ -709,6 +781,50 @@ extension DimroomCLI {
                 throw ValidationError("format must be one of \(validFormats.joined(separator: ", ")), got '\(format)'.")
             }
             try runCommand(.export(destinationPath: destinationPath, format: format, applyEdits: applyEdits), socket: socket)
+        }
+    }
+
+    struct TriggerExportMenu: ParsableCommand {
+        static let configuration = CommandConfiguration(
+            commandName: "trigger-export-menu",
+            abstract: "Post the same .showExportSheet notification the File → Export… menu does, exercising the SwiftUI sheet path. Returns isExportSheetVisible so the caller can assert the sheet mounted (#242)."
+        )
+
+        @Option(name: .long, help: "Path to the harness socket.")
+        var socket: String = HarnessServer.defaultSocketPath
+
+        func run() throws {
+            try runCommand(.triggerExportMenu, socket: socket)
+        }
+    }
+
+    struct CompleteExportSheet: ParsableCommand {
+        static let configuration = CommandConfiguration(
+            commandName: "complete-export-sheet",
+            abstract: "Drive the export sheet's onExport callback (substitutes for the NSOpenPanel that the harness can't drive) and enter the unified AppDelegate.startExport entry point. Fails if the sheet isn't currently visible (#242)."
+        )
+
+        @Argument(help: "Absolute path to the destination directory (substitutes for NSOpenPanel).")
+        var destinationPath: String
+
+        @Option(name: .long, help: "Export format: original, jpeg, or tiff.")
+        var format: String = "jpeg"
+
+        @Flag(name: .long, help: "Apply edits to exported files.")
+        var applyEdits: Bool = false
+
+        @Option(name: .long, help: "Path to the harness socket.")
+        var socket: String = HarnessServer.defaultSocketPath
+
+        func run() throws {
+            let validFormats = ["original", "jpeg", "tiff"]
+            guard validFormats.contains(format) else {
+                throw ValidationError("format must be one of \(validFormats.joined(separator: ", ")), got '\(format)'.")
+            }
+            try runCommand(
+                .completeExportSheet(destinationPath: destinationPath, format: format, applyEdits: applyEdits),
+                socket: socket
+            )
         }
     }
 
@@ -1094,6 +1210,20 @@ extension DimroomCLI {
 
         func run() throws {
             try runCommand(.clearPreviewCache, socket: socket)
+        }
+    }
+
+    struct SyncFromDrive: ParsableCommand {
+        static let configuration = CommandConfiguration(
+            commandName: "sync-from-drive",
+            abstract: "Force a single Drive changes-list poll and return the classified outcome."
+        )
+
+        @Option(name: .long, help: "Path to the harness socket.")
+        var socket: String = HarnessServer.defaultSocketPath
+
+        func run() throws {
+            try runCommand(.syncFromDrive, socket: socket)
         }
     }
 

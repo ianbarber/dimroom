@@ -33,6 +33,8 @@ public enum Command: Codable, Sendable, Equatable {
     case fetchOriginal(assetId: UUID)
     case setEditParameter(assetId: UUID, parameter: String, value: Double)
     case resetEditParameter(assetId: UUID, parameter: String)
+    case setEditFlag(assetId: UUID, parameter: String, value: Bool)
+    case resetEditFlag(assetId: UUID, parameter: String)
     /// Set a single index of an array-valued edit parameter (e.g.
     /// `hueShift`, `hslSaturation`, `hslLuminance`). Separate from
     /// `setEditParameter` because the keypath surface only addresses
@@ -47,6 +49,10 @@ public enum Command: Codable, Sendable, Equatable {
     /// CGPoint type.
     case setCurvePoints(assetId: UUID, channel: String, pointsJSON: String)
     case resetCurve(assetId: UUID, channel: String)
+    /// Switch the Develop curve-editor channel picker
+    /// (Luminance / Red / Green / Blue). Affects which curve is rendered
+    /// on the editor canvas; does not mutate `EditState`.
+    case selectCurveChannel(channel: String)
     case undo
     case redo
     case selectAssets(ids: [UUID])
@@ -98,6 +104,10 @@ public enum Command: Codable, Sendable, Equatable {
     /// Wipe every cached preview JPEG (both master and display tiers).
     /// Mirrors the "Clear preview cache" button in Settings.
     case clearPreviewCache
+    /// Force a single Drive `changes.list` poll and return the
+    /// classified outcome. Used by Layer C delta-sync flows so they
+    /// don't have to wait for the periodic 5-minute tick.
+    case syncFromDrive
     /// Runs `CatalogPublisher.restoreIfNeeded` against the live
     /// uploader (or the local-file stub when
     /// `DIMROOM_HARNESS_STUB_REMOTE_CATALOG` is set). `confirm`
@@ -106,6 +116,23 @@ public enum Command: Codable, Sendable, Equatable {
     /// in the response payload so flows can assert on the restore
     /// shape (issue #234).
     case restoreCatalogFromDrive(confirm: Bool)
+    /// Posts the same `.showExportSheet` notification the File → Export…
+    /// menu item does, exercising the SwiftUI sheet presentation path
+    /// end-to-end. Returns the post-tick value of
+    /// `AppDelegate.isExportSheetVisible` so flows can assert the sheet
+    /// actually mounted before firing `completeExportSheet`. Added for
+    /// #242 so a regression in the menu → notification → sheet hop is
+    /// caught by Layer C.
+    case triggerExportMenu
+    /// Drives the export sheet's `onExport` callback with the supplied
+    /// destination + format + applyEdits values, dismissing the sheet
+    /// and entering the coordinator through the same
+    /// `AppDelegate.startExport` entry point the UI uses. Errors out if
+    /// the sheet isn't currently visible (i.e. `triggerExportMenu`
+    /// wasn't called or the confirmation policy diverted into the
+    /// dialog branch). NSOpenPanel can't be driven from the harness, so
+    /// `destinationPath` substitutes for the panel's URL output (#242).
+    case completeExportSheet(destinationPath: String, format: String, applyEdits: Bool)
 
     private enum CodingKeys: String, CodingKey {
         case type
@@ -125,6 +152,7 @@ public enum Command: Codable, Sendable, Equatable {
         case applyEdits
         case parameter
         case value
+        case flagValue
         case index
         case channel
         case pointsJSON
@@ -171,10 +199,13 @@ public enum Command: Codable, Sendable, Equatable {
         case fetchOriginal
         case setEditParameter
         case resetEditParameter
+        case setEditFlag
+        case resetEditFlag
         case setEditArrayParameter
         case resetEditArrayParameter
         case setCurvePoints
         case resetCurve
+        case selectCurveChannel
         case undo
         case redo
         case selectAssets
@@ -200,7 +231,10 @@ public enum Command: Codable, Sendable, Equatable {
         case setSetting
         case clearOriginalsCache
         case clearPreviewCache
+        case syncFromDrive
         case restoreCatalogFromDrive
+        case triggerExportMenu
+        case completeExportSheet
     }
 
     public init(from decoder: Decoder) throws {
@@ -305,6 +339,15 @@ public enum Command: Codable, Sendable, Equatable {
             let assetId = try container.decode(UUID.self, forKey: .assetId)
             let parameter = try container.decode(String.self, forKey: .parameter)
             self = .resetEditParameter(assetId: assetId, parameter: parameter)
+        case .setEditFlag:
+            let assetId = try container.decode(UUID.self, forKey: .assetId)
+            let parameter = try container.decode(String.self, forKey: .parameter)
+            let value = try container.decode(Bool.self, forKey: .flagValue)
+            self = .setEditFlag(assetId: assetId, parameter: parameter, value: value)
+        case .resetEditFlag:
+            let assetId = try container.decode(UUID.self, forKey: .assetId)
+            let parameter = try container.decode(String.self, forKey: .parameter)
+            self = .resetEditFlag(assetId: assetId, parameter: parameter)
         case .setEditArrayParameter:
             let assetId = try container.decode(UUID.self, forKey: .assetId)
             let parameter = try container.decode(String.self, forKey: .parameter)
@@ -325,6 +368,9 @@ public enum Command: Codable, Sendable, Equatable {
             let assetId = try container.decode(UUID.self, forKey: .assetId)
             let channel = try container.decode(String.self, forKey: .channel)
             self = .resetCurve(assetId: assetId, channel: channel)
+        case .selectCurveChannel:
+            let channel = try container.decode(String.self, forKey: .channel)
+            self = .selectCurveChannel(channel: channel)
         case .undo:
             self = .undo
         case .redo:
@@ -388,9 +434,18 @@ public enum Command: Codable, Sendable, Equatable {
             self = .clearOriginalsCache
         case .clearPreviewCache:
             self = .clearPreviewCache
+        case .syncFromDrive:
+            self = .syncFromDrive
         case .restoreCatalogFromDrive:
             let confirm = try container.decodeIfPresent(Bool.self, forKey: .confirm) ?? true
             self = .restoreCatalogFromDrive(confirm: confirm)
+        case .triggerExportMenu:
+            self = .triggerExportMenu
+        case .completeExportSheet:
+            let destinationPath = try container.decode(String.self, forKey: .destinationPath)
+            let format = try container.decode(String.self, forKey: .format)
+            let applyEdits = try container.decode(Bool.self, forKey: .applyEdits)
+            self = .completeExportSheet(destinationPath: destinationPath, format: format, applyEdits: applyEdits)
         }
     }
 
@@ -488,6 +543,15 @@ public enum Command: Codable, Sendable, Equatable {
             try container.encode(CommandType.resetEditParameter, forKey: .type)
             try container.encode(assetId, forKey: .assetId)
             try container.encode(parameter, forKey: .parameter)
+        case .setEditFlag(let assetId, let parameter, let value):
+            try container.encode(CommandType.setEditFlag, forKey: .type)
+            try container.encode(assetId, forKey: .assetId)
+            try container.encode(parameter, forKey: .parameter)
+            try container.encode(value, forKey: .flagValue)
+        case .resetEditFlag(let assetId, let parameter):
+            try container.encode(CommandType.resetEditFlag, forKey: .type)
+            try container.encode(assetId, forKey: .assetId)
+            try container.encode(parameter, forKey: .parameter)
         case .setEditArrayParameter(let assetId, let parameter, let index, let value):
             try container.encode(CommandType.setEditArrayParameter, forKey: .type)
             try container.encode(assetId, forKey: .assetId)
@@ -507,6 +571,9 @@ public enum Command: Codable, Sendable, Equatable {
         case .resetCurve(let assetId, let channel):
             try container.encode(CommandType.resetCurve, forKey: .type)
             try container.encode(assetId, forKey: .assetId)
+            try container.encode(channel, forKey: .channel)
+        case .selectCurveChannel(let channel):
+            try container.encode(CommandType.selectCurveChannel, forKey: .type)
             try container.encode(channel, forKey: .channel)
         case .undo:
             try container.encode(CommandType.undo, forKey: .type)
@@ -571,9 +638,18 @@ public enum Command: Codable, Sendable, Equatable {
             try container.encode(CommandType.clearOriginalsCache, forKey: .type)
         case .clearPreviewCache:
             try container.encode(CommandType.clearPreviewCache, forKey: .type)
+        case .syncFromDrive:
+            try container.encode(CommandType.syncFromDrive, forKey: .type)
         case .restoreCatalogFromDrive(let confirm):
             try container.encode(CommandType.restoreCatalogFromDrive, forKey: .type)
             try container.encode(confirm, forKey: .confirm)
+        case .triggerExportMenu:
+            try container.encode(CommandType.triggerExportMenu, forKey: .type)
+        case .completeExportSheet(let destinationPath, let format, let applyEdits):
+            try container.encode(CommandType.completeExportSheet, forKey: .type)
+            try container.encode(destinationPath, forKey: .destinationPath)
+            try container.encode(format, forKey: .format)
+            try container.encode(applyEdits, forKey: .applyEdits)
         }
     }
 }

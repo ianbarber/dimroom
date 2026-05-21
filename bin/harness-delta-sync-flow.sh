@@ -1,0 +1,236 @@
+#!/usr/bin/env bash
+# harness-delta-sync-flow.sh — Layer C flow for delta sync via Drive
+# changes API (#235).
+#
+# Walks the three classified outcomes the change poller emits:
+#   1. bootstrap — no stored page token, getStartPageToken returns one.
+#   2. noChanges — steady-state poll with an empty changes list.
+#   3. catalogChanged — fixture page reports a change to the file id
+#      matching the cached catalog driveFileId, so the poller classifies
+#      it as a remote catalog update (not a conflict, because there's
+#      no last-published modifiedTime stored).
+#
+# Drive HTTP is stubbed two ways:
+#   - `DIMROOM_HARNESS_DRIVE_STUB=1` swaps in the OAuth-and-`/about`
+#     stub HTTPClient so `applicationDidFinishLaunching` resolves a
+#     DriveClient and wires the publisher + change poller.
+#   - `DIMROOM_HARNESS_DRIVE_CHANGES_FIXTURE=<json>` swaps the live
+#     `DriveChangesClient` for a fixture-driven stub that serves
+#     successive pages from a JSON file.
+#
+# Assumes the capture-screenshots skill already built the App and CLI
+# binaries.
+set -euo pipefail
+
+REPO_ROOT="$(cd "$(dirname "$0")/.." && pwd)"
+SCREENSHOT_DIR="${SCREENSHOT_DIR:-$REPO_ROOT/.artifacts/delta-sync}"
+WORK_DIR="$REPO_ROOT/.artifacts/harness-delta-sync"
+CATALOG_PATH="$WORK_DIR/catalog.sqlite"
+PREVIEW_CACHE="$WORK_DIR/previews"
+FIXTURE_PATH="$WORK_DIR/changes-fixture.json"
+SOCKET="/tmp/dimroom-harness-delta-sync-$$.sock"
+APP_PID=""
+
+cleanup() {
+    if [ -n "$APP_PID" ] && kill -0 "$APP_PID" 2>/dev/null; then
+        kill "$APP_PID" 2>/dev/null || true
+        wait "$APP_PID" 2>/dev/null || true
+    fi
+    rm -f "$SOCKET"
+}
+trap cleanup EXIT
+
+APP_BIN="$REPO_ROOT/App/.build/debug/Dimroom"
+CLI_BIN="$REPO_ROOT/Packages/Harness/.build/debug/dimroom-cli"
+FIXTURE_BIN="$REPO_ROOT/Packages/Harness/.build/debug/dimroom-fixture"
+
+for bin in "$APP_BIN" "$CLI_BIN" "$FIXTURE_BIN"; do
+    if [ ! -x "$bin" ]; then
+        echo "ERROR: missing binary $bin — capture-screenshots skill should have built it"
+        exit 1
+    fi
+done
+
+take_screenshot() {
+    local name="$1"
+    local shot_path="$SCREENSHOT_DIR/$name.png"
+    echo "=== screenshot: $name ==="
+    local shot_out
+    shot_out=$("$CLI_BIN" screenshot "$shot_path" --socket "$SOCKET")
+    echo "$shot_out"
+    if ! echo "$shot_out" | grep -q '"ok"'; then
+        echo "ERROR: screenshot command did not return ok"
+        exit 1
+    fi
+    if [ ! -f "$shot_path" ]; then
+        echo "ERROR: screenshot file not created at $shot_path"
+        exit 1
+    fi
+}
+
+echo "=== Seeding catalog and fixture ==="
+rm -rf "$WORK_DIR"
+mkdir -p "$WORK_DIR"
+"$FIXTURE_BIN" seed \
+    --catalog "$CATALOG_PATH" \
+    --cache "$PREVIEW_CACHE" \
+    --seed-dir "$REPO_ROOT/fixtures/library-seed"
+
+if [ ! -f "$CATALOG_PATH" ]; then
+    echo "ERROR: dimroom-fixture did not produce $CATALOG_PATH"
+    exit 1
+fi
+
+# Fixture describes the sequence of `listChanges` responses the stub
+# returns. The third page reports a change to "stub-catalog-id", which
+# the poller matches against the cached catalog driveFileId we'll plant
+# in the file-id store below.
+cat >"$FIXTURE_PATH" <<'JSON'
+{
+  "startPageToken": "stub-start-token",
+  "pages": [
+    {
+      "newStartPageToken": "stub-token-after-empty",
+      "changes": []
+    },
+    {
+      "newStartPageToken": "stub-token-after-catalog-change",
+      "changes": [
+        {
+          "fileId": "stub-catalog-id",
+          "name": "catalog.sqlite",
+          "modifiedTime": "2026-05-17T08:00:00.000Z",
+          "mimeType": "application/x-sqlite3",
+          "parents": ["catalog-folder"],
+          "removed": false,
+          "trashed": false
+        }
+      ]
+    }
+  ]
+}
+JSON
+
+# Plant the cached catalog driveFileId before launching the app so the
+# poller's conflict-detection branch can match the fixture's change
+# entry. The store lives under Application Support by default; we
+# overwrite to a deterministic value just for this run.
+FILE_ID_PATH="${HOME}/Library/Application Support/Dimroom/drive-catalog-id.txt"
+mkdir -p "$(dirname "$FILE_ID_PATH")"
+PREVIOUS_FILE_ID=""
+if [ -f "$FILE_ID_PATH" ]; then
+    PREVIOUS_FILE_ID=$(cat "$FILE_ID_PATH")
+fi
+printf "stub-catalog-id" >"$FILE_ID_PATH"
+
+restore_file_id() {
+    if [ -n "$PREVIOUS_FILE_ID" ]; then
+        printf "%s" "$PREVIOUS_FILE_ID" >"$FILE_ID_PATH"
+    else
+        rm -f "$FILE_ID_PATH"
+    fi
+}
+trap 'cleanup; restore_file_id' EXIT
+
+mkdir -p "$SCREENSHOT_DIR"
+
+echo "=== Launching app in harness mode ==="
+DIMROOM_HARNESS_SOCKET="$SOCKET" \
+DIMROOM_HARNESS_DRIVE_STUB=1 \
+DIMROOM_HARNESS_DRIVE_CHANGES_FIXTURE="$FIXTURE_PATH" \
+    "$APP_BIN" --harness \
+    --fixture-catalog "$CATALOG_PATH" \
+    --preview-cache "$PREVIEW_CACHE" &
+APP_PID=$!
+
+echo "=== Waiting for socket ==="
+for i in $(seq 1 30); do
+    if [ -e "$SOCKET" ]; then
+        echo "Socket ready after ${i}s"
+        break
+    fi
+    if ! kill -0 "$APP_PID" 2>/dev/null; then
+        echo "ERROR: App exited before socket was ready"
+        exit 1
+    fi
+    sleep 1
+done
+if [ ! -e "$SOCKET" ]; then
+    echo "ERROR: Socket not ready after 30s"
+    exit 1
+fi
+
+echo "=== connect-drive — wire up the publisher + change poller ==="
+CONNECT_OUT=$("$CLI_BIN" connect-drive --socket "$SOCKET")
+echo "$CONNECT_OUT"
+CONNECT_STATUS=$(printf '%s' "$CONNECT_OUT" | "$REPO_ROOT/bin/harness-json-extract" 'data.status')
+if [ "$CONNECT_STATUS" != "connected" ]; then
+    echo "ERROR: expected drive auth status 'connected', got '$CONNECT_STATUS'"
+    exit 1
+fi
+
+echo "=== sync-from-drive — bootstrap path ==="
+BOOT_OUT=$("$CLI_BIN" sync-from-drive --socket "$SOCKET")
+echo "$BOOT_OUT"
+BOOT_STATUS=$(printf '%s' "$BOOT_OUT" | "$REPO_ROOT/bin/harness-json-extract" 'data.status')
+BOOT_TOKEN=$(printf '%s' "$BOOT_OUT" | "$REPO_ROOT/bin/harness-json-extract" 'data.pageToken')
+if [ "$BOOT_STATUS" != "bootstrapped" ]; then
+    echo "ERROR: expected first sync status 'bootstrapped', got '$BOOT_STATUS'"
+    exit 1
+fi
+if [ "$BOOT_TOKEN" != "stub-start-token" ]; then
+    echo "ERROR: expected pageToken 'stub-start-token', got '$BOOT_TOKEN'"
+    exit 1
+fi
+echo "  OK: bootstrapped at stub-start-token"
+
+take_screenshot "delta-sync-bootstrapped"
+
+echo "=== sync-from-drive — steady-state, expect noChanges ==="
+NOCHG_OUT=$("$CLI_BIN" sync-from-drive --socket "$SOCKET")
+echo "$NOCHG_OUT"
+NOCHG_STATUS=$(printf '%s' "$NOCHG_OUT" | "$REPO_ROOT/bin/harness-json-extract" 'data.status')
+NOCHG_TOKEN=$(printf '%s' "$NOCHG_OUT" | "$REPO_ROOT/bin/harness-json-extract" 'data.pageToken')
+if [ "$NOCHG_STATUS" != "noChanges" ]; then
+    echo "ERROR: expected status 'noChanges', got '$NOCHG_STATUS'"
+    exit 1
+fi
+if [ "$NOCHG_TOKEN" != "stub-token-after-empty" ]; then
+    echo "ERROR: expected pageToken 'stub-token-after-empty', got '$NOCHG_TOKEN'"
+    exit 1
+fi
+echo "  OK: noChanges at stub-token-after-empty"
+
+echo "=== sync-from-drive — fixture serves catalog change ==="
+CCHG_OUT=$("$CLI_BIN" sync-from-drive --socket "$SOCKET")
+echo "$CCHG_OUT"
+CCHG_STATUS=$(printf '%s' "$CCHG_OUT" | "$REPO_ROOT/bin/harness-json-extract" 'data.status')
+CCHG_FILEID=$(printf '%s' "$CCHG_OUT" | "$REPO_ROOT/bin/harness-json-extract" 'data.driveFileId')
+CCHG_TOKEN=$(printf '%s' "$CCHG_OUT" | "$REPO_ROOT/bin/harness-json-extract" 'data.pageToken')
+if [ "$CCHG_STATUS" != "catalogChanged" ]; then
+    echo "ERROR: expected status 'catalogChanged', got '$CCHG_STATUS'"
+    exit 1
+fi
+if [ "$CCHG_FILEID" != "stub-catalog-id" ]; then
+    echo "ERROR: expected driveFileId 'stub-catalog-id', got '$CCHG_FILEID'"
+    exit 1
+fi
+if [ "$CCHG_TOKEN" != "stub-token-after-catalog-change" ]; then
+    echo "ERROR: expected pageToken 'stub-token-after-catalog-change', got '$CCHG_TOKEN'"
+    exit 1
+fi
+echo "  OK: catalogChanged at stub-token-after-catalog-change"
+
+take_screenshot "delta-sync-catalog-changed"
+
+echo "=== quit ==="
+"$CLI_BIN" quit --socket "$SOCKET" 2>&1 || true
+
+sleep 1
+if kill -0 "$APP_PID" 2>/dev/null; then
+    echo "WARN: App did not exit after quit, killing"
+    kill "$APP_PID" 2>/dev/null || true
+fi
+APP_PID=""
+
+echo "=== Harness delta-sync flow PASSED ==="

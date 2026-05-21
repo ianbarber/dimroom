@@ -226,6 +226,22 @@ public final class DevelopViewModel: ObservableObject {
         scheduleSave()
     }
 
+    /// Boolean-flag equivalent of `setParameter`. The geometry/lens-corrections
+    /// stage exposes its two switches (chromatic aberration auto-correct,
+    /// natural lens vignette correction) through this same debounced
+    /// render+save path so a toggle generates a single `.editSave` undo entry.
+    public func setFlag(_ keyPath: WritableKeyPath<EditState, Bool>, value: Bool) {
+        capturePendingUndoPreviousIfNeeded()
+        editState[keyPath: keyPath] = value
+        hasUnsavedChanges = true
+        scheduleRender()
+        scheduleSave()
+    }
+
+    public func resetFlag(_ keyPath: WritableKeyPath<EditState, Bool>) {
+        setFlag(keyPath, value: false)
+    }
+
     /// Update a single per-band HSL slot. Mirrors `setParameter` for the
     /// scalar sliders: snapshots the previous state for the undo entry,
     /// flips `hasUnsavedChanges`, and schedules render + debounced save.
@@ -415,6 +431,24 @@ public final class DevelopViewModel: ObservableObject {
         case "vignetteAmount": return \.vignetteAmount
         case "vignetteRoundness": return \.vignetteRoundness
         case "vignetteSoftness": return \.vignetteSoftness
+        case "splitToneHighlightHue": return \.splitToneHighlightHue
+        case "splitToneHighlightSaturation": return \.splitToneHighlightSaturation
+        case "splitToneShadowHue": return \.splitToneShadowHue
+        case "splitToneShadowSaturation": return \.splitToneShadowSaturation
+        case "splitToneBalance": return \.splitToneBalance
+        case "perspectiveVertical": return \.perspectiveVertical
+        case "perspectiveHorizontal": return \.perspectiveHorizontal
+        case "perspectiveRotation": return \.perspectiveRotation
+        default: return nil
+        }
+    }
+
+    /// Boolean counterpart to `keyPath(forParameter:)`. The harness uses this
+    /// to route `setEditFlag` to the right edit-state field by name.
+    nonisolated public static func keyPath(forFlag name: String) -> WritableKeyPath<EditState, Bool>? {
+        switch name {
+        case "chromaticAberration": return \.chromaticAberration
+        case "lensVignette": return \.lensVignette
         default: return nil
         }
     }

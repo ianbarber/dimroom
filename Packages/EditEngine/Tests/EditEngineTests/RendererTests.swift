@@ -622,6 +622,90 @@ final class RendererTests: XCTestCase {
         XCTAssertGreaterThan(resCorner.r, srcCorner.r, "Positive vignette should brighten corners")
     }
 
+    /// At the slider's full negative extreme the corners must still
+    /// show source detail — they should be darker than the centre but
+    /// never crushed all the way to RGB=0. Regression for #240, where
+    /// an alpha-driven tint made the output translucent and the
+    /// underlying dark view background showed through as pure black.
+    func testFullNegativeVignetteDoesNotCrushCornersToBlack() {
+        let source = makeMidGreyImage()
+        let cornerX = 2
+        let cornerY = 2
+        let result = Renderer.render(
+            source: source,
+            editState: EditState(vignetteAmount: -100)
+        )
+        let resCorner = samplePixel(image: result, x: cornerX, y: cornerY, context: ctx)
+
+        XCTAssertGreaterThan(
+            Int(resCorner.r), 0,
+            "Corner red channel should retain some source signal at amount=-100"
+        )
+        XCTAssertGreaterThan(
+            Int(resCorner.g), 0,
+            "Corner green channel should retain some source signal at amount=-100"
+        )
+        XCTAssertGreaterThan(
+            Int(resCorner.b), 0,
+            "Corner blue channel should retain some source signal at amount=-100"
+        )
+        // Output must be fully opaque — the previous implementation made
+        // corners translucent so the view background bled through.
+        XCTAssertEqual(Int(resCorner.a), 255, "Vignette output must stay opaque")
+    }
+
+    /// The strength of the darkening should rise monotonically with
+    /// the magnitude of `vignetteAmount`. Regression for #240 where
+    /// any negative value saturated to fully black, eliminating the
+    /// difference between -10 and -100.
+    func testNegativeVignetteIsMonotonicInStrength() {
+        let source = makeMidGreyImage()
+        let cornerX = 2
+        let cornerY = 2
+        let srcCorner = samplePixel(image: source, x: cornerX, y: cornerY, context: ctx)
+
+        let small = Renderer.render(source: source, editState: EditState(vignetteAmount: -10))
+        let large = Renderer.render(source: source, editState: EditState(vignetteAmount: -100))
+        let smallCorner = samplePixel(image: small, x: cornerX, y: cornerY, context: ctx)
+        let largeCorner = samplePixel(image: large, x: cornerX, y: cornerY, context: ctx)
+
+        let smallDelta = Int(srcCorner.r) - Int(smallCorner.r)
+        let largeDelta = Int(srcCorner.r) - Int(largeCorner.r)
+
+        XCTAssertGreaterThan(smallDelta, 0, "amount=-10 must darken corners at least slightly")
+        XCTAssertGreaterThan(
+            largeDelta, smallDelta,
+            "amount=-100 must darken corners more than amount=-10 — got -10:\(smallDelta) vs -100:\(largeDelta)"
+        )
+    }
+
+    /// Mirror of the negative test: +100 must brighten the corner
+    /// more than +10, but never push it to fully white.
+    func testPositiveVignetteIsMonotonicAndNotBlownOut() {
+        let source = makeMidGreyImage()
+        let cornerX = 2
+        let cornerY = 2
+        let srcCorner = samplePixel(image: source, x: cornerX, y: cornerY, context: ctx)
+
+        let small = Renderer.render(source: source, editState: EditState(vignetteAmount: 10))
+        let large = Renderer.render(source: source, editState: EditState(vignetteAmount: 100))
+        let smallCorner = samplePixel(image: small, x: cornerX, y: cornerY, context: ctx)
+        let largeCorner = samplePixel(image: large, x: cornerX, y: cornerY, context: ctx)
+
+        let smallDelta = Int(smallCorner.r) - Int(srcCorner.r)
+        let largeDelta = Int(largeCorner.r) - Int(srcCorner.r)
+
+        XCTAssertGreaterThan(smallDelta, 0, "amount=+10 must brighten corners at least slightly")
+        XCTAssertGreaterThan(
+            largeDelta, smallDelta,
+            "amount=+100 must brighten corners more than amount=+10"
+        )
+        XCTAssertLessThan(
+            Int(largeCorner.r), 255,
+            "Corner red should not be blown out at amount=+100"
+        )
+    }
+
     // MARK: - HSL
 
     /// All-zero HSL arrays must short-circuit the kernel and leave a
@@ -943,6 +1027,136 @@ final class RendererTests: XCTestCase {
             editState: EditState(luminanceNoiseReduction: 80, chrominanceNoiseReduction: 80)
         )
         XCTAssertEqual(result.extent, source.extent)
+    }
+
+    // MARK: - Split Toning
+
+    func testSplitToneIdentityIsPassThrough() {
+        // Both saturations at 0 must short-circuit the kernel entirely even
+        // when hue and balance carry arbitrary non-zero values — those are
+        // no-ops without a tint colour to apply.
+        let source = makeGradientImage()
+        let mid = Int(source.extent.width) / 2
+        let srcPx = samplePixel(image: source, x: mid, y: mid, context: ctx)
+        let result = Renderer.render(
+            source: source,
+            editState: EditState(
+                splitToneHighlightHue: 30,
+                splitToneHighlightSaturation: 0,
+                splitToneShadowHue: 210,
+                splitToneShadowSaturation: 0,
+                splitToneBalance: 40
+            )
+        )
+        let resPx = samplePixel(image: result, x: mid, y: mid, context: ctx)
+        XCTAssertEqual(srcPx.r, resPx.r)
+        XCTAssertEqual(srcPx.g, resPx.g)
+        XCTAssertEqual(srcPx.b, resPx.b)
+        XCTAssertEqual(srcPx.a, resPx.a)
+    }
+
+    func testSplitToneHighlightTintWarmsBrightPixel() {
+        // Orange highlight tint (hue 30) on a bright pixel must shift it
+        // warm — red channel rises and blue channel drops relative to the
+        // grey source.
+        let source = makeGradientImage()
+        let width = Int(source.extent.width)
+        let midY = Int(source.extent.height) / 2
+        let brightX = width - 4
+
+        let srcPx = samplePixel(image: source, x: brightX, y: midY, context: ctx)
+        let result = Renderer.render(
+            source: source,
+            editState: EditState(
+                splitToneHighlightHue: 30,
+                splitToneHighlightSaturation: 50
+            )
+        )
+        let resPx = samplePixel(image: result, x: brightX, y: midY, context: ctx)
+        XCTAssertGreaterThanOrEqual(Int(resPx.r), Int(srcPx.r), "Warm highlight tint should keep red at or above source")
+        XCTAssertGreaterThan(Int(resPx.r), Int(resPx.b), "Warm highlight tint should make red dominate blue on bright pixels")
+    }
+
+    func testSplitToneShadowTintCoolsDarkPixel() {
+        // Blue shadow tint (hue 210) on a dark pixel must shift it cool —
+        // blue channel rises and red drops or stays flat.
+        let source = makeGradientImage()
+        let midY = Int(source.extent.height) / 2
+        let darkX = 3
+
+        let srcPx = samplePixel(image: source, x: darkX, y: midY, context: ctx)
+        let result = Renderer.render(
+            source: source,
+            editState: EditState(
+                splitToneShadowHue: 210,
+                splitToneShadowSaturation: 50
+            )
+        )
+        let resPx = samplePixel(image: result, x: darkX, y: midY, context: ctx)
+        XCTAssertGreaterThanOrEqual(Int(resPx.b), Int(srcPx.b), "Cool shadow tint should keep blue at or above source")
+        XCTAssertGreaterThan(Int(resPx.b), Int(resPx.r), "Cool shadow tint should make blue dominate red on dark pixels")
+    }
+
+    func testSplitToneShadowTintDoesNotBleedIntoHighlights() {
+        // A pure shadow tint should leave the bright end of the gradient
+        // largely unchanged — masking is what differentiates split toning
+        // from a global tint.
+        let source = makeGradientImage()
+        let width = Int(source.extent.width)
+        let midY = Int(source.extent.height) / 2
+        let brightX = width - 4
+
+        let srcPx = samplePixel(image: source, x: brightX, y: midY, context: ctx)
+        let result = Renderer.render(
+            source: source,
+            editState: EditState(
+                splitToneShadowHue: 210,
+                splitToneShadowSaturation: 80
+            )
+        )
+        let resPx = samplePixel(image: result, x: brightX, y: midY, context: ctx)
+        XCTAssertEqual(Int(resPx.r), Int(srcPx.r), accuracy: 12, "Shadow tint must not heavily shift bright pixels")
+        XCTAssertEqual(Int(resPx.g), Int(srcPx.g), accuracy: 12)
+        XCTAssertEqual(Int(resPx.b), Int(srcPx.b), accuracy: 12)
+    }
+
+    func testSplitToneBalanceShiftsMidpoint() {
+        // With balance pushed strongly toward shadows, even a midtone
+        // pixel reads as "shadow" — so the shadow tint dominates there.
+        // With balance pushed toward highlights, the same midtone reads
+        // as "highlight" — so the highlight tint dominates instead.
+        let source = makeGradientImage()
+        let mid = Int(source.extent.width) / 2
+        let midY = Int(source.extent.height) / 2
+
+        let shadowDominant = Renderer.render(
+            source: source,
+            editState: EditState(
+                splitToneHighlightHue: 30,
+                splitToneHighlightSaturation: 80,
+                splitToneShadowHue: 210,
+                splitToneShadowSaturation: 80,
+                splitToneBalance: 100 // push midpoint toward white → mid reads as shadow
+            )
+        )
+        let shadowPx = samplePixel(image: shadowDominant, x: mid, y: midY, context: ctx)
+
+        let highlightDominant = Renderer.render(
+            source: source,
+            editState: EditState(
+                splitToneHighlightHue: 30,
+                splitToneHighlightSaturation: 80,
+                splitToneShadowHue: 210,
+                splitToneShadowSaturation: 80,
+                splitToneBalance: -100 // push midpoint toward black → mid reads as highlight
+            )
+        )
+        let highlightPx = samplePixel(image: highlightDominant, x: mid, y: midY, context: ctx)
+
+        // When balance = +100 the midtone should read shadow (cool/blue);
+        // when balance = -100 the midtone should read highlight (warm/red).
+        XCTAssertGreaterThan(Int(shadowPx.b), Int(shadowPx.r), "Balance = +100 should make midtone read as shadow (blue dominant)")
+        XCTAssertGreaterThan(Int(highlightPx.r), Int(highlightPx.b), "Balance = -100 should make midtone read as highlight (red dominant)")
     }
 
     func testClaritySymmetry() {

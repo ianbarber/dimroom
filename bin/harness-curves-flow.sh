@@ -55,6 +55,8 @@ fi
 
 echo "=== Launching app in harness mode ==="
 DIMROOM_HARNESS_SOCKET="$SOCKET" \
+DIMROOM_HARNESS_DISABLE_DRIVE=1 \
+DIMROOM_HARNESS_AUTO_CONFIRM_RESTORE=0 \
     "$APP_BIN" --harness \
     --fixture-catalog "$CATALOG_PATH" \
     --preview-cache "$PREVIEW_CACHE" &
@@ -173,6 +175,7 @@ else:
 
 echo "=== set-curve-points luminance S-curve ==="
 "$CLI_BIN" set-curve-points "$ASSET_ID" luminance "[[0,0],[0.25,0.15],[0.75,0.85],[1,1]]" --socket "$SOCKET" >/dev/null
+"$CLI_BIN" select-curve-channel luminance --socket "$SOCKET" >/dev/null
 sleep 1
 "$CLI_BIN" screenshot "$SCREENSHOT_DIR/curves-luminance-s.png" --socket "$SOCKET" >/dev/null
 if [ ! -f "$SCREENSHOT_DIR/curves-luminance-s.png" ]; then
@@ -183,6 +186,7 @@ assert_curve_length luminance 4
 
 echo "=== set-curve-points red lift ==="
 "$CLI_BIN" set-curve-points "$ASSET_ID" red "[[0,0.05],[0.5,0.6],[1,1]]" --socket "$SOCKET" >/dev/null
+"$CLI_BIN" select-curve-channel red --socket "$SOCKET" >/dev/null
 sleep 1
 "$CLI_BIN" screenshot "$SCREENSHOT_DIR/curves-red.png" --socket "$SOCKET" >/dev/null
 if [ ! -f "$SCREENSHOT_DIR/curves-red.png" ]; then
@@ -205,6 +209,7 @@ assert_curve_identity red
 assert_curve_identity green
 assert_curve_identity blue
 
+"$CLI_BIN" select-curve-channel luminance --socket "$SOCKET" >/dev/null
 "$CLI_BIN" screenshot "$SCREENSHOT_DIR/curves-reset.png" --socket "$SOCKET" >/dev/null
 
 echo "=== quit ==="

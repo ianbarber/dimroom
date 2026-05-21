@@ -72,6 +72,8 @@ fi
 
 echo "=== Launching app in harness mode (hold-until-released stub downloader) ==="
 DIMROOM_HARNESS_SOCKET="$SOCKET" \
+DIMROOM_HARNESS_DISABLE_DRIVE=1 \
+DIMROOM_HARNESS_AUTO_CONFIRM_RESTORE=0 \
 DIMROOM_HARNESS_STUB_DOWNLOADER="hold-until-released" \
 DIMROOM_ORIGINALS_CACHE_BYTES="1048576" \
     "$APP_BIN" --harness \

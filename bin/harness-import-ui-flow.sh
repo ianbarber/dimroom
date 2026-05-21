@@ -80,6 +80,8 @@ rm -f "$CATALOG_PATH"
 
 echo "=== Launching app in harness mode ==="
 DIMROOM_HARNESS_SOCKET="$SOCKET" \
+DIMROOM_HARNESS_DISABLE_DRIVE=1 \
+DIMROOM_HARNESS_AUTO_CONFIRM_RESTORE=0 \
 DIMROOM_ORIGINALS_DIR="$ORIGINALS_DIR" \
 "$APP_BIN" --harness --fixture-catalog "$CATALOG_PATH" --preview-cache "$PREVIEW_CACHE" &
 APP_PID=$!

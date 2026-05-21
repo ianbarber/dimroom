@@ -41,7 +41,10 @@ fi
 
 echo "=== Launching app in harness mode ==="
 # Set the socket path via env so the app uses our test socket
-DIMROOM_HARNESS_SOCKET="$SOCKET" "$APP_BIN" --harness --fixture-catalog "$FIXTURE_CATALOG" &
+DIMROOM_HARNESS_SOCKET="$SOCKET" \
+DIMROOM_HARNESS_DISABLE_DRIVE=1 \
+DIMROOM_HARNESS_AUTO_CONFIRM_RESTORE=0 \
+    "$APP_BIN" --harness --fixture-catalog "$FIXTURE_CATALOG" &
 APP_PID=$!
 
 echo "=== Waiting for socket ==="

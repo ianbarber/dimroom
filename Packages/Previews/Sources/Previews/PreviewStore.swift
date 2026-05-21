@@ -210,7 +210,8 @@ public actor PreviewStore {
             return
         }
 
-        let rendered = Renderer.render(source: source, editState: editState)
+        let lensProfile = LensProfileLibrary.lookup(for: asset.lensModel)
+        let rendered = Renderer.render(source: source, editState: editState, lensProfile: lensProfile)
 
         for kind in PreviewKind.allCases {
             let target = CachePaths.fileURL(

@@ -3,9 +3,17 @@ import Catalog
 
 /// Stateless Core Image filter graph renderer.
 ///
-/// Applies an `EditState` to a source `CIImage` by chaining nine filter stages
-/// in a fixed order. Each stage is a no-op when its parameter is at identity.
-/// The caller owns the `CIContext` — this renderer only builds the filter graph.
+/// Applies an `EditState` to a source `CIImage` by chaining filter stages in a
+/// fixed order. Each stage is a no-op when its parameter is at identity. The
+/// caller owns the `CIContext` — this renderer only builds the filter graph.
+///
+/// Pipeline order:
+///   1. Tone / colour: exposure, noise reduction, white balance, highlights+shadows,
+///      whites+blacks, contrast, clarity, sharpening, vibrance, saturation.
+///   2. Geometric / lens stage: chromatic aberration correction, perspective +
+///      fine rotation, lens-vignette correction, crop.
+///   3. Creative vignette (applied after crop so the vignette tracks the
+///      final framing rather than the uncropped sensor frame).
 public enum Renderer {
 
     /// Apply all edits described by `editState` to `source` and return the result.
@@ -38,6 +46,22 @@ public enum Renderer {
             saturation: editState.hslSaturation,
             luminance: editState.hslLuminance
         )
+        image = applySplitTone(
+            image,
+            highlightHue: editState.splitToneHighlightHue,
+            highlightSaturation: editState.splitToneHighlightSaturation,
+            shadowHue: editState.splitToneShadowHue,
+            shadowSaturation: editState.splitToneShadowSaturation,
+            balance: editState.splitToneBalance
+        )
+        image = applyChromaticAberrationCorrection(image, enabled: editState.chromaticAberration)
+        image = applyGeometryCorrections(
+            image,
+            vertical: editState.perspectiveVertical,
+            horizontal: editState.perspectiveHorizontal,
+            rotation: editState.perspectiveRotation
+        )
+        image = applyLensVignetteCorrection(image, enabled: editState.lensVignette)
         image = applyCrop(image, rect: editState.cropRect, angle: editState.cropAngle)
         image = applyVignette(
             image,
@@ -199,6 +223,47 @@ public enum Renderer {
         return filter.outputImage!.cropped(to: image.extent)
     }
 
+    private static func applySplitTone(
+        _ image: CIImage,
+        highlightHue: Double,
+        highlightSaturation: Double,
+        shadowHue: Double,
+        shadowSaturation: Double,
+        balance: Double
+    ) -> CIImage {
+        // Fast path: both saturations at 0 means no tint to add. Hue and
+        // balance alone are no-ops in that case.
+        guard highlightSaturation > 0 || shadowSaturation > 0 else { return image }
+        guard let kernel = SplitToneKernel.kernel else { return image }
+
+        let highlight = SplitToneKernel.hslToRGB(
+            hue: highlightHue,
+            saturation: highlightSaturation / 100.0
+        )
+        let shadow = SplitToneKernel.hslToRGB(
+            hue: shadowHue,
+            saturation: shadowSaturation / 100.0
+        )
+
+        let highlightVec = CIVector(
+            x: CGFloat(highlight.0),
+            y: CGFloat(highlight.1),
+            z: CGFloat(highlight.2)
+        )
+        let shadowVec = CIVector(
+            x: CGFloat(shadow.0),
+            y: CGFloat(shadow.1),
+            z: CGFloat(shadow.2)
+        )
+        let balanceArg = max(-1.0, min(1.0, balance / 100.0))
+
+        let result = kernel.apply(
+            extent: image.extent,
+            arguments: [image, highlightVec, shadowVec, balanceArg]
+        )
+        return result ?? image
+    }
+
     private static func applySharpening(_ image: CIImage, sharpening: Double) -> CIImage {
         guard sharpening != 0 else { return image }
         // Luminance-only sharpen avoids the colour fringing CIUnsharpMask can
@@ -241,21 +306,40 @@ public enum Renderer {
         let outerRadius = halfMin + (halfDiag - halfMin) * (1.0 - roundnessFraction)
         let innerRadius = max(0.0, outerRadius - halfMin * softnessFraction)
 
+        // The mask itself encodes the effect strength: outer alpha rises
+        // to `strength` (not 1) so the blend mixes only that fraction of
+        // the opaque tint over the source. Putting the strength on the
+        // mask (rather than the tint's alpha) keeps the output fully
+        // opaque — the previous alpha-driven tint produced corners with
+        // alpha < 1 that the Develop view's dark background showed
+        // through, making any negative amount read as near-black (#240).
+        //
+        // `maxStrength` caps the effect so ±100 reads as "strong but
+        // photographic" rather than crushing corners to pure black or
+        // white. The linear amount→strength mapping then gives a
+        // visible, monotonic gradient across the full slider range.
+        let maxStrength = 0.75
+        let strength = (Swift.abs(amount) / 100.0) * maxStrength
+
         let gradient = CIFilter(name: "CIRadialGradient")!
         gradient.setValue(center, forKey: "inputCenter")
         gradient.setValue(innerRadius, forKey: "inputRadius0")
         gradient.setValue(outerRadius, forKey: "inputRadius1")
-        // Mask: inner is black (no effect), outer is white (full effect).
+        // Mask: inner is fully transparent (no effect), outer reaches
+        // `strength` in both luminance and alpha so the blend factor at
+        // the corner equals `strength`.
         gradient.setValue(CIColor(red: 0, green: 0, blue: 0, alpha: 0), forKey: "inputColor0")
-        gradient.setValue(CIColor(red: 1, green: 1, blue: 1, alpha: 1), forKey: "inputColor1")
+        gradient.setValue(
+            CIColor(red: strength, green: strength, blue: strength, alpha: strength),
+            forKey: "inputColor1"
+        )
         let mask = gradient.outputImage!.cropped(to: extent)
 
-        // Blend the image with a tint image (black for dark, white for light)
-        // using the radial mask — corners converge toward the tint colour.
-        let intensity = Swift.abs(amount) / 100.0
+        // Opaque tint — alpha=1 on both channels so the blended output
+        // stays opaque regardless of the mask's strength.
         let tintColor: CIColor = amount < 0
-            ? CIColor(red: 0, green: 0, blue: 0, alpha: CGFloat(intensity))
-            : CIColor(red: 1, green: 1, blue: 1, alpha: CGFloat(intensity))
+            ? CIColor(red: 0, green: 0, blue: 0, alpha: 1)
+            : CIColor(red: 1, green: 1, blue: 1, alpha: 1)
         let tint = CIImage(color: tintColor).cropped(to: extent)
 
         let blend = CIFilter(name: "CIBlendWithMask")!
@@ -263,6 +347,150 @@ public enum Renderer {
         blend.setValue(image, forKey: kCIInputBackgroundImageKey)
         blend.setValue(mask, forKey: "inputMaskImage")
         return blend.outputImage!.cropped(to: extent)
+    }
+
+    /// Keystone correction + fine rotation via a single `CIPerspectiveTransform`.
+    /// All three controls fold into one warped quad so we resample once.
+    ///
+    /// Slider mapping: ±100 vertical inset = ±25 % of image width applied to the
+    /// top/bottom edges (positive vertical pulls the top edge inward to correct
+    /// converging verticals shot looking up). Horizontal mirrors that on the left
+    /// and right edges. Rotation is a corner rotation about the centre and is
+    /// composed into the same quad — separate from `cropAngle`, which lives on
+    /// the crop tool and is not destructive to perspective.
+    ///
+    /// `CIPerspectiveTransform` expands the extent to the bounding box of the
+    /// warped corners; we `cropped(to:)` the original extent so downstream
+    /// stages see a canonical extent. Same gotcha as `applySharpening`.
+    private static func applyGeometryCorrections(
+        _ image: CIImage,
+        vertical: Double,
+        horizontal: Double,
+        rotation: Double
+    ) -> CIImage {
+        guard vertical != 0 || horizontal != 0 || rotation != 0 else { return image }
+
+        let extent = image.extent
+        let w = extent.width
+        let h = extent.height
+        let cx = extent.midX
+        let cy = extent.midY
+
+        // Vertical keystone: positive pulls the top edge inward (corrects
+        // looking-up converging verticals). Negative pulls the bottom.
+        // ±100 → ±25 % of width inset on the corresponding edge.
+        let vFrac = vertical / 400.0
+        let topInset = max(0.0, vFrac) * w
+        let bottomInset = max(0.0, -vFrac) * w
+
+        // Horizontal keystone: positive pulls the right edge inward (corrects
+        // looking-right). Negative pulls the left edge.
+        let hFrac = horizontal / 400.0
+        let rightInset = max(0.0, hFrac) * h
+        let leftInset = max(0.0, -hFrac) * h
+
+        // Build the warped quad in image coordinates (origin bottom-left).
+        var tl = CGPoint(x: extent.minX + topInset, y: extent.maxY - leftInset)
+        var tr = CGPoint(x: extent.maxX - topInset, y: extent.maxY - rightInset)
+        var bl = CGPoint(x: extent.minX + bottomInset, y: extent.minY + leftInset)
+        var br = CGPoint(x: extent.maxX - bottomInset, y: extent.minY + rightInset)
+
+        if rotation != 0 {
+            let radians = rotation * .pi / 180.0
+            let cosR = CGFloat(cos(radians))
+            let sinR = CGFloat(sin(radians))
+            func rotate(_ p: CGPoint) -> CGPoint {
+                let dx = p.x - cx
+                let dy = p.y - cy
+                return CGPoint(x: cx + dx * cosR - dy * sinR, y: cy + dx * sinR + dy * cosR)
+            }
+            tl = rotate(tl); tr = rotate(tr); bl = rotate(bl); br = rotate(br)
+        }
+
+        let filter = CIFilter(name: "CIPerspectiveTransform")!
+        filter.setValue(image, forKey: kCIInputImageKey)
+        filter.setValue(CIVector(cgPoint: tl), forKey: "inputTopLeft")
+        filter.setValue(CIVector(cgPoint: tr), forKey: "inputTopRight")
+        filter.setValue(CIVector(cgPoint: bl), forKey: "inputBottomLeft")
+        filter.setValue(CIVector(cgPoint: br), forKey: "inputBottomRight")
+        return filter.outputImage!.cropped(to: extent)
+    }
+
+    /// Auto-correct chromatic aberration. Without a lens profile this is a
+    /// uniform per-channel scale about the image centre — small enough to
+    /// avoid visible softening of in-focus areas but large enough to nudge
+    /// purple/green fringes on a typical fast-prime wide-open shot.
+    ///
+    /// Real auto-correction needs an EXIF lens-model lookup; that's tracked
+    /// for a later stage. Until then this is a placeholder that's honest
+    /// about being a placeholder.
+    private static func applyChromaticAberrationCorrection(_ image: CIImage, enabled: Bool) -> CIImage {
+        guard enabled else { return image }
+
+        let extent = image.extent
+        let cx = extent.midX
+        let cy = extent.midY
+
+        // Scale R and B about the centre by ±0.5 % — typical lateral CA on
+        // mid-range lenses is well under 1 % on the worst channel. Conservative
+        // enough to avoid visible scaling on a clean image; large enough to be
+        // measurable so this placeholder isn't a silent no-op.
+        let rScale: CGFloat = 0.995
+        let bScale: CGFloat = 1.005
+
+        func scaled(_ image: CIImage, factor: CGFloat) -> CIImage {
+            let transform = CGAffineTransform(translationX: cx, y: cy)
+                .scaledBy(x: factor, y: factor)
+                .translatedBy(x: -cx, y: -cy)
+            return image.transformed(by: transform).cropped(to: extent)
+        }
+
+        // Extract each channel as a single-channel image (other channels zeroed
+        // out in the matrix), scale, and additively combine.
+        func channelOnly(_ image: CIImage, r: CGFloat, g: CGFloat, b: CGFloat) -> CIImage {
+            let f = CIFilter(name: "CIColorMatrix")!
+            f.setValue(image, forKey: kCIInputImageKey)
+            f.setValue(CIVector(x: r, y: 0, z: 0, w: 0), forKey: "inputRVector")
+            f.setValue(CIVector(x: 0, y: g, z: 0, w: 0), forKey: "inputGVector")
+            f.setValue(CIVector(x: 0, y: 0, z: b, w: 0), forKey: "inputBVector")
+            f.setValue(CIVector(x: 0, y: 0, z: 0, w: 1), forKey: "inputAVector")
+            return f.outputImage!
+        }
+
+        let rOnly = scaled(channelOnly(image, r: 1, g: 0, b: 0), factor: rScale)
+        let gOnly = channelOnly(image, r: 0, g: 1, b: 0)
+        let bOnly = scaled(channelOnly(image, r: 0, g: 0, b: 1), factor: bScale)
+
+        func add(_ a: CIImage, _ b: CIImage) -> CIImage {
+            let f = CIFilter(name: "CIAdditionCompositing")!
+            f.setValue(a, forKey: kCIInputImageKey)
+            f.setValue(b, forKey: kCIInputBackgroundImageKey)
+            return f.outputImage!
+        }
+
+        return add(rOnly, add(gOnly, bOnly)).cropped(to: extent)
+    }
+
+    /// Auto-correct natural lens vignetting (corner darkening) with a fixed
+    /// brightening profile centred on the frame. Distinct from the creative
+    /// `applyVignette` stage which intentionally darkens or lightens corners
+    /// — this stage flattens the lens's intrinsic falloff so the creative
+    /// vignette has a known starting point.
+    ///
+    /// Like CA correction, this is a placeholder until lens-profile data is
+    /// wired in. Apply a small inverted vignette: bright at the corners,
+    /// neutral at centre, so the multiply lifts shadowed corners without
+    /// touching the middle of the frame.
+    private static func applyLensVignetteCorrection(_ image: CIImage, enabled: Bool) -> CIImage {
+        guard enabled else { return image }
+        let filter = CIFilter(name: "CIVignette")!
+        filter.setValue(image, forKey: kCIInputImageKey)
+        // Negative intensity inverts the vignette: corners brighten rather
+        // than darken. Conservative magnitude — anything stronger and a clean
+        // image gets blown corners.
+        filter.setValue(-0.3, forKey: "inputIntensity")
+        filter.setValue(1.5, forKey: "inputRadius")
+        return filter.outputImage!.cropped(to: image.extent)
     }
 
     /// Apply per-band hue / saturation / luminance shifts via the

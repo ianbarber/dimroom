@@ -384,6 +384,69 @@ public final class CatalogDatabase: @unchecked Sendable {
         }
     }
 
+    // MARK: - Sync State
+
+    /// Keys used by SyncEngine to persist its bookkeeping in the catalog
+    /// itself, so the state round-trips across machines together with the
+    /// rest of the data. Listed here (rather than inside SyncEngine) so
+    /// the accessors below can stay private to this file.
+    public enum SyncStateKey: String, Sendable {
+        case drivePageToken
+        case lastPublishedCatalogModifiedTime
+    }
+
+    /// Look up a `sync_state` row by key. Returns `nil` when the row
+    /// doesn't exist yet (e.g. fresh catalog, no bootstrap yet).
+    public func loadSyncState(_ key: SyncStateKey) throws -> String? {
+        try dbQueue.read { db in
+            try String.fetchOne(
+                db,
+                sql: "SELECT value FROM sync_state WHERE key = ?",
+                arguments: [key.rawValue]
+            )
+        }
+    }
+
+    /// Upsert a `sync_state` value. Deliberately does **not** call
+    /// `fireOnChange()` — sync bookkeeping is internal to the SyncEngine
+    /// and must never trigger the publisher's debouncer (otherwise every
+    /// poll would kick off a fresh upload).
+    public func saveSyncState(_ key: SyncStateKey, value: String) throws {
+        try dbQueue.write { db in
+            try db.execute(
+                sql: "INSERT INTO sync_state (key, value) VALUES (?, ?) "
+                    + "ON CONFLICT(key) DO UPDATE SET value = excluded.value",
+                arguments: [key.rawValue, value]
+            )
+        }
+    }
+
+    /// Convenience: load the cached Drive page token (or `nil` if no
+    /// bootstrap has run).
+    public func loadDrivePageToken() throws -> String? {
+        try loadSyncState(.drivePageToken)
+    }
+
+    /// Convenience: persist the Drive page token returned by
+    /// `changes.list`.
+    public func saveDrivePageToken(_ token: String) throws {
+        try saveSyncState(.drivePageToken, value: token)
+    }
+
+    /// Convenience: load the Drive `modifiedTime` of the catalog file as
+    /// of the most recent successful publish. Used by the change poller
+    /// to detect "remote catalog has moved past what we published" → a
+    /// conflict even when we have no pending local debounced edits.
+    /// Returned as an ISO-8601 string so callers don't pay a date-parsing
+    /// cost when they only need to compare equality.
+    public func loadLastPublishedCatalogModifiedTime() throws -> String? {
+        try loadSyncState(.lastPublishedCatalogModifiedTime)
+    }
+
+    public func saveLastPublishedCatalogModifiedTime(_ iso8601: String) throws {
+        try saveSyncState(.lastPublishedCatalogModifiedTime, value: iso8601)
+    }
+
     private func fireOnChange() {
         onChangeLock.lock()
         let callback = _onChange

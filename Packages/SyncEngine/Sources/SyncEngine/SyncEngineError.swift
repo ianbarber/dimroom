@@ -17,4 +17,9 @@ public enum SyncEngineError: Error, Sendable, Equatable {
     case fileIdStoreFailed(underlying: String)
     /// No refresh token in the Keychain — caller must authenticate first.
     case notAuthenticated
+    /// `drive.changes.list` (or `getStartPageToken`) failed after the
+    /// retry budget was exhausted.
+    case changesFetchFailed(underlying: String)
+    /// Persisting / loading the Drive page token in `sync_state` failed.
+    case pageTokenStoreFailed(underlying: String)
 }

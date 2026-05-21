@@ -26,9 +26,20 @@ final class HarnessController: @unchecked Sendable {
     private let undoStack: UndoStack?
     private let catalogPublisher: CatalogPublisher?
     private let driveAuthState: DriveAuthState?
+    private let changePoller: ChangePoller?
     private let catalogRestoreUploader: (any CatalogUploading)?
     private let catalogRestorePath: String?
     private let catalogRestoreFileIdStore: (any DriveFileIdStore)?
+    /// Owner of the unified export entry point (`startExport(...)`). The
+    /// harness export commands route through it so a regression in either
+    /// the menu→sheet path or the harness path is caught by the same
+    /// Layer C flow (#242).
+    private let appDelegate: AppDelegate
+    /// Wire-format string identifying the token store backing the
+    /// `DriveClient` (`"keychain"`, `"in-memory"`, `"stub-in-memory"`).
+    /// Surfaced via `driveAuthState` so Layer C flows can assert that
+    /// harness runs never hit the Keychain (#260).
+    private let tokenStoreKind: String?
     private var server: HarnessServer?
 
     init(
@@ -41,14 +52,17 @@ final class HarnessController: @unchecked Sendable {
         editClipboard: EditClipboard,
         exportCoordinator: ExportCoordinator,
         uploadCoordinator: UploadCoordinator,
+        appDelegate: AppDelegate,
         driveUploader: (any DriveUploading)? = nil,
         originalsCoordinator: OriginalsCoordinator? = nil,
         undoStack: UndoStack? = nil,
         catalogPublisher: CatalogPublisher? = nil,
         driveAuthState: DriveAuthState? = nil,
+        changePoller: ChangePoller? = nil,
         catalogRestoreUploader: (any CatalogUploading)? = nil,
         catalogRestorePath: String? = nil,
-        catalogRestoreFileIdStore: (any DriveFileIdStore)? = nil
+        catalogRestoreFileIdStore: (any DriveFileIdStore)? = nil,
+        tokenStoreKind: String? = nil
     ) {
         self.router = router
         self.catalog = catalog
@@ -59,14 +73,17 @@ final class HarnessController: @unchecked Sendable {
         self.editClipboard = editClipboard
         self.exportCoordinator = exportCoordinator
         self.uploadCoordinator = uploadCoordinator
+        self.appDelegate = appDelegate
         self.driveUploader = driveUploader
         self.originalsCoordinator = originalsCoordinator
         self.undoStack = undoStack
         self.catalogPublisher = catalogPublisher
         self.driveAuthState = driveAuthState
+        self.changePoller = changePoller
         self.catalogRestoreUploader = catalogRestoreUploader
         self.catalogRestorePath = catalogRestorePath
         self.catalogRestoreFileIdStore = catalogRestoreFileIdStore
+        self.tokenStoreKind = tokenStoreKind
     }
 
     func start(socketPath: String = HarnessServer.defaultSocketPath) throws {
@@ -226,6 +243,16 @@ final class HarnessController: @unchecked Sendable {
         case .export(let destinationPath, let format, let applyEdits):
             return await handleExport(destinationPath: destinationPath, format: format, applyEdits: applyEdits)
 
+        case .triggerExportMenu:
+            return await handleTriggerExportMenu()
+
+        case .completeExportSheet(let destinationPath, let format, let applyEdits):
+            return await handleCompleteExportSheet(
+                destinationPath: destinationPath,
+                format: format,
+                applyEdits: applyEdits
+            )
+
         case .fetchOriginal(let assetId):
             return await handleFetchOriginal(assetId: assetId)
 
@@ -234,6 +261,12 @@ final class HarnessController: @unchecked Sendable {
 
         case .resetEditParameter(let assetId, let parameter):
             return await handleResetEditParameter(assetId: assetId, parameter: parameter)
+
+        case .setEditFlag(let assetId, let parameter, let value):
+            return await handleSetEditFlag(assetId: assetId, parameter: parameter, value: value)
+
+        case .resetEditFlag(let assetId, let parameter):
+            return await handleResetEditFlag(assetId: assetId, parameter: parameter)
 
         case .setEditArrayParameter(let assetId, let parameter, let index, let value):
             return await handleSetEditArrayParameter(assetId: assetId, parameter: parameter, index: index, value: value)
@@ -246,6 +279,9 @@ final class HarnessController: @unchecked Sendable {
 
         case .resetCurve(let assetId, let channel):
             return await handleResetCurve(assetId: assetId, channel: channel)
+
+        case .selectCurveChannel(let channel):
+            return await handleSelectCurveChannel(channel: channel)
 
         case .undo:
             return await handleUndo()
@@ -323,6 +359,9 @@ final class HarnessController: @unchecked Sendable {
         case .releaseHeldDownloads:
             HoldUntilReleasedHarnessDownloader.shared.release()
             return .ok()
+
+        case .syncFromDrive:
+            return await handleSyncFromDrive()
 
         case .restoreCatalogFromDrive(let confirm):
             return await handleRestoreCatalogFromDrive(confirm: confirm)
@@ -413,10 +452,14 @@ final class HarnessController: @unchecked Sendable {
 
     private func handleDriveAuthState() async -> Response {
         guard let driveAuthState else {
-            return .ok(data: .dictionary([
+            var payload: [String: AnyCodableValue] = [
                 "status": .string("disconnected"),
                 "configured": .bool(false),
-            ]))
+            ]
+            if let kind = tokenStoreKind {
+                payload["tokenStoreKind"] = .string(kind)
+            }
+            return .ok(data: .dictionary(payload))
         }
         let snapshot: (status: String, email: String?, needsReauthMessage: String?) = await MainActor.run {
             let message = driveAuthState.needsReauthMessage
@@ -439,6 +482,9 @@ final class HarnessController: @unchecked Sendable {
             payload["needsReauthMessage"] = .string(message)
         } else {
             payload["needsReauthMessage"] = .null
+        }
+        if let kind = tokenStoreKind {
+            payload["tokenStoreKind"] = .string(kind)
         }
         return .ok(data: .dictionary(payload))
     }
@@ -584,6 +630,58 @@ final class HarnessController: @unchecked Sendable {
         }
     }
 
+    // MARK: - Delta sync
+
+    private func handleSyncFromDrive() async -> Response {
+        guard let changePoller else {
+            return .error("change poller not configured (drive not authenticated)")
+        }
+        do {
+            let outcome = try await changePoller.pollOnce()
+            return .ok(data: Self.encode(outcome: outcome))
+        } catch let error as SyncEngineError {
+            return .error("syncFromDrive failed: \(error)")
+        } catch {
+            return .error("syncFromDrive failed: \(error.localizedDescription)")
+        }
+    }
+
+    private static func encode(outcome: DeltaSyncOutcome) -> AnyCodableValue {
+        switch outcome {
+        case .bootstrapped(let pageToken):
+            return .dictionary([
+                "status": .string("bootstrapped"),
+                "pageToken": .string(pageToken),
+            ])
+        case .noChanges(let pageToken):
+            return .dictionary([
+                "status": .string("noChanges"),
+                "pageToken": .string(pageToken),
+            ])
+        case .catalogChanged(let driveFileId, let modifiedTime, let pageToken):
+            return .dictionary([
+                "status": .string("catalogChanged"),
+                "driveFileId": .string(driveFileId),
+                "modifiedTime": modifiedTime.map(AnyCodableValue.string) ?? .null,
+                "pageToken": .string(pageToken),
+            ])
+        case .conflict(let localPending, let remoteFileId, let modifiedTime, let pageToken):
+            return .dictionary([
+                "status": .string("conflict"),
+                "localPending": .bool(localPending),
+                "remoteFileId": .string(remoteFileId),
+                "modifiedTime": modifiedTime.map(AnyCodableValue.string) ?? .null,
+                "pageToken": .string(pageToken),
+            ])
+        case .originalsChangedOnly(let addedCount, let pageToken):
+            return .dictionary([
+                "status": .string("originalsChangedOnly"),
+                "addedCount": .int(addedCount),
+                "pageToken": .string(pageToken),
+            ])
+        }
+    }
+
     // MARK: - Publish catalog
 
     private func handlePublishCatalog() async -> Response {
@@ -677,9 +775,6 @@ final class HarnessController: @unchecked Sendable {
     // MARK: - Export
 
     private func handleExport(destinationPath: String, format: String, applyEdits: Bool) async -> Response {
-        guard let catalog else {
-            return .error("catalog not loaded")
-        }
         guard let exportFormat = ExportFormat(rawValue: format) else {
             return .error("invalid format '\(format)'; expected original, jpeg, or tiff")
         }
@@ -692,27 +787,92 @@ final class HarnessController: @unchecked Sendable {
             return .error("failed to create destination directory: \(error.localizedDescription)")
         }
 
-        // Selection wins when non-empty; otherwise fall back to all
-        // visible rows (which already respect the rating filter and
-        // active scope). Same rule as the File → Export… sheet so both
-        // entry points agree.
-        let assets = await MainActor.run {
-            ExportScope.resolve(
-                selectedIds: libraryViewModel.selectedAssetIds,
-                rows: libraryViewModel.rows
-            )
-        }
-
-        await exportCoordinator.run(
-            assets: assets,
-            catalog: catalog,
+        return await runExport(
+            destinationURL: destinationURL,
+            destinationPath: destinationPath,
             format: exportFormat,
-            jpegQuality: 85,
-            applyEdits: applyEdits,
-            destinationDirectory: destinationURL,
-            originalFetcher: originalsCoordinator
+            applyEdits: applyEdits
         )
+    }
 
+    /// Drives the menu → notification path (#242). Verifies the
+    /// File → Export… menu wiring posts `.showExportSheet`, which
+    /// `ContentView` should observe and flip `showExportSheet` (or
+    /// `showExportConfirmation`). Returns the SwiftUI sheet-visibility
+    /// mirror so the flow can assert the sheet actually mounted before
+    /// firing `completeExportSheet`.
+    private func handleTriggerExportMenu() async -> Response {
+        let visibleAfter = await MainActor.run { () -> Bool in
+            ExportLog.logger.info("Harness triggerExportMenu — posting .showExportSheet")
+            NotificationCenter.default.post(name: .showExportSheet, object: nil)
+            return appDelegate.isExportSheetVisible
+        }
+        // Give SwiftUI a couple of runloop ticks to swap state. The
+        // confirmationDialog path also routes through this notification
+        // (and may *not* land the sheet — that's the policy talking, not
+        // a bug), so we report the post-tick visibility and let the flow
+        // decide whether to assert true.
+        try? await Task.sleep(for: .milliseconds(150))
+        let finalVisible = await MainActor.run { appDelegate.isExportSheetVisible }
+        return .ok(data: .dictionary([
+            "exportSheetVisible": .bool(finalVisible),
+            "exportSheetVisibleImmediately": .bool(visibleAfter),
+        ]))
+    }
+
+    /// Drives the sheet's `onExport` closure: same code path the user
+    /// hits after picking a destination in the File → Export… sheet.
+    /// Asserts the sheet is currently mounted before firing so the
+    /// command can't paper over a regression that drops the sheet
+    /// presentation. NSOpenPanel itself is not harness-driveable, so
+    /// `destinationPath` substitutes for the panel's URL output.
+    private func handleCompleteExportSheet(
+        destinationPath: String,
+        format: String,
+        applyEdits: Bool
+    ) async -> Response {
+        guard let exportFormat = ExportFormat(rawValue: format) else {
+            return .error("invalid format '\(format)'; expected original, jpeg, or tiff")
+        }
+        let visible = await MainActor.run { appDelegate.isExportSheetVisible }
+        guard visible else {
+            return .error("export sheet not visible; call triggerExportMenu first or check confirmation policy")
+        }
+        let destinationURL = URL(fileURLWithPath: destinationPath)
+        do {
+            try FileManager.default.createDirectory(at: destinationURL, withIntermediateDirectories: true)
+        } catch {
+            return .error("failed to create destination directory: \(error.localizedDescription)")
+        }
+        // Mirror ContentView.onExport: dismiss the sheet, then run the
+        // coordinator through the same `appDelegate.startExport` entry.
+        await MainActor.run {
+            ExportLog.logger.info("Harness completeExportSheet — dismissing sheet, invoking startExport")
+            appDelegate.setExportSheetVisible(false)
+        }
+        return await runExport(
+            destinationURL: destinationURL,
+            destinationPath: destinationPath,
+            format: exportFormat,
+            applyEdits: applyEdits
+        )
+    }
+
+    /// Shared coordinator round-trip + response shaping. Used by both
+    /// `handleExport` (direct) and `handleCompleteExportSheet` (sheet
+    /// path) so both produce the same payload shape.
+    private func runExport(
+        destinationURL: URL,
+        destinationPath: String,
+        format: ExportFormat,
+        applyEdits: Bool
+    ) async -> Response {
+        await appDelegate.startExport(
+            destinationURL: destinationURL,
+            format: format,
+            jpegQuality: 85,
+            applyEdits: applyEdits
+        )
         let phase = await exportCoordinator.phase
         switch phase {
         case .done(let exported, let skipped, let failures):
@@ -1017,6 +1177,17 @@ final class HarnessController: @unchecked Sendable {
         return .ok()
     }
 
+    private func handleSelectCurveChannel(channel: String) async -> Response {
+        guard let curveChannel = DevelopViewModel.curveChannel(named: channel) else {
+            let valid = CurveChannel.allCases.map(\.rawValue).joined(separator: ", ")
+            return .error("unknown curve channel '\(channel)'; expected one of: \(valid)")
+        }
+        await MainActor.run {
+            developViewModel.selectedCurveChannel = curveChannel
+        }
+        return .ok()
+    }
+
     private func handleResetEditParameter(assetId: UUID, parameter: String) async -> Response {
         guard let keyPath = DevelopViewModel.keyPath(forParameter: parameter) else {
             return .error("unknown parameter: \(parameter)")
@@ -1033,6 +1204,46 @@ final class HarnessController: @unchecked Sendable {
         }
         await MainActor.run {
             developViewModel.resetParameter(keyPath)
+        }
+        return .ok()
+    }
+
+    private func handleSetEditFlag(assetId: UUID, parameter: String, value: Bool) async -> Response {
+        guard let keyPath = DevelopViewModel.keyPath(forFlag: parameter) else {
+            return .error("unknown flag: \(parameter)")
+        }
+        let alreadyActive: Bool = await MainActor.run {
+            if developViewModel.currentAssetId != assetId {
+                router.route = .develop
+                return false
+            }
+            return true
+        }
+        if !alreadyActive {
+            await developViewModel.activate(assetId: assetId)
+        }
+        await MainActor.run {
+            developViewModel.setFlag(keyPath, value: value)
+        }
+        return .ok()
+    }
+
+    private func handleResetEditFlag(assetId: UUID, parameter: String) async -> Response {
+        guard let keyPath = DevelopViewModel.keyPath(forFlag: parameter) else {
+            return .error("unknown flag: \(parameter)")
+        }
+        let alreadyActive: Bool = await MainActor.run {
+            if developViewModel.currentAssetId != assetId {
+                router.route = .develop
+                return false
+            }
+            return true
+        }
+        if !alreadyActive {
+            await developViewModel.activate(assetId: assetId)
+        }
+        await MainActor.run {
+            developViewModel.resetFlag(keyPath)
         }
         return .ok()
     }

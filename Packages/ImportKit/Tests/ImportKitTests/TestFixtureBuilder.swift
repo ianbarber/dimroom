@@ -13,6 +13,8 @@ enum TestFixtureBuilder {
         var dateTimeOriginal: String?   // EXIF format: "yyyy:MM:dd HH:mm:ss"
         var make: String?
         var model: String?
+        var lensMake: String?
+        var lensModel: String?
         var orientation: Int?           // 1-8
     }
 
@@ -65,6 +67,12 @@ enum TestFixtureBuilder {
         var exifDict: [CFString: Any] = [:]
         if let dto = exif.dateTimeOriginal {
             exifDict[kCGImagePropertyExifDateTimeOriginal] = dto
+        }
+        if let lensMake = exif.lensMake {
+            exifDict[kCGImagePropertyExifLensMake] = lensMake
+        }
+        if let lensModel = exif.lensModel {
+            exifDict[kCGImagePropertyExifLensModel] = lensModel
         }
 
         var properties: [CFString: Any] = [:]

@@ -77,10 +77,10 @@ func editParameterDescription(previous: EditState?, next: EditState) -> String? 
     // one logical change ("Hue (Red) +12"); a change spanning multiple
     // bands or axes rolls up to a generic "HSL" label so the count rule
     // below still picks it up as a single change.
-    let hslDiffs: [(axis: String, label: String, base: [Double], next: [Double])] = [
-        ("Hue", "Hue", base.hueShift, next.hueShift),
-        ("Saturation", "HSL Saturation", base.hslSaturation, next.hslSaturation),
-        ("Luminance", "Luminance", base.hslLuminance, next.hslLuminance),
+    let hslDiffs: [(axis: String, base: [Double], next: [Double])] = [
+        ("Hue", base.hueShift, next.hueShift),
+        ("Saturation", base.hslSaturation, next.hslSaturation),
+        ("Luminance", base.hslLuminance, next.hslLuminance),
     ]
     var hslSingleBand: (axis: String, range: HSLColorRange, value: Double)?
     var hslChangeCount = 0

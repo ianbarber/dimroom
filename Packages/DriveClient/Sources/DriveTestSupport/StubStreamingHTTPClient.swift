@@ -1,42 +1,51 @@
 import Foundation
-@testable import DriveClient
+import DriveClient
 
-final class StubStreamingHTTPClient: StreamingHTTPClient, @unchecked Sendable {
-    struct CapturedRequest {
-        let url: URL?
-        let method: String?
-        let headers: [String: String]
-        let destination: URL
+public final class StubStreamingHTTPClient: StreamingHTTPClient, @unchecked Sendable {
+    public struct CapturedRequest {
+        public let url: URL?
+        public let method: String?
+        public let headers: [String: String]
+        public let destination: URL
     }
 
-    struct Response {
-        let status: Int
-        let chunks: [Data]
+    public struct Response {
+        public let status: Int
+        public let chunks: [Data]
 
-        static func success(_ status: Int, chunks: [Data]) -> Response {
+        public static func success(_ status: Int, chunks: [Data]) -> Response {
             Response(status: status, chunks: chunks)
         }
 
-        static func success(_ status: Int, data: Data) -> Response {
+        public static func success(_ status: Int, data: Data) -> Response {
             Response(status: status, chunks: [data])
         }
     }
 
     private let lock = NSLock()
     private var responses: [Response]
-    private(set) var captured: [CapturedRequest] = []
+    private var _captured: [CapturedRequest] = []
 
-    init(responses: [Response]) {
+    public init(responses: [Response]) {
         self.responses = responses
     }
 
-    func download(
+    public convenience init(status: Int, body: Data) {
+        self.init(responses: [.success(status, data: body)])
+    }
+
+    public var captured: [CapturedRequest] {
+        lock.lock(); defer { lock.unlock() }
+        return _captured
+    }
+
+    public func download(
         for request: URLRequest,
         to destinationURL: URL,
         progress: (@Sendable (Double) -> Void)?
     ) async throws -> HTTPURLResponse {
         lock.lock()
-        captured.append(
+        _captured.append(
             CapturedRequest(
                 url: request.url,
                 method: request.httpMethod ?? "GET",
@@ -57,6 +66,10 @@ final class StubStreamingHTTPClient: StreamingHTTPClient, @unchecked Sendable {
 
         let total = response.chunks.reduce(0) { $0 + $1.count }
         if (200..<300).contains(response.status) {
+            try FileManager.default.createDirectory(
+                at: destinationURL.deletingLastPathComponent(),
+                withIntermediateDirectories: true
+            )
             FileManager.default.createFile(atPath: destinationURL.path, contents: nil)
             let handle = try FileHandle(forWritingTo: destinationURL)
             defer { try? handle.close() }

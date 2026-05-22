@@ -467,8 +467,9 @@ public enum Renderer {
     ///
     /// When `profile` is non-nil the `CIVignette` parameters come from the
     /// lens profile; otherwise we fall back to a conservative built-in
-    /// placeholder (-0.3 / 1.5) tuned to lift shadowed corners on a typical
-    /// fast-prime wide-open shot without blowing them out.
+    /// placeholder (intensity -0.15, radius 1.0) tuned to be near-no-op on a
+    /// clean centre while still measurably brightening genuinely vignetted
+    /// corners (#274).
     private static func applyLensVignetteCorrection(
         _ image: CIImage,
         enabled: Bool,
@@ -478,11 +479,9 @@ public enum Renderer {
         let filter = CIFilter(name: "CIVignette")!
         filter.setValue(image, forKey: kCIInputImageKey)
         // Negative intensity inverts the vignette: corners brighten rather
-        // than darken. Placeholder magnitudes are conservative — anything
-        // stronger and a clean image gets blown corners. Lens-profile values
-        // override per-asset.
-        filter.setValue(profile?.vignetteIntensity ?? -0.3, forKey: "inputIntensity")
-        filter.setValue(profile?.vignetteRadius ?? 1.5, forKey: "inputRadius")
+        // than darken. Lens-profile values override per-asset.
+        filter.setValue(profile?.vignetteIntensity ?? -0.15, forKey: "inputIntensity")
+        filter.setValue(profile?.vignetteRadius ?? 1.0, forKey: "inputRadius")
         return filter.outputImage!.cropped(to: image.extent)
     }
 

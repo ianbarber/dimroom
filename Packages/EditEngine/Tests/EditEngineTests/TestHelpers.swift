@@ -194,3 +194,126 @@ func samplePixel(image: CIImage, x: Int, y: Int, context: CIContext) -> PixelRGB
     )
     return PixelRGBA(r: pixel[0], g: pixel[1], b: pixel[2], a: pixel[3])
 }
+
+/// Sample a rectangular patch of pixels from a CIImage as a flat row-major array.
+///
+/// One context.render call covers the whole rect — cheaper and more accurate than
+/// looping over `samplePixel`, and avoids per-pixel filter graph rebuilds.
+func samplePatch(image: CIImage, rect: CGRect, context: CIContext) -> [PixelRGBA] {
+    let width = Int(rect.width)
+    let height = Int(rect.height)
+    let bytesPerRow = width * 4
+    var buffer = [UInt8](repeating: 0, count: width * height * 4)
+    context.render(
+        image,
+        toBitmap: &buffer,
+        rowBytes: bytesPerRow,
+        bounds: rect,
+        format: .RGBA8,
+        colorSpace: CGColorSpace(name: CGColorSpace.sRGB)!
+    )
+    var out: [PixelRGBA] = []
+    out.reserveCapacity(width * height)
+    for i in 0..<(width * height) {
+        let o = i * 4
+        out.append(PixelRGBA(r: buffer[o], g: buffer[o + 1], b: buffer[o + 2], a: buffer[o + 3]))
+    }
+    return out
+}
+
+/// Rec. 601 luma in the 0–255 scale. Used by NR tests to score smoothing of a
+/// luma-jittered grey patch independent of any small chroma drift.
+func luma(_ p: PixelRGBA) -> Double {
+    0.299 * Double(p.r) + 0.587 * Double(p.g) + 0.114 * Double(p.b)
+}
+
+/// Cheap chroma proxy. `B − R` swings directly under the `R = mid+j, B = mid−j`
+/// jitter pattern used by the chrominance-NR test source while staying invariant
+/// under uniform luma changes.
+func chromaBR(_ p: PixelRGBA) -> Double {
+    Double(p.b) - Double(p.r)
+}
+
+func mean(_ xs: [Double]) -> Double {
+    guard !xs.isEmpty else { return 0 }
+    return xs.reduce(0, +) / Double(xs.count)
+}
+
+/// Population variance — same N before and after, so the unbiased correction
+/// would just cancel out of any ratio comparison.
+func variance(_ xs: [Double]) -> Double {
+    guard !xs.isEmpty else { return 0 }
+    let m = mean(xs)
+    let sq = xs.reduce(0.0) { acc, x in
+        let d = x - m
+        return acc + d * d
+    }
+    return sq / Double(xs.count)
+}
+
+/// Create a noisy test image with deterministic, seeded per-pixel jitter.
+///
+/// `lumaJitter` (in 0–255 units) adds the same offset to all three channels per
+/// pixel — producing luminance noise on a grey base. `chromaJitter` adds an
+/// offset of `+j` to R and `−j` to B, leaving G alone, producing chroma noise
+/// while keeping the per-pixel luma close to `baseLuma`.
+///
+/// The seeded LCG is pure Swift (`state &* 1103515245 &+ 12345`) so results are
+/// reproducible on CI and dev machines without depending on `arc4random`.
+func makeNoisyImage(
+    width: Int = 64,
+    height: Int = 64,
+    baseLuma: UInt8 = 128,
+    lumaJitter: Int = 0,
+    chromaJitter: Int = 0,
+    seed: UInt32 = 0xC0FFEE
+) -> CIImage {
+    let bytesPerPixel = 4
+    let bytesPerRow = width * bytesPerPixel
+    var pixels = [UInt8](repeating: 0, count: width * height * bytesPerPixel)
+
+    var state: UInt32 = seed
+    func nextRange(_ half: Int) -> Int {
+        state = state &* 1_103_515_245 &+ 12_345
+        if half == 0 { return 0 }
+        let span = half * 2 + 1
+        return Int(state >> 16) % span - half
+    }
+
+    func clamp(_ v: Int) -> UInt8 { UInt8(max(0, min(255, v))) }
+
+    for y in 0..<height {
+        for x in 0..<width {
+            let lj = nextRange(lumaJitter)
+            let cj = nextRange(chromaJitter)
+            let base = Int(baseLuma)
+            let r = clamp(base + lj + cj)
+            let g = clamp(base + lj)
+            let b = clamp(base + lj - cj)
+            let offset = y * bytesPerRow + x * bytesPerPixel
+            pixels[offset] = r
+            pixels[offset + 1] = g
+            pixels[offset + 2] = b
+            pixels[offset + 3] = 255
+        }
+    }
+
+    let data = Data(pixels)
+    let colorSpace = CGColorSpace(name: CGColorSpace.sRGB)!
+    let bitmapInfo = CGBitmapInfo(rawValue: CGImageAlphaInfo.premultipliedLast.rawValue)
+    let provider = CGDataProvider(data: data as CFData)!
+    let cgImage = CGImage(
+        width: width,
+        height: height,
+        bitsPerComponent: 8,
+        bitsPerPixel: 32,
+        bytesPerRow: bytesPerRow,
+        space: colorSpace,
+        bitmapInfo: bitmapInfo,
+        provider: provider,
+        decode: nil,
+        shouldInterpolate: false,
+        intent: .defaultIntent
+    )!
+    return CIImage(cgImage: cgImage)
+}

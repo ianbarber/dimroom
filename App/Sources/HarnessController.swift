@@ -160,7 +160,8 @@ final class HarnessController: @unchecked Sendable {
                     showHistogram: developViewModel.showHistogram,
                     developIsDownloadingOriginal: developViewModel.isDownloadingOriginal,
                     developDownloadProgress: developViewModel.downloadProgress,
-                    developCurrentAssetId: developViewModel.currentAssetId
+                    developCurrentAssetId: developViewModel.currentAssetId,
+                    libraryRemoteAdditionsCount: libraryViewModel.remoteAdditionsBadge?.addedCount
                 )
             }
             let encoder = JSONEncoder()
@@ -748,6 +749,15 @@ final class HarnessController: @unchecked Sendable {
         }
         do {
             let outcome = try await changePoller.pollOnce()
+            // `--harness` skips the periodic events subscription that
+            // normally drives `handleDeltaSyncOutcome` (the periodic
+            // path can race the harness's own `pollOnce` and an NSAlert
+            // would block the socket). Apply the non-modal portion of
+            // the outcome here so badges still surface to Layer C while
+            // we skip the modal alerts.
+            await MainActor.run {
+                appDelegate.applyNonModalDeltaSyncOutcome(outcome)
+            }
             return .ok(data: Self.encode(outcome: outcome))
         } catch let error as SyncEngineError {
             return .error("syncFromDrive failed: \(error)")

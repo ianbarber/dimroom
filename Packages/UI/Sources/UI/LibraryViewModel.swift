@@ -49,6 +49,17 @@ public final class LibraryViewModel: ObservableObject {
     /// a short delay by the toast view.
     @Published public var ratingToast: RatingToast?
 
+    /// Filter-bar badge showing how many new originals have appeared on
+    /// Drive since the last time the user saw the badge. Set by
+    /// `AppDelegate.handleDeltaSyncOutcome` when the change poller
+    /// classifies a tick as `.originalsChangedOnly`; cleared when the
+    /// user dismisses it or when a subsequent `.catalogChanged` outcome
+    /// reloads the catalog (since the new assets will arrive with that
+    /// catalog). Accumulates counts across successive ticks so the badge
+    /// reads "N new since you last looked", not "N new in the most
+    /// recent tick".
+    @Published public private(set) var remoteAdditionsBadge: RemoteAdditionsBadge?
+
     /// Trigger property for zoom commands. ContentView sets this when
     /// the user presses Z or Cmd+0; LoupeView observes it via
     /// `.onChange`, executes the zoom action with its local state, and
@@ -111,6 +122,21 @@ public final class LibraryViewModel: ObservableObject {
         case all
         case session(UUID)
         case recentlyDeleted
+    }
+
+    /// Value published on `remoteAdditionsBadge` when the change poller
+    /// reports that originals (but not the catalog file) changed on
+    /// Drive. `firstSeenAt` is preserved across accumulating ticks so
+    /// callers can render "N new since 12:34" style text if they want
+    /// to; the current `LibraryView` rendering only reads `addedCount`.
+    public struct RemoteAdditionsBadge: Equatable, Sendable {
+        public let addedCount: Int
+        public let firstSeenAt: Date
+
+        public init(addedCount: Int, firstSeenAt: Date = Date()) {
+            self.addedCount = addedCount
+            self.firstSeenAt = firstSeenAt
+        }
     }
 
     /// Value attached to `undoToast` after a soft-delete. Carries the
@@ -505,6 +531,30 @@ public final class LibraryViewModel: ObservableObject {
         undoToast = nil
         undoDismissTask?.cancel()
         undoDismissTask = nil
+    }
+
+    /// Record that `count` originals have appeared on Drive since the
+    /// last successful catalog sync. Successive calls accumulate so the
+    /// badge always reads the total since the user last dismissed it;
+    /// `firstSeenAt` is preserved from the earliest call.
+    public func recordRemoteOriginalsAdded(count: Int) {
+        guard count > 0 else { return }
+        if let existing = remoteAdditionsBadge {
+            remoteAdditionsBadge = RemoteAdditionsBadge(
+                addedCount: existing.addedCount + count,
+                firstSeenAt: existing.firstSeenAt
+            )
+        } else {
+            remoteAdditionsBadge = RemoteAdditionsBadge(addedCount: count)
+        }
+    }
+
+    /// Clear the remote-additions badge. Called from the dismiss button
+    /// on the badge itself and from `AppDelegate` when a subsequent
+    /// catalog reload supersedes the "you might be missing N photos"
+    /// notice.
+    public func dismissRemoteAdditionsBadge() {
+        remoteAdditionsBadge = nil
     }
 
     private func showUndoToast(for deletedIds: [UUID]) {

@@ -81,6 +81,24 @@ if [ ! -f "$CATALOG_PATH" ]; then
     exit 1
 fi
 
+# Seed a *second* catalog with a different asset count so the hot-reload
+# step (#259) can assert the swap took effect — same seed dir, but
+# --duplicate 2 doubles every row so the asset count differs from the
+# initial bootstrap. Used as the stub remote when DIMROOM_HARNESS_STUB_REMOTE_CATALOG
+# points at this path.
+RELOAD_CATALOG="$WORK_DIR/reload-source.sqlite"
+RELOAD_PREVIEW_CACHE="$WORK_DIR/reload-previews"
+"$FIXTURE_BIN" seed \
+    --catalog "$RELOAD_CATALOG" \
+    --cache "$RELOAD_PREVIEW_CACHE" \
+    --seed-dir "$REPO_ROOT/fixtures/library-seed" \
+    --duplicate 2
+
+if [ ! -f "$RELOAD_CATALOG" ]; then
+    echo "ERROR: dimroom-fixture did not produce $RELOAD_CATALOG"
+    exit 1
+fi
+
 # Fixture describes the sequence of `listChanges` responses the stub
 # returns. The third page reports a change to "stub-catalog-id", which
 # the poller matches against the cached catalog driveFileId we'll plant
@@ -138,6 +156,7 @@ echo "=== Launching app in harness mode ==="
 DIMROOM_HARNESS_SOCKET="$SOCKET" \
 DIMROOM_HARNESS_DRIVE_STUB=1 \
 DIMROOM_HARNESS_DRIVE_CHANGES_FIXTURE="$FIXTURE_PATH" \
+DIMROOM_HARNESS_STUB_REMOTE_CATALOG="$RELOAD_CATALOG" \
     "$APP_BIN" --harness \
     --fixture-catalog "$CATALOG_PATH" \
     --preview-cache "$PREVIEW_CACHE" &
@@ -222,6 +241,51 @@ fi
 echo "  OK: catalogChanged at stub-token-after-catalog-change"
 
 take_screenshot "delta-sync-catalog-changed"
+
+echo "=== state — capture pre-reload asset count ==="
+PRE_STATE_OUT=$("$CLI_BIN" state --socket "$SOCKET")
+echo "$PRE_STATE_OUT"
+PRE_RELOAD_COUNT=$(printf '%s' "$PRE_STATE_OUT" | "$REPO_ROOT/bin/harness-json-extract" 'data.assetCount')
+echo "  Pre-reload asset count: $PRE_RELOAD_COUNT"
+
+echo "=== reload-catalog-from-drive — hot-reload the local catalog (#259) ==="
+RELOAD_OUT=$("$CLI_BIN" reload-catalog-from-drive \
+    --drive-file-id stub-catalog-id \
+    --modified-time 2026-05-17T08:00:00.000Z \
+    --page-token stub-token-after-catalog-change \
+    --socket "$SOCKET")
+echo "$RELOAD_OUT"
+RELOAD_OUTCOME=$(printf '%s' "$RELOAD_OUT" | "$REPO_ROOT/bin/harness-json-extract" 'data.outcome')
+if [ "$RELOAD_OUTCOME" != "reloaded" ]; then
+    echo "ERROR: expected reload outcome=reloaded, got '$RELOAD_OUTCOME'"
+    exit 1
+fi
+echo "  OK: catalog reloaded in-place"
+
+echo "=== state — asset count reflects new catalog, process survived ==="
+if ! kill -0 "$APP_PID" 2>/dev/null; then
+    echo "ERROR: app process died during reload"
+    exit 1
+fi
+POST_STATE_OUT=$("$CLI_BIN" state --socket "$SOCKET")
+echo "$POST_STATE_OUT"
+POST_RELOAD_COUNT=$(printf '%s' "$POST_STATE_OUT" | "$REPO_ROOT/bin/harness-json-extract" 'data.assetCount')
+if [ "$POST_RELOAD_COUNT" = "$PRE_RELOAD_COUNT" ]; then
+    echo "ERROR: post-reload asset count ($POST_RELOAD_COUNT) matches pre-reload ($PRE_RELOAD_COUNT) — swap didn't take"
+    exit 1
+fi
+echo "  OK: assetCount went $PRE_RELOAD_COUNT -> $POST_RELOAD_COUNT, PID $APP_PID survived"
+
+take_screenshot "delta-sync-after-reload"
+
+echo "=== sync-from-drive after reload — fixture exhausted, expect failure (no-op) ==="
+# The fixture only has 2 pages of changes. After bootstrap + noChanges +
+# catalogChanged we've consumed them all, so the next list call returns
+# the fixture's drained-list error. The point of this poll isn't to
+# round-trip a 4th outcome — it's to confirm the rebuilt poller is
+# talking to the new catalog (it doesn't crash on a dropped queue).
+DRAINED_OUT=$("$CLI_BIN" sync-from-drive --socket "$SOCKET" 2>&1 || true)
+echo "$DRAINED_OUT"
 
 echo "=== quit ==="
 "$CLI_BIN" quit --socket "$SOCKET" 2>&1 || true

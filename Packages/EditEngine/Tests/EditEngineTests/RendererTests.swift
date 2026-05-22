@@ -984,6 +984,14 @@ final class RendererTests: XCTestCase {
         // preserve the patch mean (overall brightness/detail not destroyed).
         // The old single-pixel "did anything change" check passed for any
         // perturbation; this pins the smoothing property the slider promises.
+        //
+        // Both sliders are pinned at 100 because the current renderer gates
+        // CINoiseReduction's smoothing on the chroma slider (it maps to
+        // inputNoiseLevel) — the luma slider on its own only sharpens via
+        // inputSharpness, which raises luma variance instead of dropping it.
+        // This test therefore proves that strong combined NR smooths luma,
+        // not that the luma slider does so in isolation. See #303 for the
+        // renderer fix that would let us test the sliders independently.
         let source = makeNoisyImage(
             baseLuma: 128,
             lumaJitter: 20,
@@ -997,7 +1005,7 @@ final class RendererTests: XCTestCase {
         let srcPixels = samplePatch(image: source, rect: patch, context: ctx)
         let result = Renderer.render(
             source: source,
-            editState: EditState(luminanceNoiseReduction: 100)
+            editState: EditState(luminanceNoiseReduction: 100, chrominanceNoiseReduction: 100)
         )
         let resPixels = samplePatch(image: result, rect: patch, context: ctx)
 

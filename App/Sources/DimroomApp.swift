@@ -562,13 +562,29 @@ final class AppDelegate: NSObject, NSApplicationDelegate, ObservableObject {
         self.driveFileIdStore = fileIdStore
         self.stubCatalogUploader = Self.resolveStubCatalogUploader()
 
-        attemptCatalogRestore(
-            catalogPath: catalogPath,
-            driveClient: resolvedDriveClient,
-            fileIdStore: fileIdStore
-        )
+        // Harness flows that exercise the `restoreCatalogFromDrive`
+        // command's non-`localCatalogPresent` branches set this env var
+        // to keep the local catalog genuinely absent at socket-open
+        // time. Skipping `attemptCatalogRestore` alone isn't enough —
+        // `openCatalog` creates an empty SQLite file at `catalogPath`,
+        // which would make every subsequent `restoreIfNeeded` short-
+        // circuit. Skip both, accept a nil catalog, and let the harness
+        // command drive `CatalogPublisher.restoreIfNeeded` directly.
+        // Only `restore-catalog-from-drive`, `state`, `screenshot`, and
+        // `quit` are safe to call in this mode.
+        let skipLaunchRestore = Self.shouldSkipLaunchCatalogRestore()
 
-        let resolvedCatalog = openCatalog(at: catalogPath)
+        let resolvedCatalog: CatalogDatabase?
+        if skipLaunchRestore {
+            resolvedCatalog = nil
+        } else {
+            attemptCatalogRestore(
+                catalogPath: catalogPath,
+                driveClient: resolvedDriveClient,
+                fileIdStore: fileIdStore
+            )
+            resolvedCatalog = openCatalog(at: catalogPath)
+        }
         self.catalog = resolvedCatalog
         self.previewStore = resolvedPreviewStore
         self.originalsDirectory = resolvedOriginalsDirectory
@@ -1397,6 +1413,19 @@ final class AppDelegate: NSObject, NSApplicationDelegate, ObservableObject {
     /// runBlocking — see `attemptCatalogRestore`).
     nonisolated static func shouldAutoConfirmRestorePrompt() -> Bool {
         ProcessInfo.processInfo.environment["DIMROOM_HARNESS_AUTO_CONFIRM_RESTORE"] != nil
+    }
+
+    /// Harness flows that need to drive `restore-catalog-from-drive`
+    /// against a genuinely absent local catalog set
+    /// `DIMROOM_HARNESS_SKIP_LAUNCH_RESTORE=1`. The launch path skips
+    /// both `attemptCatalogRestore` (which would prompt-or-fetch) and
+    /// `openCatalog` (which would create an empty SQLite file and make
+    /// every subsequent `restoreIfNeeded` short-circuit to
+    /// `localCatalogPresent`). Used by
+    /// `bin/harness-restore-catalog-outcomes-flow.sh` (#257) to assert
+    /// the `restored`, `declinedByUser`, and `restoreFailed` outcomes.
+    nonisolated static func shouldSkipLaunchCatalogRestore() -> Bool {
+        ProcessInfo.processInfo.environment["DIMROOM_HARNESS_SKIP_LAUNCH_RESTORE"] != nil
     }
 
     nonisolated static func harnessAutoConfirmValue() -> Bool {

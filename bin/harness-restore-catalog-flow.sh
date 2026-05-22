@@ -94,9 +94,14 @@ if [ -f "$LOCAL_CATALOG" ]; then
 fi
 
 echo "=== Launching app in harness mode with stub remote catalog ==="
+# `_AT_LAUNCH` (#283) opts this flow into the launch-time restore
+# path. Without it, the launch decision would route to
+# `.offerConnectNoAuth` and defer restore to the post-connect sink —
+# which is what the new in-session flow exercises.
 DIMROOM_HARNESS_SOCKET="$SOCKET" \
 DIMROOM_HARNESS_DRIVE_STUB=1 \
 DIMROOM_HARNESS_STUB_REMOTE_CATALOG="$REMOTE_CATALOG" \
+DIMROOM_HARNESS_STUB_REMOTE_CATALOG_AT_LAUNCH=1 \
 DIMROOM_HARNESS_STUB_REMOTE_CATALOG_PHOTO_COUNT="$EXPECTED_COUNT" \
 DIMROOM_HARNESS_AUTO_CONFIRM_RESTORE=1 \
     "$APP_BIN" --harness \

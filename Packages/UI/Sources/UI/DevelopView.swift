@@ -99,16 +99,16 @@ public struct DevelopView: View {
 
             sliderSection("Split Toning") {
                 slider("Balance", keyPath: \.splitToneBalance, range: -100...100, step: 1, identity: 0)
-                Text("Highlights")
-                    .font(.system(size: 10, weight: .medium))
-                    .foregroundStyle(Color(white: 0.55))
-                slider("Hue", keyPath: \.splitToneHighlightHue, range: 0...360, step: 1, identity: 0)
-                slider("Saturation", keyPath: \.splitToneHighlightSaturation, range: 0...100, step: 1, identity: 0)
-                Text("Shadows")
-                    .font(.system(size: 10, weight: .medium))
-                    .foregroundStyle(Color(white: 0.55))
-                slider("Hue", keyPath: \.splitToneShadowHue, range: 0...360, step: 1, identity: 0)
-                slider("Saturation", keyPath: \.splitToneShadowSaturation, range: 0...100, step: 1, identity: 0)
+                splitToneWheel(
+                    label: "Highlights",
+                    hueKey: \.splitToneHighlightHue,
+                    satKey: \.splitToneHighlightSaturation
+                )
+                splitToneWheel(
+                    label: "Shadows",
+                    hueKey: \.splitToneShadowHue,
+                    satKey: \.splitToneShadowSaturation
+                )
             }
 
             sliderSection("Vignette") {
@@ -275,6 +275,24 @@ public struct DevelopView: View {
                 set: { viewModel.setParameter(keyPath, value: $0) }
             ),
             onReset: { viewModel.resetParameter(keyPath) }
+        )
+    }
+
+    private func splitToneWheel(
+        label: String,
+        hueKey: WritableKeyPath<EditState, Double>,
+        satKey: WritableKeyPath<EditState, Double>
+    ) -> some View {
+        ColorWheelControl(
+            label: label,
+            hue: viewModel.editState[keyPath: hueKey],
+            saturation: viewModel.editState[keyPath: satKey],
+            onHueChange: { viewModel.setParameter(hueKey, value: $0) },
+            onSaturationChange: { viewModel.setParameter(satKey, value: $0) },
+            onReset: {
+                viewModel.resetParameter(hueKey)
+                viewModel.resetParameter(satKey)
+            }
         )
     }
 

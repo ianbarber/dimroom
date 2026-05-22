@@ -1,5 +1,6 @@
 import XCTest
 @testable import DriveClient
+import DriveTestSupport
 
 /// Covers the `authFailures` stream on `DriveClient` — the signal that
 /// `DriveAuthState` subscribes to so a stale or revoked refresh token can

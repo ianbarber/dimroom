@@ -1,5 +1,6 @@
 import XCTest
 @testable import DriveClient
+import DriveTestSupport
 
 final class TokenEndpointTests: XCTestCase {
     private let config = OAuthConfig(clientID: "test-client", scope: "drive")

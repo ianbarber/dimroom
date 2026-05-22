@@ -1,5 +1,6 @@
 import XCTest
 @testable import DriveClient
+import DriveTestSupport
 
 final class AuthorizedSessionTests: XCTestCase {
     func testSuccessPassesThrough() async throws {
@@ -63,36 +64,5 @@ final class AuthorizedSessionTests: XCTestCase {
         } catch {
             XCTFail("unexpected error \(error)")
         }
-    }
-}
-
-final class StubTokenProvider: AccessTokenProvider, @unchecked Sendable {
-    private let lock = NSLock()
-    private var tokens: [String]
-    private let refreshError: Error?
-    private(set) var currentCalls: Int = 0
-    private(set) var refreshCalls: Int = 0
-
-    init(accessTokens: [String], refreshError: Error? = nil) {
-        self.tokens = accessTokens
-        self.refreshError = refreshError
-    }
-
-    func currentAccessToken() async throws -> String {
-        lock.lock(); defer { lock.unlock() }
-        currentCalls += 1
-        return tokens.first ?? ""
-    }
-
-    func forceRefreshAccessToken() async throws -> String {
-        lock.lock(); defer { lock.unlock() }
-        refreshCalls += 1
-        if let refreshError {
-            throw refreshError
-        }
-        if tokens.count > 1 {
-            tokens.removeFirst()
-        }
-        return tokens.first ?? ""
     }
 }

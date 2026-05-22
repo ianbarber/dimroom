@@ -270,6 +270,98 @@ final class OriginalsCacheTests: XCTestCase {
         XCTAssertEqual(c2, 0)
     }
 
+    // MARK: - setBudget / clearAll
+
+    func testSetBudgetSmallerThanCurrentEvictsLRUDownToNewCeiling() async throws {
+        let dir = try makeTempDirectory()
+        defer { try? FileManager.default.removeItem(at: dir) }
+        let oldId = UUID()
+        let newId = UUID()
+        let payload = Data(repeating: 0xCC, count: 100)
+        let downloader = FakeDownloader(payloads: ["old": payload, "new": payload])
+        let clock = AdvancingClock(start: Date(timeIntervalSince1970: 1_000))
+        let evictions = EvictionLog()
+        let cache = try OriginalsCache(
+            directory: dir,
+            budgetBytes: 1_000,
+            downloader: downloader,
+            clock: clock.now,
+            onEvict: { id in evictions.record(id) }
+        )
+
+        _ = try await cache.fetch(assetId: oldId, driveFileId: "old", suggestedFilename: "old.jpg", progress: nil)
+        clock.advance(by: 10)
+        _ = try await cache.fetch(assetId: newId, driveFileId: "new", suggestedFilename: "new.jpg", progress: nil)
+        let initialSize = await cache.currentSizeBytes()
+        XCTAssertEqual(initialSize, 200)
+
+        // Shrink to fit only one file. The older entry should be
+        // evicted; the newer one (most recently accessed) survives.
+        await cache.setBudget(150)
+
+        let postBudget = await cache.budgetBytes
+        XCTAssertEqual(postBudget, 150)
+        let postSize = await cache.currentSizeBytes()
+        XCTAssertLessThanOrEqual(postSize, 150)
+        let cachedOld = await cache.cachedURL(for: oldId)
+        XCTAssertNil(cachedOld)
+        let cachedNew = await cache.cachedURL(for: newId)
+        XCTAssertNotNil(cachedNew)
+        XCTAssertEqual(evictions.ids, [oldId])
+    }
+
+    func testSetBudgetLargerIsNoOp() async throws {
+        let dir = try makeTempDirectory()
+        defer { try? FileManager.default.removeItem(at: dir) }
+        let assetId = UUID()
+        let payload = Data(repeating: 0xDD, count: 100)
+        let downloader = FakeDownloader(payloads: ["a": payload])
+        let cache = try OriginalsCache(
+            directory: dir,
+            budgetBytes: 500,
+            downloader: downloader
+        )
+        _ = try await cache.fetch(assetId: assetId, driveFileId: "a", suggestedFilename: "a.jpg", progress: nil)
+
+        await cache.setBudget(5_000)
+
+        let budget = await cache.budgetBytes
+        XCTAssertEqual(budget, 5_000)
+        let cached = await cache.cachedURL(for: assetId)
+        XCTAssertNotNil(cached)
+        let size = await cache.currentSizeBytes()
+        XCTAssertEqual(size, 100)
+    }
+
+    func testClearAllRemovesEveryEntryAndFiresOnEvict() async throws {
+        let dir = try makeTempDirectory()
+        defer { try? FileManager.default.removeItem(at: dir) }
+        let aId = UUID()
+        let bId = UUID()
+        let payload = Data(repeating: 0xEE, count: 80)
+        let downloader = FakeDownloader(payloads: ["a": payload, "b": payload])
+        let evictions = EvictionLog()
+        let cache = try OriginalsCache(
+            directory: dir,
+            budgetBytes: 1_000,
+            downloader: downloader,
+            onEvict: { id in evictions.record(id) }
+        )
+
+        _ = try await cache.fetch(assetId: aId, driveFileId: "a", suggestedFilename: "a.jpg", progress: nil)
+        _ = try await cache.fetch(assetId: bId, driveFileId: "b", suggestedFilename: "b.jpg", progress: nil)
+
+        await cache.clearAll()
+
+        let postSize = await cache.currentSizeBytes()
+        XCTAssertEqual(postSize, 0)
+        let cachedA = await cache.cachedURL(for: aId)
+        XCTAssertNil(cachedA)
+        let cachedB = await cache.cachedURL(for: bId)
+        XCTAssertNil(cachedB)
+        XCTAssertEqual(Set(evictions.ids), [aId, bId])
+    }
+
     // MARK: - Helpers
 
     private func readIndex(at dir: URL) async throws -> OriginalsCacheIndex {

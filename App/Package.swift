@@ -15,6 +15,7 @@ let package = Package(
         .package(path: "../Packages/DriveClient"),
         .package(path: "../Packages/SyncEngine"),
         .package(path: "../Packages/AppIcon"),
+        .package(path: "../Packages/TestSupport"),
     ],
     targets: [
         .executableTarget(
@@ -45,8 +46,10 @@ let package = Package(
                 .product(name: "Previews", package: "Previews"),
                 .product(name: "SyncEngine", package: "SyncEngine"),
                 .product(name: "UI", package: "UI"),
+                .product(name: "TestSupport", package: "TestSupport"),
             ],
-            path: "Tests"
+            path: "Tests",
+            exclude: ["__Snapshots__"]
         ),
     ]
 )

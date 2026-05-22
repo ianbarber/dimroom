@@ -1240,6 +1240,82 @@ final class CommandCodingTests: XCTestCase {
         XCTAssertEqual(command, .releaseHeldDownloads)
     }
 
+    // MARK: - Settings commands
+
+    func testGetSettingRoundTrip() throws {
+        let command = Command.getSetting(key: "libraryGridColumns")
+        let data = try encoder.encode(command)
+        let decoded = try decoder.decode(Command.self, from: data)
+        XCTAssertEqual(command, decoded)
+    }
+
+    func testGetSettingJSON() throws {
+        let command = Command.getSetting(key: "libraryGridColumns")
+        let data = try encoder.encode(command)
+        let json = String(data: data, encoding: .utf8)!
+        XCTAssertEqual(
+            json,
+            #"{"key":"libraryGridColumns","type":"getSetting"}"#
+        )
+    }
+
+    func testDecodeGetSettingFromJSON() throws {
+        let json = #"{"type":"getSetting","key":"developHistogramVisible"}"#
+        let command = try decoder.decode(Command.self, from: Data(json.utf8))
+        XCTAssertEqual(command, .getSetting(key: "developHistogramVisible"))
+    }
+
+    func testSetSettingRoundTrip() throws {
+        let command = Command.setSetting(key: "libraryGridColumns", valueJSON: "6")
+        let data = try encoder.encode(command)
+        let decoded = try decoder.decode(Command.self, from: data)
+        XCTAssertEqual(command, decoded)
+    }
+
+    func testSetSettingJSON() throws {
+        let command = Command.setSetting(key: "driveAutoPublish", valueJSON: "false")
+        let data = try encoder.encode(command)
+        let json = String(data: data, encoding: .utf8)!
+        XCTAssertEqual(
+            json,
+            #"{"key":"driveAutoPublish","type":"setSetting","valueJSON":"false"}"#
+        )
+    }
+
+    func testDecodeSetSettingFromJSON() throws {
+        let json = #"{"type":"setSetting","key":"developSaveDebounceMillis","valueJSON":"750"}"#
+        let command = try decoder.decode(Command.self, from: Data(json.utf8))
+        XCTAssertEqual(command, .setSetting(key: "developSaveDebounceMillis", valueJSON: "750"))
+    }
+
+    func testClearOriginalsCacheRoundTrip() throws {
+        let command = Command.clearOriginalsCache
+        let data = try encoder.encode(command)
+        let decoded = try decoder.decode(Command.self, from: data)
+        XCTAssertEqual(command, decoded)
+    }
+
+    func testClearOriginalsCacheJSON() throws {
+        let command = Command.clearOriginalsCache
+        let data = try encoder.encode(command)
+        let json = String(data: data, encoding: .utf8)!
+        XCTAssertEqual(json, #"{"type":"clearOriginalsCache"}"#)
+    }
+
+    func testClearPreviewCacheRoundTrip() throws {
+        let command = Command.clearPreviewCache
+        let data = try encoder.encode(command)
+        let decoded = try decoder.decode(Command.self, from: data)
+        XCTAssertEqual(command, decoded)
+    }
+
+    func testClearPreviewCacheJSON() throws {
+        let command = Command.clearPreviewCache
+        let data = try encoder.encode(command)
+        let json = String(data: data, encoding: .utf8)!
+        XCTAssertEqual(json, #"{"type":"clearPreviewCache"}"#)
+    }
+
     // MARK: - syncFromDrive
 
     func testSyncFromDriveRoundTrip() throws {

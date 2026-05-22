@@ -63,6 +63,10 @@ struct DimroomCLI: ParsableCommand {
             SimulateDriveAuthFailure.self,
             PostMenuAction.self,
             ReleaseHeldDownloads.self,
+            GetSetting.self,
+            SetSetting.self,
+            ClearOriginalsCache.self,
+            ClearPreviewCache.self,
             SyncFromDrive.self,
             RestoreCatalogFromDrive.self,
             TriggerExportMenu.self,
@@ -1141,6 +1145,71 @@ extension DimroomCLI {
 
         func run() throws {
             try runCommand(.releaseHeldDownloads, socket: socket)
+        }
+    }
+
+    struct GetSetting: ParsableCommand {
+        static let configuration = CommandConfiguration(
+            commandName: "get-setting",
+            abstract: "Read a SettingsStore value by short wire key (e.g. libraryGridColumns)."
+        )
+
+        @Argument(help: "Setting key (short name, without dimroom.settings. prefix).")
+        var key: String
+
+        @Option(name: .long, help: "Path to the harness socket.")
+        var socket: String = HarnessServer.defaultSocketPath
+
+        func run() throws {
+            try runCommand(.getSetting(key: key), socket: socket)
+        }
+    }
+
+    struct SetSetting: ParsableCommand {
+        static let configuration = CommandConfiguration(
+            commandName: "set-setting",
+            abstract: "Write a SettingsStore value. valueJSON is a JSON scalar (e.g. 4, true, \"text\")."
+        )
+
+        @Argument(help: "Setting key (short name).")
+        var key: String
+
+        @Argument(help: "JSON-encoded value: 4, true, \"text\", etc.")
+        var valueJSON: String
+
+        @Option(name: .long, help: "Path to the harness socket.")
+        var socket: String = HarnessServer.defaultSocketPath
+
+        func run() throws {
+            try runCommand(.setSetting(key: key, valueJSON: valueJSON), socket: socket)
+        }
+    }
+
+    struct ClearOriginalsCache: ParsableCommand {
+        static let configuration = CommandConfiguration(
+            commandName: "clear-originals-cache",
+            abstract: "Wipe every cached original on disk."
+        )
+
+        @Option(name: .long, help: "Path to the harness socket.")
+        var socket: String = HarnessServer.defaultSocketPath
+
+        func run() throws {
+            try runCommand(.clearOriginalsCache, socket: socket)
+        }
+    }
+
+    struct ClearPreviewCache: ParsableCommand {
+        static let configuration = CommandConfiguration(
+            commandName: "clear-preview-cache",
+            abstract: "Wipe every cached preview JPEG (master + display tiers)."
+        )
+
+        @Option(name: .long, help: "Path to the harness socket.")
+        var socket: String = HarnessServer.defaultSocketPath
+
+        func run() throws {
+            try runCommand(.clearPreviewCache, socket: socket)
         }
     }
 

@@ -26,6 +26,7 @@ final class HarnessController: @unchecked Sendable {
     private let undoStack: UndoStack?
     private let catalogPublisher: CatalogPublisher?
     private let driveAuthState: DriveAuthState?
+    private let settingsStore: SettingsStore?
     private let changePoller: ChangePoller?
     private let catalogRestoreUploader: (any CatalogUploading)?
     private let catalogRestorePath: String?
@@ -58,6 +59,7 @@ final class HarnessController: @unchecked Sendable {
         undoStack: UndoStack? = nil,
         catalogPublisher: CatalogPublisher? = nil,
         driveAuthState: DriveAuthState? = nil,
+        settingsStore: SettingsStore? = nil,
         changePoller: ChangePoller? = nil,
         catalogRestoreUploader: (any CatalogUploading)? = nil,
         catalogRestorePath: String? = nil,
@@ -79,6 +81,7 @@ final class HarnessController: @unchecked Sendable {
         self.undoStack = undoStack
         self.catalogPublisher = catalogPublisher
         self.driveAuthState = driveAuthState
+        self.settingsStore = settingsStore
         self.changePoller = changePoller
         self.catalogRestoreUploader = catalogRestoreUploader
         self.catalogRestorePath = catalogRestorePath
@@ -360,6 +363,18 @@ final class HarnessController: @unchecked Sendable {
             HoldUntilReleasedHarnessDownloader.shared.release()
             return .ok()
 
+        case .getSetting(let key):
+            return await handleGetSetting(key: key)
+
+        case .setSetting(let key, let valueJSON):
+            return await handleSetSetting(key: key, valueJSON: valueJSON)
+
+        case .clearOriginalsCache:
+            return await handleClearOriginalsCache()
+
+        case .clearPreviewCache:
+            return await handleClearPreviewCache()
+
         case .syncFromDrive:
             return await handleSyncFromDrive()
 
@@ -367,6 +382,79 @@ final class HarnessController: @unchecked Sendable {
             return await handleRestoreCatalogFromDrive(confirm: confirm)
         }
     }
+
+    // MARK: - Settings
+
+    private func handleGetSetting(key: String) async -> Response {
+        guard let store = settingsStore else {
+            return .error("settings store not configured")
+        }
+        let value: Any? = await MainActor.run { store.value(forWireKey: key) }
+        guard let value else {
+            return .error("unknown setting key '\(key)'")
+        }
+        return .ok(data: .dictionary([
+            "key": .string(key),
+            "value": Self.encode(value: value),
+        ]))
+    }
+
+    private func handleSetSetting(key: String, valueJSON: String) async -> Response {
+        guard let store = settingsStore else {
+            return .error("settings store not configured")
+        }
+        let decoded: Any
+        do {
+            // Decode as `JSONValue` so we get Foundation types (NSNumber,
+            // String, Bool, Array, Dict) without committing to a specific
+            // Swift type up-front. The store does its own coercion.
+            let raw = try JSONSerialization.jsonObject(
+                with: Data(valueJSON.utf8),
+                options: [.fragmentsAllowed]
+            )
+            decoded = raw
+        } catch {
+            return .error("invalid valueJSON for '\(key)': \(error.localizedDescription)")
+        }
+        let success: Bool = await MainActor.run {
+            store.setValue(forWireKey: key, value: decoded)
+        }
+        if !success {
+            return .error("setting '\(key)' rejected the supplied value (unknown key or type mismatch)")
+        }
+        return .ok(data: .dictionary([
+            "key": .string(key),
+        ]))
+    }
+
+    private func handleClearOriginalsCache() async -> Response {
+        guard let coordinator = originalsCoordinator else {
+            return .error("originals coordinator not configured")
+        }
+        await coordinator.clearCache()
+        return .ok()
+    }
+
+    private func handleClearPreviewCache() async -> Response {
+        await previewStore.removeAll()
+        return .ok()
+    }
+
+    private static func encode(value: Any) -> AnyCodableValue {
+        if let v = value as? Bool { return .bool(v) }
+        if let v = value as? Int { return .int(v) }
+        if let v = value as? Int64 {
+            if v <= Int64(Int.max) && v >= Int64(Int.min) {
+                return .int(Int(v))
+            }
+            return .double(Double(v))
+        }
+        if let v = value as? Double { return .double(v) }
+        if let v = value as? String { return .string(v) }
+        return .null
+    }
+
+    // MARK: - Catalog restore
 
     private func handleRestoreCatalogFromDrive(confirm: Bool) async -> Response {
         guard let uploader = catalogRestoreUploader,

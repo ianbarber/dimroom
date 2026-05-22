@@ -13,7 +13,7 @@ import Foundation
 /// asset id share the same download task.
 public actor OriginalsCache {
     public let directory: URL
-    public let budgetBytes: Int64
+    public private(set) var budgetBytes: Int64
     private let downloader: OriginalsDownloader
     private let clock: @Sendable () -> Date
     private let onEvict: @Sendable (UUID) -> Void
@@ -55,6 +55,35 @@ public actor OriginalsCache {
     /// an O(n) filesystem walk, so it's cheap to call.
     public func currentSizeBytes() -> Int64 {
         index.totalBytes
+    }
+
+    /// Update the byte budget and immediately evict LRU entries to
+    /// honour it. A larger budget is a no-op (`evictIfNeeded` returns
+    /// early when total ≤ budget). Used by the Settings UI to retune
+    /// the cache without rebuilding it.
+    public func setBudget(_ newValue: Int64) {
+        budgetBytes = newValue
+        evictIfNeeded(protectedId: nil)
+        try? index.save(to: indexURL)
+    }
+
+    /// Remove every entry from the cache, on disk and in memory. Used
+    /// by the harness `clearOriginalsCache` command and the Settings UI
+    /// "Clear originals cache" button. `onEvict` fires for each entry so
+    /// downstream callers can clear `Asset.localPath` and re-fetch.
+    public func clearAll() {
+        let ids = Array(index.entries.keys)
+        for key in ids {
+            if let entry = index.entries[key] {
+                let fileURL = directory.appendingPathComponent(entry.filename)
+                try? fileManager.removeItem(at: fileURL)
+            }
+            index.entries.removeValue(forKey: key)
+            if let id = UUID(uuidString: key) {
+                onEvict(id)
+            }
+        }
+        try? index.save(to: indexURL)
     }
 
     /// Bump `lastAccess` for an asset id without fetching. Safe to call
@@ -138,10 +167,10 @@ public actor OriginalsCache {
 
     // MARK: - Eviction
 
-    private func evictIfNeeded(protectedId: UUID) {
+    private func evictIfNeeded(protectedId: UUID?) {
         guard index.totalBytes > budgetBytes else { return }
         let sorted = index.entries
-            .filter { $0.key != protectedId.uuidString }
+            .filter { $0.key != protectedId?.uuidString }
             .sorted { $0.value.lastAccess < $1.value.lastAccess }
 
         for (key, entry) in sorted {

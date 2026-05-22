@@ -15,8 +15,19 @@ public final class DevelopViewModel: ObservableObject {
     /// view model (rather than as `@State` in `ContentView`) so the
     /// harness `toggleHistogram` command can flip it through the same
     /// path as the H key, and so `AppState.showHistogram` has a single
-    /// source of truth to read from.
-    @Published public var showHistogram: Bool = true
+    /// source of truth to read from. Initial value is configurable via
+    /// the settings store.
+    @Published public var showHistogram: Bool
+
+    /// Debounce window between a slider/curve mutation and the next
+    /// `performRender` pass. Tuneable via Settings; defaults preserve
+    /// the previous hardcoded `50ms` behaviour.
+    public var renderDebounceMillis: Int
+
+    /// Debounce window between the last mutation and the catalog write
+    /// that records the new `EditState`. Tuneable via Settings;
+    /// defaults preserve the previous hardcoded `500ms` behaviour.
+    public var saveDebounceMillis: Int
     /// Monotonic counter bumped whenever `reloadEditState()` refreshes
     /// `editState` from the catalog (i.e. an undo/redo replay replaced
     /// the current values). The Develop view keys its slider animation
@@ -62,11 +73,17 @@ public final class DevelopViewModel: ObservableObject {
     public init(
         catalog: CatalogDatabase,
         previewStore: PreviewStore,
-        originalFetcher: (any OriginalFetcher)? = nil
+        originalFetcher: (any OriginalFetcher)? = nil,
+        defaultShowHistogram: Bool = true,
+        renderDebounceMillis: Int = 50,
+        saveDebounceMillis: Int = 500
     ) {
         self.catalog = catalog
         self.previewStore = previewStore
         self.originalFetcher = originalFetcher
+        self.showHistogram = defaultShowHistogram
+        self.renderDebounceMillis = renderDebounceMillis
+        self.saveDebounceMillis = saveDebounceMillis
     }
 
     /// Late-bind the shared undo stack so edit saves show up as Cmd+Z
@@ -467,8 +484,9 @@ public final class DevelopViewModel: ObservableObject {
 
     private func scheduleRender() {
         renderTask?.cancel()
+        let millis = max(0, renderDebounceMillis)
         renderTask = Task {
-            try? await Task.sleep(nanoseconds: 50_000_000)
+            try? await Task.sleep(nanoseconds: UInt64(millis) * 1_000_000)
             guard !Task.isCancelled else { return }
             await performRender()
         }
@@ -514,8 +532,9 @@ public final class DevelopViewModel: ObservableObject {
 
     private func scheduleSave() {
         saveTask?.cancel()
+        let millis = max(0, saveDebounceMillis)
         saveTask = Task {
-            try? await Task.sleep(nanoseconds: 500_000_000)
+            try? await Task.sleep(nanoseconds: UInt64(millis) * 1_000_000)
             guard !Task.isCancelled else { return }
             guard let assetId = currentAssetId else { return }
             let previous = pendingUndoPrevious

@@ -151,6 +151,32 @@ final class GeometryRenderTests: XCTestCase {
         XCTAssertTrue(foundDifference, "CA correction should change at least one pixel when enabled")
     }
 
+    func testChromaticAberrationKeepsGreenChannelBitExact() {
+        // Stripe pattern: every column alternates 0/255 so neighbouring G
+        // values differ by the full 8-bit range. Any sub-pixel sampling shift
+        // on the G channel would produce intermediate values and fail this
+        // assertion. The CA kernel must sample G at the unmodified destination
+        // coordinate so it passes through untouched even while R/B are scaled.
+        let source = makeStripeImage(width: 64, height: 64)
+        let result = Renderer.render(
+            source: source,
+            editState: EditState(chromaticAberration: true)
+        )
+
+        // Sample the centre and four off-centre points where the radial scale
+        // applied to R/B is largest — those are exactly the positions where a
+        // mistaken G transform would show up.
+        let samplePoints = [(32, 32), (8, 8), (56, 8), (8, 56), (56, 56)]
+        for (x, y) in samplePoints {
+            let srcPx = samplePixel(image: source, x: x, y: y, context: ctx)
+            let resPx = samplePixel(image: result, x: x, y: y, context: ctx)
+            XCTAssertEqual(
+                srcPx.g, resPx.g,
+                "G channel should be bit-exact with CA on at (\(x), \(y)): source=\(srcPx.g) result=\(resPx.g)"
+            )
+        }
+    }
+
     func testChromaticAberrationOffIsPassThrough() {
         let source = makeColorImage()
         let result = Renderer.render(

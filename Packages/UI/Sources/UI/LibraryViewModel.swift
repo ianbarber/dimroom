@@ -139,7 +139,16 @@ public final class LibraryViewModel: ObservableObject {
 
     /// Number of columns in the library grid. Shared between `LibraryView`
     /// (layout) and navigation (Up/Down arrow skip by this count).
-    public static let columnCount = 4
+    /// Instance-level so the user can tune it from Settings; defaults
+    /// match the pre-settings hardcoded value so existing tests and
+    /// fixtures see no change.
+    @Published public var columnCount: Int = 4
+
+    /// Number of recent import sessions to surface in the scope picker.
+    /// Plumbed into `catalog.fetchImportSessions(limit:)` on every
+    /// reload; instance-level so the Settings UI can change it at
+    /// runtime.
+    public var recentImportsLimit: Int = 20
 
     private var catalog: CatalogDatabase
     private var previewStore: PreviewStore
@@ -223,8 +232,9 @@ public final class LibraryViewModel: ObservableObject {
         let previewStore = self.previewStore
         let minRating = self.minRating
         let scope = self.scope
+        let recentImportsLimit = self.recentImportsLimit
         reloadTask = Task { [weak self] in
-            let sessions = await Self.loadSessions(catalog: catalog)
+            let sessions = await Self.loadSessions(catalog: catalog, limit: recentImportsLimit)
             let resolved = await Self.loadRows(
                 catalog: catalog,
                 previewStore: previewStore,
@@ -394,7 +404,7 @@ public final class LibraryViewModel: ObservableObject {
     /// No-op if nothing is selected or the target would be out of bounds.
     public func selectUp() {
         let ids = rows.map(\.id)
-        guard let target = Self.neighbor(in: ids, from: primarySelectedAssetId, offset: -Self.columnCount) else {
+        guard let target = Self.neighbor(in: ids, from: primarySelectedAssetId, offset: -columnCount) else {
             return
         }
         select(target)
@@ -405,7 +415,7 @@ public final class LibraryViewModel: ObservableObject {
     /// No-op if nothing is selected or the target would be out of bounds.
     public func selectDown() {
         let ids = rows.map(\.id)
-        guard let target = Self.neighbor(in: ids, from: primarySelectedAssetId, offset: Self.columnCount) else {
+        guard let target = Self.neighbor(in: ids, from: primarySelectedAssetId, offset: columnCount) else {
             return
         }
         select(target)
@@ -686,10 +696,11 @@ public final class LibraryViewModel: ObservableObject {
 
     /// Background-task worker: fetch recent import sessions.
     private static func loadSessions(
-        catalog: CatalogDatabase
+        catalog: CatalogDatabase,
+        limit: Int
     ) async -> [ImportSessionSummary] {
         await Task.detached(priority: .userInitiated) {
-            (try? catalog.fetchImportSessions()) ?? []
+            (try? catalog.fetchImportSessions(limit: limit)) ?? []
         }.value
     }
 

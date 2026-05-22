@@ -69,6 +69,7 @@ struct DimroomCLI: ParsableCommand {
             ClearPreviewCache.self,
             SyncFromDrive.self,
             RestoreCatalogFromDrive.self,
+            ReloadCatalogFromDrive.self,
             TriggerExportMenu.self,
             CompleteExportSheet.self,
         ]
@@ -1250,6 +1251,36 @@ extension DimroomCLI {
             // launch-time auto-confirm path used by the Layer C flow.
             let approve = !decline
             try runCommand(.restoreCatalogFromDrive(confirm: approve), socket: socket)
+        }
+    }
+
+    struct ReloadCatalogFromDrive: ParsableCommand {
+        static let configuration = CommandConfiguration(
+            commandName: "reload-catalog-from-drive",
+            abstract: "Hot-reload the local catalog from the published remote (#259). Same path the 'Reload Now' button in the catalog-changed alert dispatches."
+        )
+
+        @Option(name: .long, help: "Drive file id from the prior syncFromDrive catalogChanged payload.")
+        var driveFileId: String
+
+        @Option(name: .long, help: "ISO-8601 modifiedTime from the syncFromDrive payload (optional).")
+        var modifiedTime: String?
+
+        @Option(name: .long, help: "Page token from the syncFromDrive payload, persisted on the new catalog.")
+        var pageToken: String
+
+        @Option(name: .long, help: "Path to the harness socket.")
+        var socket: String = HarnessServer.defaultSocketPath
+
+        func run() throws {
+            try runCommand(
+                .reloadCatalogFromDrive(
+                    driveFileId: driveFileId,
+                    modifiedTime: modifiedTime,
+                    pageToken: pageToken
+                ),
+                socket: socket
+            )
         }
     }
 

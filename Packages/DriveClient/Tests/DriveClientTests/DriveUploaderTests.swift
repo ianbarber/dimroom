@@ -281,6 +281,94 @@ final class DriveUploaderTests: XCTestCase {
         XCTAssertTrue(dedupURL.contains("'id-4' in parents"), "got: \(dedupURL)")
     }
 
+    func testSimpleUploadStampsDimroomMarkerInAppProperties() async throws {
+        // Issue #273: every dimroom-uploaded file must carry the shared
+        // `dimroom: 1` appProperty so the ChangePoller can drop changes
+        // for files outside the /PhotoTool/ workflow.
+        let fixture = try writeFixture(bytes: Array(repeating: UInt8(7), count: 100))
+        defer { try? FileManager.default.removeItem(at: fixture) }
+
+        let http = RoutingStubHTTPClient()
+        let segments = ["PhotoTool", "library", "2024", "2024-06-14", "digital"]
+        for (i, segment) in segments.enumerated() {
+            http.route(method: "GET", urlContains: "'\(segment)'",
+                       response: .init(status: 200, body: stubFolderList([("id-\(i)", segment)])))
+        }
+        http.route(method: "GET", urlContains: "contentHash",
+                   response: .init(status: 200, body: stubFolderList([])))
+        http.route(method: "POST", urlContains: "uploadType=multipart",
+                   response: .init(status: 200, body: Data(#"{"id":"uploaded-xyz"}"#.utf8)))
+
+        let session = authorizedSession(for: http)
+        let resolver = DriveFolderResolver(
+            session: session,
+            root: .folderId("root"),
+            retryPolicy: RetryPolicy(maxAttempts: 1, baseDelay: .zero, maxDelay: .zero)
+        )
+        let uploader = DriveUploader(
+            session: session,
+            folderResolver: resolver,
+            retryPolicy: RetryPolicy(maxAttempts: 1, baseDelay: .zero, maxDelay: .zero),
+            simpleUploadThreshold: 5 * 1024 * 1024
+        )
+        _ = try await uploader.upload(sampleRef(localPath: fixture, bytes: 100)) { _, _ in }
+
+        let posts = http.requestsMatching(method: "POST", urlContains: "uploadType=multipart")
+        XCTAssertEqual(posts.count, 1)
+        let body = String(data: posts[0].body ?? Data(), encoding: .utf8) ?? ""
+        XCTAssertTrue(
+            body.contains("\"dimroom\":\"1\""),
+            "expected dimroom marker in multipart appProperties: \(body)"
+        )
+    }
+
+    func testResumableUploadStampsDimroomMarkerInInitiateBody() async throws {
+        let fixture = try writeFixture(bytes: Array(repeating: UInt8(3), count: 500))
+        defer { try? FileManager.default.removeItem(at: fixture) }
+
+        let http = RoutingStubHTTPClient()
+        let segments = ["PhotoTool", "library", "2024", "2024-06-14", "digital"]
+        for (i, segment) in segments.enumerated() {
+            http.route(method: "GET", urlContains: "'\(segment)'",
+                       response: .init(status: 200, body: stubFolderList([("id-\(i)", segment)])))
+        }
+        http.route(method: "GET", urlContains: "contentHash",
+                   response: .init(status: 200, body: stubFolderList([])))
+        http.route(method: "POST", urlContains: "uploadType=resumable",
+                   response: .init(
+                    status: 200,
+                    body: Data(),
+                    headers: ["Location": "https://upload.example/s-resumable"]
+                   ))
+        http.route(method: "PUT", urlContains: "s-resumable",
+                   response: .init(status: 200, body: Data(#"{"id":"resumable-id"}"#.utf8)))
+
+        let session = authorizedSession(for: http)
+        let resolver = DriveFolderResolver(
+            session: session,
+            root: .folderId("root"),
+            retryPolicy: RetryPolicy(maxAttempts: 1, baseDelay: .zero, maxDelay: .zero)
+        )
+        let uploader = DriveUploader(
+            session: session,
+            folderResolver: resolver,
+            retryPolicy: RetryPolicy(maxAttempts: 1, baseDelay: .zero, maxDelay: .zero),
+            simpleUploadThreshold: 100,
+            resumableChunkSize: 500
+        )
+        _ = try await uploader.upload(sampleRef(localPath: fixture, bytes: 500)) { _, _ in }
+
+        let initiates = http.requestsMatching(method: "POST", urlContains: "uploadType=resumable")
+        XCTAssertEqual(initiates.count, 1)
+        let json = try JSONSerialization.jsonObject(with: initiates[0].body ?? Data()) as? [String: Any]
+        let appProperties = json?["appProperties"] as? [String: String]
+        XCTAssertEqual(
+            appProperties?["dimroom"],
+            "1",
+            "expected dimroom marker in resumable initiate body: \(String(describing: json))"
+        )
+    }
+
     func testMissingLocalFileThrows() async {
         let missing = URL(fileURLWithPath: "/var/folders/definitely-not-there-\(UUID().uuidString)")
         let http = RoutingStubHTTPClient()

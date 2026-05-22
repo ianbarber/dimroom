@@ -195,6 +195,23 @@ public final class LibraryViewModel: ObservableObject {
     /// same object identity that the SwiftUI view tree is already
     /// observing.
     public func configure(catalog: CatalogDatabase, previewStore: PreviewStore) {
+        // Cancel any in-flight `reload()` from the previous catalog so
+        // its background fetch can't land after the new catalog is
+        // swapped in and overwrite `rows` with stale data. The fetch
+        // closure already captures the old catalog by value, so the
+        // task isn't going to deadlock waiting on the dropped queue —
+        // but its result would still publish over the new state.
+        reloadTask?.cancel()
+        // Drop any in-flight original-fetch bookkeeping. The fetcher
+        // tasks themselves keep running (we don't own them here), but
+        // ticks they emit will fail the `currentFetchIdByAssetId`
+        // gate; clearing here keeps the Loupe overlay from showing a
+        // spinner for an asset that no longer exists in the new
+        // catalog.
+        downloadingAssetIds = []
+        downloadProgressByAssetId = [:]
+        currentFetchIdByAssetId = [:]
+
         self.catalog = catalog
         self.previewStore = previewStore
         subscribeToPreviewRegeneration()

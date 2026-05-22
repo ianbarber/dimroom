@@ -318,6 +318,34 @@ final class LibrarySnapshotTests: XCTestCase {
         }
     }
 
+    // MARK: - Remote-additions badge
+
+    /// Library grid with the filter-bar badge surfacing remote
+    /// originals added on Drive (delta-sync `originalsChangedOnly`).
+    /// Renders against an empty grid so the snapshot is deterministic
+    /// regardless of thumbnail layout. The pluralisation branch in
+    /// `LibraryView.badgeText(for:)` is covered by the Layer A tests;
+    /// this snapshot guards the visible chrome.
+    @MainActor
+    func test_filter_bar_with_remote_additions_badge() async throws {
+        let catalog = try CatalogDatabase.inMemory()
+        let store = PreviewStore(cacheDirectory: tempCacheDir)
+        let vm = LibraryViewModel(catalog: catalog, previewStore: store)
+        vm.recordRemoteOriginalsAdded(count: 4)
+
+        let image = renderFixedPixelImage(for: LibraryView(viewModel: vm))
+
+        runAssertSnapshot {
+            assertSnapshot(
+                of: image,
+                as: .image(
+                    precision: Self.snapshotPrecision,
+                    perceptualPrecision: Self.snapshotPerceptualPrecision
+                )
+            )
+        }
+    }
+
     // MARK: - Undo toast
 
     /// Library grid with the 10-second undo toast visible at the bottom

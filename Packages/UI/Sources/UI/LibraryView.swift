@@ -114,12 +114,54 @@ public struct LibraryView: View {
             // ImageRenderer renders segment text light regardless, so a
             // structural test (FilterBarStructureTests) guards this modifier.
             .colorScheme(.dark)
+            if let badge = viewModel.remoteAdditionsBadge {
+                remoteAdditionsBadgeView(badge)
+            }
             Spacer()
             deleteButton
         }
         .padding(.horizontal, 12)
         .padding(.vertical, 8)
         .background(Color(white: 0.12))
+    }
+
+    /// Non-modal "N new on Drive" capsule. Surfaces a delta-sync tick
+    /// classified as `originalsChangedOnly` so the user knows there are
+    /// remote photos worth pulling for, without auto-triggering a
+    /// catalog reload (the next `catalogChanged` tick handles that).
+    /// Tapping the close button clears the badge via the view model;
+    /// a subsequent reload also clears it.
+    private func remoteAdditionsBadgeView(
+        _ badge: LibraryViewModel.RemoteAdditionsBadge
+    ) -> some View {
+        HStack(spacing: 6) {
+            Image(systemName: "icloud.and.arrow.down")
+                .font(.caption)
+            Text(badgeText(for: badge.addedCount))
+                .font(.caption)
+                .lineLimit(1)
+            Button {
+                viewModel.dismissRemoteAdditionsBadge()
+            } label: {
+                Image(systemName: "xmark.circle.fill")
+                    .font(.caption)
+            }
+            .buttonStyle(.borderless)
+            .help("Dismiss")
+            .accessibilityLabel("Dismiss new originals badge")
+        }
+        .foregroundStyle(Color(white: 0.9))
+        .padding(.horizontal, 10)
+        .padding(.vertical, 4)
+        .background(
+            Capsule().fill(Color(red: 0.12, green: 0.32, blue: 0.55))
+        )
+        .accessibilityElement(children: .contain)
+        .accessibilityLabel("\(badge.addedCount) new on Drive")
+    }
+
+    private func badgeText(for count: Int) -> String {
+        count == 1 ? "1 new on Drive" : "\(count) new on Drive"
     }
 
     /// Trash icon wired to the same `pendingDeleteCount` binding the

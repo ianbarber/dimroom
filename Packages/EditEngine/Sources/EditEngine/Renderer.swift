@@ -440,19 +440,17 @@ public enum Renderer {
     /// — this stage flattens the lens's intrinsic falloff so the creative
     /// vignette has a known starting point.
     ///
-    /// Like CA correction, this is a placeholder until lens-profile data is
-    /// wired in. Apply a small inverted vignette: bright at the corners,
-    /// neutral at centre, so the multiply lifts shadowed corners without
-    /// touching the middle of the frame.
+    /// Placeholder until EXIF lens metadata feeds a per-lens profile (future
+    /// Stage 7+ work). Tuned to be near-no-op on a clean centre: radius 1.0
+    /// keeps the falloff band at the image's circumscribed circle so the
+    /// centre amplitude is ~zero, and intensity -0.15 caps any residual lift
+    /// while still measurably brightening genuinely vignetted corners.
     private static func applyLensVignetteCorrection(_ image: CIImage, enabled: Bool) -> CIImage {
         guard enabled else { return image }
         let filter = CIFilter(name: "CIVignette")!
         filter.setValue(image, forKey: kCIInputImageKey)
-        // Negative intensity inverts the vignette: corners brighten rather
-        // than darken. Conservative magnitude — anything stronger and a clean
-        // image gets blown corners.
-        filter.setValue(-0.3, forKey: "inputIntensity")
-        filter.setValue(1.5, forKey: "inputRadius")
+        filter.setValue(-0.15, forKey: "inputIntensity")
+        filter.setValue(1.0, forKey: "inputRadius")
         return filter.outputImage!.cropped(to: image.extent)
     }
 

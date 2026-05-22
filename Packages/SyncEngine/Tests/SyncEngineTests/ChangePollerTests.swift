@@ -231,6 +231,44 @@ final class ChangePollerTests: XCTestCase {
         }
     }
 
+    // MARK: - Post-reload guard (#259)
+
+    func testCatalogChangeMatchingLastPublishedTimeYieldsNoChanges() async throws {
+        // After a hot-reload, the new catalog is stamped with the
+        // applied modifiedTime. If the next poll's change list replays
+        // the same change (deterministic harness fixture, or a slow
+        // Drive index that hasn't moved on yet) the poller must not
+        // re-fire `.catalogChanged` for state we already have.
+        let catalog = try makeCatalog()
+        try catalog.saveDrivePageToken("stored")
+        try catalog.saveLastPublishedCatalogModifiedTime("2026-05-17T08:00:00.000Z")
+        let fetcher = StubDriveChangesFetcher()
+        let cachedId = "drive-catalog-abc"
+        fetcher.enqueueListResponse(DriveChangesPage(
+            changes: [
+                DriveChange(
+                    fileId: cachedId,
+                    modifiedTime: "2026-05-17T08:00:00.000Z"
+                )
+            ],
+            newStartPageToken: "after-replay"
+        ))
+        let (poller, _) = makePoller(
+            catalog: catalog,
+            fetcher: fetcher,
+            cachedCatalogFileId: cachedId
+        )
+
+        let outcome = try await poller.pollOnce()
+
+        switch outcome {
+        case .noChanges(let token):
+            XCTAssertEqual(token, "after-replay")
+        default:
+            XCTFail("expected .noChanges (post-reload guard), got \(outcome)")
+        }
+    }
+
     // MARK: - Pagination
 
     func testPaginatedChangesFollowNextPageTokenBeforePersisting() async throws {

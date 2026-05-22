@@ -1,15 +1,22 @@
 #!/usr/bin/env bash
 # harness-delta-sync-flow.sh — Layer C flow for delta sync via Drive
-# changes API (#235, extended by #273).
+# changes API (#235, extended by #272 and #273).
 #
-# Walks four classified outcomes the change poller emits:
+# Walks the classified outcomes the change poller emits:
 #   1. bootstrap — no stored page token, getStartPageToken returns one.
 #   2. noChanges — steady-state poll with an empty changes list.
 #   3. catalogChanged — fixture page reports a change to the file id
 #      matching the cached catalog driveFileId, so the poller classifies
 #      it as a remote catalog update (not a conflict, because there's
 #      no last-published modifiedTime stored).
-#   4. noChanges (filtered) — fixture page reports a change for a file
+#   4. originalsChangedOnly — fixture page reports a change to a file
+#      id that is not the cached catalog id and carries the dimroom
+#      appProperty marker. The poller classifies it as a new original
+#      on Drive (`originalsChangedOnly`); the harness asserts the
+#      surfaced count and that the Library view model's remote-additions
+#      badge picked it up via the `state` snapshot
+#      (libraryRemoteAdditionsCount).
+#   5. noChanges (filtered) — fixture page reports a change for a file
 #      without the dimroom `appProperties` marker, which the poller
 #      drops per #273.
 #
@@ -87,9 +94,12 @@ fi
 # Fixture describes the sequence of `listChanges` responses the stub
 # returns. The third page reports a change to "stub-catalog-id", which
 # the poller matches against the cached catalog driveFileId we'll plant
-# in the file-id store below. The fourth page reports a change for a
-# file lacking the dimroom appProperty marker — the poller drops it
-# (#273) and surfaces .noChanges.
+# in the file-id store below. The fourth page reports a tagged change
+# to a different file id ("stub-original-id"), which the poller
+# classifies as a new original on Drive (`originalsChangedOnly`). The
+# fifth page reports a change for a file lacking the dimroom
+# appProperty marker — the poller drops it (#273) and surfaces
+# .noChanges.
 cat >"$FIXTURE_PATH" <<'JSON'
 {
   "startPageToken": "stub-start-token",
@@ -107,6 +117,21 @@ cat >"$FIXTURE_PATH" <<'JSON'
           "modifiedTime": "2026-05-17T08:00:00.000Z",
           "mimeType": "application/x-sqlite3",
           "parents": ["catalog-folder"],
+          "removed": false,
+          "trashed": false
+        }
+      ]
+    },
+    {
+      "newStartPageToken": "stub-token-after-originals-change",
+      "changes": [
+        {
+          "fileId": "stub-original-id",
+          "name": "DSC_0001.jpg",
+          "modifiedTime": "2026-05-17T09:00:00.000Z",
+          "mimeType": "image/jpeg",
+          "parents": ["digital-folder"],
+          "appProperties": {"dimroom": "1"},
           "removed": false,
           "trashed": false
         }
@@ -241,6 +266,38 @@ fi
 echo "  OK: catalogChanged at stub-token-after-catalog-change"
 
 take_screenshot "delta-sync-catalog-changed"
+
+echo "=== sync-from-drive — fixture serves originals-only change ==="
+OCHG_OUT=$("$CLI_BIN" sync-from-drive --socket "$SOCKET")
+echo "$OCHG_OUT"
+OCHG_STATUS=$(printf '%s' "$OCHG_OUT" | "$REPO_ROOT/bin/harness-json-extract" 'data.status')
+OCHG_COUNT=$(printf '%s' "$OCHG_OUT" | "$REPO_ROOT/bin/harness-json-extract" 'data.addedCount')
+OCHG_TOKEN=$(printf '%s' "$OCHG_OUT" | "$REPO_ROOT/bin/harness-json-extract" 'data.pageToken')
+if [ "$OCHG_STATUS" != "originalsChangedOnly" ]; then
+    echo "ERROR: expected status 'originalsChangedOnly', got '$OCHG_STATUS'"
+    exit 1
+fi
+if [ "$OCHG_COUNT" != "1" ]; then
+    echo "ERROR: expected addedCount '1', got '$OCHG_COUNT'"
+    exit 1
+fi
+if [ "$OCHG_TOKEN" != "stub-token-after-originals-change" ]; then
+    echo "ERROR: expected pageToken 'stub-token-after-originals-change', got '$OCHG_TOKEN'"
+    exit 1
+fi
+echo "  OK: originalsChangedOnly at stub-token-after-originals-change"
+
+echo "=== state — assert Library badge picked up the addedCount ==="
+STATE_OUT=$("$CLI_BIN" state --socket "$SOCKET")
+echo "$STATE_OUT"
+STATE_BADGE=$(printf '%s' "$STATE_OUT" | "$REPO_ROOT/bin/harness-json-extract" 'data.libraryRemoteAdditionsCount')
+if [ "$STATE_BADGE" != "1" ]; then
+    echo "ERROR: expected libraryRemoteAdditionsCount '1', got '$STATE_BADGE'"
+    exit 1
+fi
+echo "  OK: badge surfaced 1 remote addition"
+
+take_screenshot "delta-sync-originals-added"
 
 echo "=== sync-from-drive — fixture serves untagged change, expect filtered to noChanges (#273) ==="
 DROP_OUT=$("$CLI_BIN" sync-from-drive --socket "$SOCKET")

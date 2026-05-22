@@ -1,5 +1,6 @@
 import XCTest
 import DriveClient
+import DriveTestSupport
 @testable import SyncEngine
 
 final class DriveCatalogUploaderTests: XCTestCase {

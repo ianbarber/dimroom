@@ -1,5 +1,6 @@
 import XCTest
 @testable import DriveClient
+import DriveTestSupport
 
 final class ResumableUploadTests: XCTestCase {
 

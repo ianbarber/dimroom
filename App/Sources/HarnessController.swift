@@ -13,7 +13,11 @@ import UI
 /// Bridges harness commands to the app's state and AppKit operations.
 final class HarnessController: @unchecked Sendable {
     private let router: AppRouter
-    private let catalog: CatalogDatabase?
+    /// `var` rather than `let` so the same-session restore path
+    /// (#283) can swap the placeholder catalog out for the restored
+    /// one without tearing down the harness socket. The other
+    /// restore-managed refs follow the same pattern below.
+    private var catalog: CatalogDatabase?
     private let originalsDirectory: URL
     private let previewStore: PreviewStore
     private let libraryViewModel: LibraryViewModel
@@ -22,9 +26,9 @@ final class HarnessController: @unchecked Sendable {
     private let exportCoordinator: ExportCoordinator
     private let uploadCoordinator: UploadCoordinator
     private let driveUploader: (any DriveUploading)?
-    private let originalsCoordinator: OriginalsCoordinator?
+    private var originalsCoordinator: OriginalsCoordinator?
     private let undoStack: UndoStack?
-    private let catalogPublisher: CatalogPublisher?
+    private var catalogPublisher: CatalogPublisher?
     private let driveAuthState: DriveAuthState?
     private let settingsStore: SettingsStore?
     private let changePoller: ChangePoller?
@@ -89,6 +93,24 @@ final class HarnessController: @unchecked Sendable {
         self.tokenStoreKind = tokenStoreKind
     }
 
+    /// Swap the catalog-side references after a same-session restore
+    /// (#283). The post-restore wiring builds a fresh catalog,
+    /// `CatalogPublisher`, and `OriginalsCoordinator`; pointing the
+    /// running harness at the new instances keeps commands like
+    /// `state`, `listAssets`, and `restoreCatalogFromDrive` consistent
+    /// with what the SwiftUI tree sees. The socket and `appDelegate`
+    /// reference do not change, so the live harness session can
+    /// continue without a reconnect.
+    func reconfigure(
+        catalog: CatalogDatabase?,
+        catalogPublisher: CatalogPublisher?,
+        originalsCoordinator: OriginalsCoordinator?
+    ) {
+        self.catalog = catalog
+        self.catalogPublisher = catalogPublisher
+        self.originalsCoordinator = originalsCoordinator
+    }
+
     func start(socketPath: String = HarnessServer.defaultSocketPath) throws {
         let handler: CommandHandler = { [self] command in
             try await self.handleCommand(command)
@@ -138,7 +160,8 @@ final class HarnessController: @unchecked Sendable {
                     showHistogram: developViewModel.showHistogram,
                     developIsDownloadingOriginal: developViewModel.isDownloadingOriginal,
                     developDownloadProgress: developViewModel.downloadProgress,
-                    developCurrentAssetId: developViewModel.currentAssetId
+                    developCurrentAssetId: developViewModel.currentAssetId,
+                    libraryRemoteAdditionsCount: libraryViewModel.remoteAdditionsBadge?.addedCount
                 )
             }
             let encoder = JSONEncoder()
@@ -726,6 +749,15 @@ final class HarnessController: @unchecked Sendable {
         }
         do {
             let outcome = try await changePoller.pollOnce()
+            // `--harness` skips the periodic events subscription that
+            // normally drives `handleDeltaSyncOutcome` (the periodic
+            // path can race the harness's own `pollOnce` and an NSAlert
+            // would block the socket). Apply the non-modal portion of
+            // the outcome here so badges still surface to Layer C while
+            // we skip the modal alerts.
+            await MainActor.run {
+                appDelegate.applyNonModalDeltaSyncOutcome(outcome)
+            }
             return .ok(data: Self.encode(outcome: outcome))
         } catch let error as SyncEngineError {
             return .error("syncFromDrive failed: \(error)")

@@ -187,3 +187,108 @@ jobs:
             exit 0
           fi
           bin/harness-restore-catalog-outcomes-flow.sh
+      - name: Run harness crop flow
+        run: |
+          if [ ! -x bin/harness-crop-flow.sh ]; then
+            echo "No harness crop flow script yet — skipping."
+            exit 0
+          fi
+          bin/harness-crop-flow.sh
+      - name: Run harness curves flow
+        run: |
+          if [ ! -x bin/harness-curves-flow.sh ]; then
+            echo "No harness curves flow script yet — skipping."
+            exit 0
+          fi
+          bin/harness-curves-flow.sh
+      - name: Run harness develop noise flow
+        run: |
+          if [ ! -x bin/harness-develop-noise-flow.sh ]; then
+            echo "No harness develop-noise flow script yet — skipping."
+            exit 0
+          fi
+          bin/harness-develop-noise-flow.sh
+      - name: Run harness develop ranges flow
+        run: |
+          if [ ! -x bin/harness-develop-ranges-flow.sh ]; then
+            echo "No harness develop-ranges flow script yet — skipping."
+            exit 0
+          fi
+          bin/harness-develop-ranges-flow.sh
+      - name: Run harness develop thumbnail flow
+        run: |
+          if [ ! -x bin/harness-develop-thumbnail-flow.sh ]; then
+            echo "No harness develop-thumbnail flow script yet — skipping."
+            exit 0
+          fi
+          bin/harness-develop-thumbnail-flow.sh
+      - name: Run harness develop undo flow
+        run: |
+          if [ ! -x bin/harness-develop-undo-flow.sh ]; then
+            echo "No harness develop-undo flow script yet — skipping."
+            exit 0
+          fi
+          bin/harness-develop-undo-flow.sh
+      - name: Run harness develop undo thumbnail flow
+        run: |
+          if [ ! -x bin/harness-develop-undo-thumbnail-flow.sh ]; then
+            echo "No harness develop-undo-thumbnail flow script yet — skipping."
+            exit 0
+          fi
+          bin/harness-develop-undo-thumbnail-flow.sh
+      - name: Run harness download flow
+        run: |
+          if [ ! -x bin/harness-download-flow.sh ]; then
+            echo "No harness download flow script yet — skipping."
+            exit 0
+          fi
+          bin/harness-download-flow.sh
+      - name: Run harness drive auth flow
+        run: |
+          if [ ! -x bin/harness-drive-auth-flow.sh ]; then
+            echo "No harness drive-auth flow script yet — skipping."
+            exit 0
+          fi
+          bin/harness-drive-auth-flow.sh
+      - name: Run harness drive auth stale token flow
+        run: |
+          if [ ! -x bin/harness-drive-auth-stale-token-flow.sh ]; then
+            echo "No harness drive-auth-stale-token flow script yet — skipping."
+            exit 0
+          fi
+          bin/harness-drive-auth-stale-token-flow.sh
+      - name: Run harness export selection flow
+        run: |
+          if [ ! -x bin/harness-export-selection-flow.sh ]; then
+            echo "No harness export-selection flow script yet — skipping."
+            exit 0
+          fi
+          bin/harness-export-selection-flow.sh
+      - name: Run harness histogram flow
+        run: |
+          if [ ! -x bin/harness-histogram-flow.sh ]; then
+            echo "No harness histogram flow script yet — skipping."
+            exit 0
+          fi
+          bin/harness-histogram-flow.sh
+      - name: Run harness keyboard paths flow
+        run: |
+          if [ ! -x bin/harness-keyboard-paths-flow.sh ]; then
+            echo "No harness keyboard-paths flow script yet — skipping."
+            exit 0
+          fi
+          bin/harness-keyboard-paths-flow.sh
+      - name: Run harness navigation scroll flow
+        run: |
+          if [ ! -x bin/harness-navigation-scroll-flow.sh ]; then
+            echo "No harness navigation-scroll flow script yet — skipping."
+            exit 0
+          fi
+          bin/harness-navigation-scroll-flow.sh
+      - name: Run harness undo flow
+        run: |
+          if [ ! -x bin/harness-undo-flow.sh ]; then
+            echo "No harness undo flow script yet — skipping."
+            exit 0
+          fi
+          bin/harness-undo-flow.sh

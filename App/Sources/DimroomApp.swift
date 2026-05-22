@@ -499,6 +499,32 @@ final class AppDelegate: NSObject, NSApplicationDelegate, ObservableObject {
     /// up the refreshed token and restores the catalog normally.
     private var pendingDriveConnectAfterLaunch = false
 
+    /// One-shot flag set alongside `pendingDriveConnectAfterLaunch` so
+    /// the `driveAuthState.$status` sink installed in
+    /// `applicationDidFinishLaunching` knows the user is still waiting
+    /// for the restore to happen this session (#283). Cleared on the
+    /// first `.connected` arrival so subsequent reconnects don't
+    /// trigger a redundant restore.
+    private var pendingSameSessionRestore = false
+
+    /// Cancellable for the `driveAuthState.$status` Combine sink
+    /// installed in `applicationDidFinishLaunching`. Retained so the
+    /// sink survives past launch — needed because OAuth completion
+    /// can land seconds after the launch path returns.
+    private var driveStatusCancellable: AnyCancellable?
+    /// Tracks the previous status seen by the sink so the
+    /// `shouldTriggerSameSessionRestore` helper can compare the
+    /// transition rather than fire on every republish (e.g. an
+    /// email-refresh-only update that keeps the case at `.connected`).
+    private var lastObservedDriveStatus: DriveAuthState.Status = .disconnected
+    /// Launch arguments stashed so `runSameSessionRestore` can pass
+    /// the same `args` to `wireCatalog` that the initial launch path
+    /// did. The values themselves are also reachable via
+    /// `ProcessInfo.processInfo.arguments`, but threading them through
+    /// keeps the post-restore code path symmetric with the initial
+    /// wiring.
+    private var resolvedArgs: [String] = []
+
     /// Public read-only view of the wired-up `OriginalsCoordinator` so
     /// `ContentView` can route export-with-edits through it. Returns
     /// `nil` before `applicationDidFinishLaunching` has wired the
@@ -588,28 +614,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate, ObservableObject {
         self.catalog = resolvedCatalog
         self.previewStore = resolvedPreviewStore
         self.originalsDirectory = resolvedOriginalsDirectory
-
-        // Reconfigure the existing view model with the real catalog so
-        // the SwiftUI view tree — which already holds a reference to this
-        // instance — picks up the change. Creating a new instance here
-        // would leave the views observing the old (empty) placeholder.
-        if let resolvedCatalog {
-            libraryViewModel.configure(
-                catalog: resolvedCatalog,
-                previewStore: resolvedPreviewStore
-            )
-            developViewModel.configure(
-                catalog: resolvedCatalog,
-                previewStore: resolvedPreviewStore
-            )
-            undoStack.configure(
-                catalog: resolvedCatalog,
-                libraryViewModel: libraryViewModel
-            )
-            undoStack.attach(developViewModel: developViewModel)
-            libraryViewModel.undoStack = undoStack
-            developViewModel.attach(undoStack: undoStack)
-        }
+        // Stashed so `runSameSessionRestore` can re-call `wireCatalog`
+        // with the same args the initial launch used (#283).
+        self.resolvedArgs = args
 
         if let resolvedDriveClient {
             driveAuthState.configure(client: resolvedDriveClient)
@@ -619,6 +626,31 @@ final class AppDelegate: NSObject, NSApplicationDelegate, ObservableObject {
                 await driveAuthState.hydrate()
             }
         }
+
+        // Install the `$status` sink BEFORE consuming the pending-connect
+        // flag so it sees the eventual `.connecting → .connected`
+        // transition kicked off by `connectGoogleDriveFromMenu()` (#283).
+        // The sink itself no-ops unless `pendingSameSessionRestore` is
+        // set — only the launch-time `.offerConnectNoAuth → Connect`
+        // path sets it.
+        lastObservedDriveStatus = driveAuthState.status
+        driveStatusCancellable = driveAuthState.$status
+            .receive(on: RunLoop.main)
+            .sink { [weak self] status in
+                guard let self else { return }
+                let previous = self.lastObservedDriveStatus
+                self.lastObservedDriveStatus = status
+                if Self.shouldTriggerSameSessionRestore(
+                    previous: previous,
+                    next: status,
+                    gate: self.pendingSameSessionRestore
+                ) {
+                    self.pendingSameSessionRestore = false
+                    Task { @MainActor in
+                        await self.runSameSessionRestore()
+                    }
+                }
+            }
 
         // If the user clicked "Connect Google Drive…" on the launch-time
         // restore alert (#256), kick off the same OAuth flow the menu
@@ -641,100 +673,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, ObservableObject {
             }
 
         if let resolvedCatalog {
-            let cacheDir = resolveOriginalsCacheDirectory(from: args)
-            let budget = resolveOriginalsCacheBudget()
-            let downloader: OriginalsDownloader = resolveHarnessDownloader()
-                ?? resolvedDriveClient
-                ?? UnavailableOriginalsDownloader()
-            let coordinator = OriginalsCoordinator(catalog: resolvedCatalog)
-            if let cache = try? OriginalsCache(
-                directory: cacheDir,
-                budgetBytes: budget,
-                downloader: downloader,
-                onEvict: { [weak coordinator] id in
-                    coordinator?.handleEviction(assetId: id)
-                }
-            ) {
-                coordinator.attach(cache: cache)
-                libraryViewModel.originalFetcher = coordinator
-                developViewModel.attach(originalFetcher: coordinator)
-                originalsCoordinator = coordinator
-            }
-        }
-
-        if let resolvedDriveClient {
-            let httpClient = URLSessionHTTPClient()
-            let session = AuthorizedSession(client: httpClient, provider: resolvedDriveClient)
-            let resolver = DriveFolderResolver(session: session)
-            self.driveUploader = DriveUploader(session: session, folderResolver: resolver)
-
-            // Catalog publisher reuses the same authorized session +
-            // folder resolver but talks through a catalog-specific
-            // uploader (overwrite-in-place, no dedup).
-            if let resolvedCatalog {
-                let catalogUploader = DriveCatalogUploader(
-                    session: session,
-                    folderResolver: resolver
-                )
-                self.catalogUploader = catalogUploader
-                let publisher = CatalogPublisher(
-                    catalog: resolvedCatalog,
-                    uploader: catalogUploader,
-                    fileIdStore: driveFileIdStore ?? FileSystemDriveFileIdStore(
-                        path: FileSystemDriveFileIdStore.defaultPath()
-                    ),
-                    debounceInterval: .seconds(settingsStore.driveAutoPublishDebounceSeconds)
-                )
-                self.catalogPublisher = publisher
-                // Disable up-front if the user has turned auto-publish
-                // off in Settings — the start() call below still arms
-                // the debouncer so subsequent toggling works, but no
-                // mutation will schedule a publish until enabled.
-                Task { await publisher.setEnabled(settingsStore.driveAutoPublish) }
-                // Wire onChange → debouncer trigger. Captured weakly so
-                // the catalog doesn't pin the publisher in a retain
-                // cycle after the app shuts down.
-                resolvedCatalog.onChange = { [weak publisher] in
-                    publisher?.scheduleDebouncedPublish()
-                }
-                Task { await publisher.start() }
-
-                let fetcher: any DriveChangesFetching
-                if let fixturePath = ProcessInfo.processInfo.environment[
-                    "DIMROOM_HARNESS_DRIVE_CHANGES_FIXTURE"
-                ] {
-                    fetcher = HarnessStubChangesFetcher(fixturePath: fixturePath)
-                } else {
-                    fetcher = DriveChangesClient(session: session)
-                }
-                let poller = ChangePoller(
-                    catalog: resolvedCatalog,
-                    fetcher: fetcher,
-                    publisher: publisher,
-                    fileIdStore: driveFileIdStore ?? FileSystemDriveFileIdStore(
-                        path: FileSystemDriveFileIdStore.defaultPath()
-                    )
-                )
-                self.changePoller = poller
-                // Harness flows drive `pollOnce()` directly through
-                // `syncFromDrive` and the controller encodes the
-                // outcome back to the test — racing the periodic loop
-                // would make those assertions non-deterministic, and
-                // an NSAlert on a poll-driven tick would block the
-                // harness socket.
-                if !args.contains("--harness") {
-                    // Subscribe before start() so we don't miss the
-                    // bootstrap event from the periodic loop's first
-                    // tick.
-                    changePollerEventsTask = Task { @MainActor [weak self] in
-                        let stream = await poller.events()
-                        for await outcome in stream {
-                            self?.handleDeltaSyncOutcome(outcome)
-                        }
-                    }
-                    Task { await poller.start() }
-                }
-            }
+            wireCatalog(resolvedCatalog, args: args)
         }
 
         // Wire SettingsStore changes into the downstream consumers so
@@ -839,6 +778,233 @@ final class AppDelegate: NSObject, NSApplicationDelegate, ObservableObject {
         if let poller = changePoller {
             Task { await poller.stop() }
         }
+    }
+
+    // MARK: - Same-session restore (#283)
+
+    /// Catalog-dependent wiring shared by the initial launch path and
+    /// the same-session restore path (#283). Re-`configure`s the
+    /// existing view-model instances against the new catalog, builds a
+    /// fresh `OriginalsCoordinator`, and — when `driveClient` is
+    /// available — re-creates the `CatalogPublisher` + `ChangePoller`.
+    /// Idempotent: callers must drop the prior `CatalogPublisher` /
+    /// `OriginalsCoordinator` references (and stop the publisher's
+    /// debouncer) before re-invoking, because this method replaces
+    /// `self.catalog`, `self.catalogPublisher`, and
+    /// `self.originalsCoordinator` without releasing whatever was
+    /// already there.
+    private func wireCatalog(_ catalog: CatalogDatabase, args: [String]) {
+        self.catalog = catalog
+
+        libraryViewModel.configure(
+            catalog: catalog,
+            previewStore: previewStore ?? PreviewStore(
+                cacheDirectory: FileManager.default.temporaryDirectory
+            )
+        )
+        developViewModel.configure(
+            catalog: catalog,
+            previewStore: previewStore ?? PreviewStore(
+                cacheDirectory: FileManager.default.temporaryDirectory
+            )
+        )
+        undoStack.configure(catalog: catalog, libraryViewModel: libraryViewModel)
+        undoStack.attach(developViewModel: developViewModel)
+        libraryViewModel.undoStack = undoStack
+        developViewModel.attach(undoStack: undoStack)
+
+        let cacheDir = resolveOriginalsCacheDirectory(from: args)
+        let budget = resolveOriginalsCacheBudget()
+        let downloader: OriginalsDownloader = resolveHarnessDownloader()
+            ?? driveClient
+            ?? UnavailableOriginalsDownloader()
+        let coordinator = OriginalsCoordinator(catalog: catalog)
+        if let cache = try? OriginalsCache(
+            directory: cacheDir,
+            budgetBytes: budget,
+            downloader: downloader,
+            onEvict: { [weak coordinator] id in
+                coordinator?.handleEviction(assetId: id)
+            }
+        ) {
+            coordinator.attach(cache: cache)
+            libraryViewModel.originalFetcher = coordinator
+            developViewModel.attach(originalFetcher: coordinator)
+            originalsCoordinator = coordinator
+        }
+
+        if let resolvedDriveClient = driveClient {
+            let httpClient = URLSessionHTTPClient()
+            let session = AuthorizedSession(client: httpClient, provider: resolvedDriveClient)
+            let resolver = DriveFolderResolver(session: session)
+            self.driveUploader = DriveUploader(session: session, folderResolver: resolver)
+
+            let catalogUploader = DriveCatalogUploader(
+                session: session,
+                folderResolver: resolver
+            )
+            self.catalogUploader = catalogUploader
+            let publisher = CatalogPublisher(
+                catalog: catalog,
+                uploader: catalogUploader,
+                fileIdStore: driveFileIdStore ?? FileSystemDriveFileIdStore(
+                    path: FileSystemDriveFileIdStore.defaultPath()
+                ),
+                debounceInterval: .seconds(settingsStore.driveAutoPublishDebounceSeconds)
+            )
+            self.catalogPublisher = publisher
+            // Honour the user's auto-publish preference up-front so a
+            // post-restore edit doesn't push to Drive when the user has
+            // turned the setting off in Settings.
+            Task { await publisher.setEnabled(settingsStore.driveAutoPublish) }
+            // Re-point `onChange` at the freshly built publisher so an
+            // edit after restore actually schedules a publish (#283).
+            catalog.onChange = { [weak publisher] in
+                publisher?.scheduleDebouncedPublish()
+            }
+            Task { await publisher.start() }
+
+            let fetcher: any DriveChangesFetching
+            if let fixturePath = ProcessInfo.processInfo.environment[
+                "DIMROOM_HARNESS_DRIVE_CHANGES_FIXTURE"
+            ] {
+                fetcher = HarnessStubChangesFetcher(fixturePath: fixturePath)
+            } else {
+                fetcher = DriveChangesClient(session: session)
+            }
+            let poller = ChangePoller(
+                catalog: catalog,
+                fetcher: fetcher,
+                publisher: publisher,
+                fileIdStore: driveFileIdStore ?? FileSystemDriveFileIdStore(
+                    path: FileSystemDriveFileIdStore.defaultPath()
+                )
+            )
+            self.changePoller = poller
+            if !args.contains("--harness") {
+                changePollerEventsTask?.cancel()
+                changePollerEventsTask = Task { @MainActor [weak self] in
+                    let stream = await poller.events()
+                    for await outcome in stream {
+                        self?.handleDeltaSyncOutcome(outcome)
+                    }
+                }
+                Task { await poller.start() }
+            }
+        }
+
+        // Keep the running harness controller pointed at the new
+        // catalog/publisher/coordinator so `state`, `listAssets`, and
+        // `restoreCatalogFromDrive` reflect the restored data.
+        harnessController?.reconfigure(
+            catalog: catalog,
+            catalogPublisher: catalogPublisher,
+            originalsCoordinator: originalsCoordinator
+        )
+    }
+
+    /// Pure helper for `driveAuthState.$status` transitions. Returns
+    /// `true` when the gate is set AND the status crosses from a
+    /// non-connected case into `.connected(…)`. Re-publishes of the
+    /// same case (e.g. an email-refresh that swaps `.connected(nil)`
+    /// for `.connected("…")`) deliberately do not fire — the launch-time
+    /// Connect intent landed once and should not re-trigger restore on
+    /// every status churn.
+    nonisolated static func shouldTriggerSameSessionRestore(
+        previous: DriveAuthState.Status,
+        next: DriveAuthState.Status,
+        gate: Bool
+    ) -> Bool {
+        guard gate else { return false }
+        if case .connected = previous { return false }
+        if case .connected = next { return true }
+        return false
+    }
+
+    /// Tears down the placeholder catalog opened during the launch
+    /// path and re-runs `CatalogPublisher.restoreIfNeeded` against a
+    /// live `DriveClient`, then re-wires the view models so the
+    /// Library / Develop tree picks up the restored rows in the same
+    /// session (#283).
+    ///
+    /// Failure modes:
+    /// - If `driveClient` is unexpectedly `nil` (theoretical — the
+    ///   gate is only set when Connect was offered, which requires a
+    ///   client), the function bails out leaving the placeholder
+    ///   intact so the next launch retries.
+    /// - If `restoreIfNeeded` throws, `offerFreshStartAfterFailure`
+    ///   surfaces the same alert the launch path uses and the
+    ///   placeholder catalog is re-opened so the app stays usable.
+    private func runSameSessionRestore() async {
+        guard let catalogPath = resolvedCatalogPath else { return }
+        guard let driveClient else { return }
+
+        // Drop refs that pin the placeholder catalog before deleting
+        // the file. GRDB releases the underlying SQLite connection on
+        // deinit of `CatalogDatabase`, so clearing every retainer lets
+        // the file handle close before `removeItem` runs.
+        if let publisher = catalogPublisher {
+            await publisher.stop()
+        }
+        catalogPublisher = nil
+        originalsCoordinator = nil
+        catalog?.onChange = nil
+        catalog = nil
+        changePollerEventsTask?.cancel()
+        changePollerEventsTask = nil
+        changePoller = nil
+
+        try? FileManager.default.removeItem(atPath: catalogPath)
+
+        let fileIdStore = driveFileIdStore ?? FileSystemDriveFileIdStore(
+            path: FileSystemDriveFileIdStore.defaultPath()
+        )
+        let uploader: any CatalogUploading
+        if let stubCatalogUploader {
+            uploader = stubCatalogUploader
+        } else {
+            let httpClient = URLSessionHTTPClient()
+            let session = AuthorizedSession(client: httpClient, provider: driveClient)
+            let resolver = DriveFolderResolver(session: session)
+            uploader = DriveCatalogUploader(session: session, folderResolver: resolver)
+        }
+
+        do {
+            let outcome = try await CatalogPublisher.restoreIfNeeded(
+                localPath: catalogPath,
+                uploader: uploader,
+                fileIdStore: fileIdStore,
+                prompt: { _ in
+                    // The user already consented to Connect+restore
+                    // seconds ago via the launch-time alert (#256); a
+                    // second prompt here would be confusing.
+                    true
+                }
+            )
+            switch outcome {
+            case .restored(_, let bytes):
+                print("[Dimroom] same-session catalog restore succeeded (\(bytes) bytes)")
+            case .noRemoteCatalog:
+                print("[Dimroom] same-session restore: no remote catalog to download")
+            case .declinedByUser, .notAuthenticated, .localCatalogPresent:
+                print("[Dimroom] same-session restore: \(outcome)")
+            }
+        } catch {
+            print("[Dimroom] same-session catalog restore failed: \(error)")
+            try? FileManager.default.removeItem(atPath: catalogPath)
+            let reason = (error as? SyncEngineError).map(Self.describeRestoreError)
+                ?? String(describing: error)
+            _ = Self.offerFreshStartAfterFailure(reason: reason)
+        }
+
+        // Re-open the catalog — restore wrote the file when it landed,
+        // otherwise `openCatalog` creates an empty one. Either way the
+        // view models below get a live SQLite handle to read from.
+        guard let restoredCatalog = openCatalog(at: catalogPath) else {
+            print("[Dimroom] same-session restore: failed to re-open catalog at \(catalogPath)")
+            return
+        }
+        wireCatalog(restoredCatalog, args: resolvedArgs)
     }
 
     // MARK: - Export
@@ -964,11 +1130,13 @@ final class AppDelegate: NSObject, NSApplicationDelegate, ObservableObject {
     }
 
     /// Routes a `DeltaSyncOutcome` from the periodic poller into the UI.
-    /// Bootstrap and steady-state results are silent; a catalog change
+    /// Bootstrap and steady-state results are silent; an originals-only
+    /// change surfaces a non-modal Library badge; a catalog change
     /// surfaces a reload prompt; a conflict surfaces a warning alert.
     /// Reload-in-place is deferred to a follow-up — for now the alert
     /// just tells the user to relaunch (see issue #235 risks).
     func handleDeltaSyncOutcome(_ outcome: DeltaSyncOutcome) {
+        applyNonModalDeltaSyncOutcome(outcome)
         switch outcome {
         case .bootstrapped, .noChanges, .originalsChangedOnly:
             return
@@ -976,6 +1144,27 @@ final class AppDelegate: NSObject, NSApplicationDelegate, ObservableObject {
             presentCatalogChangedAlert(modifiedTime: modifiedTime)
         case .conflict(let localPending, _, _, _):
             presentSyncConflictAlert(localPending: localPending)
+        }
+    }
+
+    /// Applies the side-effects of `outcome` that do not present a
+    /// modal alert: today, just the Library's remote-additions badge.
+    /// Split out from `handleDeltaSyncOutcome` so the harness's
+    /// `syncFromDrive` command can update the badge without firing
+    /// NSAlerts that would block the harness socket (`--harness` mode
+    /// intentionally skips subscribing to the periodic events stream
+    /// — see the `applicationDidFinishLaunching` comment near
+    /// `changePollerEventsTask`).
+    func applyNonModalDeltaSyncOutcome(_ outcome: DeltaSyncOutcome) {
+        switch outcome {
+        case .bootstrapped, .noChanges, .conflict:
+            return
+        case .originalsChangedOnly(let addedCount, _):
+            libraryViewModel.recordRemoteOriginalsAdded(count: addedCount)
+        case .catalogChanged:
+            // The pending reload will bring those assets in, so the
+            // "you might be missing N photos" notice no longer applies.
+            libraryViewModel.dismissRemoteAdditionsBadge()
         }
     }
 
@@ -1165,7 +1354,17 @@ final class AppDelegate: NSObject, NSApplicationDelegate, ObservableObject {
         fileIdStore: DriveFileIdStore
     ) {
         let localCatalogPresent = FileManager.default.fileExists(atPath: catalogPath)
-        let stubUploader = self.stubCatalogUploader
+        // The stub uploader is suppressed at launch unless the flow
+        // explicitly opts in via `DIMROOM_HARNESS_STUB_REMOTE_CATALOG_AT_LAUNCH`
+        // (#283). This lets the new same-session restore flow set
+        // `DIMROOM_HARNESS_STUB_REMOTE_CATALOG` for the post-connect
+        // restore without also forcing the launch-time decision into
+        // `.attemptRestoreWithStub` — without the gate the launch
+        // never reaches `.offerConnectNoAuth` and the Connect button
+        // is never offered.
+        let stubUploader = Self.shouldUseStubUploaderAtLaunch()
+            ? self.stubCatalogUploader
+            : nil
         let isAuthenticated: Bool = {
             guard !localCatalogPresent, stubUploader == nil, let driveClient else {
                 return false
@@ -1194,6 +1393,12 @@ final class AppDelegate: NSObject, NSApplicationDelegate, ObservableObject {
             // been released (#256).
             if Self.offerConnectForRestore() {
                 pendingDriveConnectAfterLaunch = true
+                // The `driveAuthState.$status` sink installed later in
+                // `applicationDidFinishLaunching` watches for the
+                // resulting `.connecting → .connected` transition and
+                // re-runs the restore against a live `DriveClient`
+                // (#283). Without this flag the sink no-ops.
+                pendingSameSessionRestore = true
             }
             return
         case .attemptRestoreWithStub:
@@ -1295,6 +1500,17 @@ final class AppDelegate: NSObject, NSApplicationDelegate, ObservableObject {
         if hasStubUploader { return .attemptRestoreWithStub }
         if hasDriveClient, isAuthenticated { return .attemptRestoreWithDrive }
         return .offerConnectNoAuth
+    }
+
+    /// Gate (#283): the stub uploader is only consulted at launch when
+    /// this env var is set. The existing
+    /// `harness-restore-catalog-flow.sh` sets both env vars so the
+    /// launch-time restore continues to fire. The new in-session
+    /// flow sets only the base var so the launch decision reaches
+    /// `.offerConnectNoAuth` and the post-connect restore picks up
+    /// the stub via `runSameSessionRestore`.
+    nonisolated static func shouldUseStubUploaderAtLaunch() -> Bool {
+        ProcessInfo.processInfo.environment["DIMROOM_HARNESS_STUB_REMOTE_CATALOG_AT_LAUNCH"] != nil
     }
 
     /// Reads `DIMROOM_HARNESS_STUB_REMOTE_CATALOG` and, if set, returns a

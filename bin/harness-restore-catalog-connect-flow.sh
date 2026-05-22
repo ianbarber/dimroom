@@ -111,9 +111,16 @@ if [ -f "$LOCAL_CATALOG" ]; then
 fi
 
 echo "=== [connect] Launching app — no local catalog, stub OAuth, auto-confirm=connect ==="
+# `AUTO_CONFIRM_RESTORE=1` (#283) silences the failure alert that
+# would otherwise pop when the post-connect same-session restore
+# probes Drive through the stub HTTPClient (which 404s every
+# non-OAuth request — there is no remote catalog to find in this
+# flow). The flow still proves the Connect button reaches `.connected`;
+# the restore probe failure is incidental and out of scope here.
 DIMROOM_HARNESS_SOCKET="$SOCKET" \
 DIMROOM_HARNESS_DRIVE_STUB=1 \
 DIMROOM_HARNESS_AUTO_CONFIRM_CONNECT_FOR_RESTORE=connect \
+DIMROOM_HARNESS_AUTO_CONFIRM_RESTORE=1 \
     "$APP_BIN" --harness \
     --fixture-catalog "$LOCAL_CATALOG" \
     --preview-cache "$LOCAL_PREVIEW_CACHE" &

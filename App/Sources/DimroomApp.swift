@@ -964,11 +964,13 @@ final class AppDelegate: NSObject, NSApplicationDelegate, ObservableObject {
     }
 
     /// Routes a `DeltaSyncOutcome` from the periodic poller into the UI.
-    /// Bootstrap and steady-state results are silent; a catalog change
+    /// Bootstrap and steady-state results are silent; an originals-only
+    /// change surfaces a non-modal Library badge; a catalog change
     /// surfaces a reload prompt; a conflict surfaces a warning alert.
     /// Reload-in-place is deferred to a follow-up — for now the alert
     /// just tells the user to relaunch (see issue #235 risks).
     func handleDeltaSyncOutcome(_ outcome: DeltaSyncOutcome) {
+        applyNonModalDeltaSyncOutcome(outcome)
         switch outcome {
         case .bootstrapped, .noChanges, .originalsChangedOnly:
             return
@@ -976,6 +978,27 @@ final class AppDelegate: NSObject, NSApplicationDelegate, ObservableObject {
             presentCatalogChangedAlert(modifiedTime: modifiedTime)
         case .conflict(let localPending, _, _, _):
             presentSyncConflictAlert(localPending: localPending)
+        }
+    }
+
+    /// Applies the side-effects of `outcome` that do not present a
+    /// modal alert: today, just the Library's remote-additions badge.
+    /// Split out from `handleDeltaSyncOutcome` so the harness's
+    /// `syncFromDrive` command can update the badge without firing
+    /// NSAlerts that would block the harness socket (`--harness` mode
+    /// intentionally skips subscribing to the periodic events stream
+    /// — see the `applicationDidFinishLaunching` comment near
+    /// `changePollerEventsTask`).
+    func applyNonModalDeltaSyncOutcome(_ outcome: DeltaSyncOutcome) {
+        switch outcome {
+        case .bootstrapped, .noChanges, .conflict:
+            return
+        case .originalsChangedOnly(let addedCount, _):
+            libraryViewModel.recordRemoteOriginalsAdded(count: addedCount)
+        case .catalogChanged:
+            // The pending reload will bring those assets in, so the
+            // "you might be missing N photos" notice no longer applies.
+            libraryViewModel.dismissRemoteAdditionsBadge()
         }
     }
 

@@ -59,6 +59,13 @@ public struct AppState: Codable, Sendable, Equatable {
     /// happen via auto-activate paths (`setEditParameter`, `setCrop`)
     /// that don't touch Library state.
     public let developCurrentAssetId: UUID?
+    /// Cumulative count surfaced by the Library "N new on Drive" badge,
+    /// or `nil` when no badge is visible. Mirrors
+    /// `LibraryViewModel.remoteAdditionsBadge?.addedCount` so Layer C
+    /// flows can assert the badge appeared after a delta-sync tick
+    /// classified as `originalsChangedOnly` without scraping a
+    /// screenshot.
+    public let libraryRemoteAdditionsCount: Int?
 
     public init(
         route: Route,
@@ -75,7 +82,8 @@ public struct AppState: Codable, Sendable, Equatable {
         showHistogram: Bool = true,
         developIsDownloadingOriginal: Bool = false,
         developDownloadProgress: Double? = nil,
-        developCurrentAssetId: UUID? = nil
+        developCurrentAssetId: UUID? = nil,
+        libraryRemoteAdditionsCount: Int? = nil
     ) {
         self.route = route
         self.assetCount = assetCount
@@ -92,5 +100,6 @@ public struct AppState: Codable, Sendable, Equatable {
         self.developIsDownloadingOriginal = developIsDownloadingOriginal
         self.developDownloadProgress = developDownloadProgress
         self.developCurrentAssetId = developCurrentAssetId
+        self.libraryRemoteAdditionsCount = libraryRemoteAdditionsCount
     }
 }

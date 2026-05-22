@@ -427,48 +427,11 @@ public enum Renderer {
     private static func applyChromaticAberrationCorrection(_ image: CIImage, enabled: Bool) -> CIImage {
         guard enabled else { return image }
 
-        let extent = image.extent
-        let cx = extent.midX
-        let cy = extent.midY
-
         // Scale R and B about the centre by ±0.5 % — typical lateral CA on
         // mid-range lenses is well under 1 % on the worst channel. Conservative
         // enough to avoid visible scaling on a clean image; large enough to be
         // measurable so this placeholder isn't a silent no-op.
-        let rScale: CGFloat = 0.995
-        let bScale: CGFloat = 1.005
-
-        func scaled(_ image: CIImage, factor: CGFloat) -> CIImage {
-            let transform = CGAffineTransform(translationX: cx, y: cy)
-                .scaledBy(x: factor, y: factor)
-                .translatedBy(x: -cx, y: -cy)
-            return image.transformed(by: transform).cropped(to: extent)
-        }
-
-        // Extract each channel as a single-channel image (other channels zeroed
-        // out in the matrix), scale, and additively combine.
-        func channelOnly(_ image: CIImage, r: CGFloat, g: CGFloat, b: CGFloat) -> CIImage {
-            let f = CIFilter(name: "CIColorMatrix")!
-            f.setValue(image, forKey: kCIInputImageKey)
-            f.setValue(CIVector(x: r, y: 0, z: 0, w: 0), forKey: "inputRVector")
-            f.setValue(CIVector(x: 0, y: g, z: 0, w: 0), forKey: "inputGVector")
-            f.setValue(CIVector(x: 0, y: 0, z: b, w: 0), forKey: "inputBVector")
-            f.setValue(CIVector(x: 0, y: 0, z: 0, w: 1), forKey: "inputAVector")
-            return f.outputImage!
-        }
-
-        let rOnly = scaled(channelOnly(image, r: 1, g: 0, b: 0), factor: rScale)
-        let gOnly = channelOnly(image, r: 0, g: 1, b: 0)
-        let bOnly = scaled(channelOnly(image, r: 0, g: 0, b: 1), factor: bScale)
-
-        func add(_ a: CIImage, _ b: CIImage) -> CIImage {
-            let f = CIFilter(name: "CIAdditionCompositing")!
-            f.setValue(a, forKey: kCIInputImageKey)
-            f.setValue(b, forKey: kCIInputBackgroundImageKey)
-            return f.outputImage!
-        }
-
-        return add(rOnly, add(gOnly, bOnly)).cropped(to: extent)
+        return ChromaticAberrationKernel.apply(image, rScale: 0.995, bScale: 1.005)
     }
 
     /// Auto-correct natural lens vignetting (corner darkening) with a fixed

@@ -481,6 +481,61 @@ final class LibraryViewModelTests: XCTestCase {
         XCTAssertEqual(vm.recentSessions.count, 2)
     }
 
+    /// `recentImportsLimit` plumbs the user-configurable cap from Settings
+    /// → General into `catalog.fetchImportSessions(limit:)`. With limit=1
+    /// and two seeded sessions, only the most recent surfaces.
+    @MainActor
+    func testRecentImportsLimitCapsScopePicker() async throws {
+        let catalog = try CatalogDatabase.inMemory()
+        let s1 = ImportSession(sourceKind: "folder", sourceDevice: "Camera A")
+        let s2 = ImportSession(sourceKind: "folder", sourceDevice: "Camera B")
+        try catalog.insertImportSession(s1)
+        try catalog.insertImportSession(s2)
+        var a1 = TestFixtures.makeAsset(hash: "rl1")
+        a1.importSessionId = s1.id
+        var a2 = TestFixtures.makeAsset(hash: "rl2")
+        a2.importSessionId = s2.id
+        try catalog.insertAsset(a1)
+        try catalog.insertAsset(a2)
+
+        let store = PreviewStore(cacheDirectory: tempCacheDir)
+        let vm = LibraryViewModel(catalog: catalog, previewStore: store)
+        vm.recentImportsLimit = 1
+        await vm.reloadAndWait()
+
+        XCTAssertEqual(vm.recentSessions.count, 1)
+    }
+
+    /// `columnCount` is now instance-level. Up/Down arrow navigation
+    /// reads the live value, so a user with `columnCount = 3` should
+    /// skip 3 rows per Down/Up, not the previous hardcoded 4.
+    @MainActor
+    func testColumnCountInstanceValueDrivesSelectDown() async throws {
+        let catalog = try CatalogDatabase.inMemory()
+        // Seed 9 assets with monotonically increasing capture dates so
+        // the grid order is predictable.
+        var assets: [Asset] = []
+        for i in 0..<9 {
+            let asset = TestFixtures.makeAsset(
+                hash: "row-\(i)",
+                captureDate: Date(timeIntervalSince1970: Double(1_000_000 - i))
+            )
+            assets.append(asset)
+            try catalog.insertAsset(asset)
+        }
+        let store = PreviewStore(cacheDirectory: tempCacheDir)
+        let vm = LibraryViewModel(catalog: catalog, previewStore: store)
+        vm.columnCount = 3
+        await vm.reloadAndWait()
+        XCTAssertEqual(vm.rows.count, 9)
+
+        // Select the first row, then move down — with columnCount=3 the
+        // skip-by-3 should land on the asset at index 3.
+        vm.select(vm.rows[0].id)
+        vm.selectDown()
+        XCTAssertEqual(vm.selectedAssetId, vm.rows[3].id)
+    }
+
     // MARK: - Delete is a no-op in Recently Deleted
 
     /// Backspace / Edit → Delete Selected in the `.recentlyDeleted`

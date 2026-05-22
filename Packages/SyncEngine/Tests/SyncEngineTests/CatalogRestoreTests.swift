@@ -232,6 +232,51 @@ final class CatalogRestoreTests: XCTestCase {
         XCTAssertNil(ref)
     }
 
+    func testDownloadFailureSurfacesAsRestoreFailed() async throws {
+        // The harness flow exercises this same wrapping end-to-end by
+        // pointing the restore at a read-only local directory so
+        // `LocalFileStubCatalogUploader.download` returns EACCES. This
+        // Layer A test pins the wrapping logic without filesystem mode
+        // games: `findExistingCatalog` succeeds, `download` throws, and
+        // `restoreIfNeeded` must rethrow as `SyncEngineError.restoreFailed`.
+        let path = tempLocalPath()
+        defer { cleanup(path) }
+        let uploader = StubCatalogUploader(behavior: .alwaysSucceed(
+            CatalogUploadResult(driveFileId: "x", uploadedBytes: 0, wasCreate: true)
+        ))
+        uploader.setRemoteCatalog(
+            DriveCatalogRef(
+                driveFileId: "remote-fail",
+                sizeBytes: 16,
+                modifiedTime: nil,
+                photoCount: 2
+            )
+        )
+        uploader.setDownloadResult(.failure(.restoreFailed(underlying: "disk full")))
+
+        do {
+            _ = try await CatalogPublisher.restoreIfNeeded(
+                localPath: path,
+                uploader: uploader,
+                fileIdStore: InMemoryDriveFileIdStore(),
+                prompt: { _ in true }
+            )
+            XCTFail("expected restoreIfNeeded to throw on download failure")
+        } catch let SyncEngineError.restoreFailed(underlying) {
+            // Restore wraps the original error in `restoreFailed` —
+            // assert the underlying description is preserved so the
+            // harness payload's `error` field carries diagnostic detail.
+            XCTAssertTrue(
+                underlying.contains("restoreFailed") || underlying.contains("disk full"),
+                "expected wrapped error to mention underlying cause; got: \(underlying)"
+            )
+        } catch {
+            XCTFail("expected SyncEngineError.restoreFailed, got \(error)")
+        }
+        XCTAssertEqual(uploader.downloadCalls.count, 1)
+        XCTAssertFalse(FileManager.default.fileExists(atPath: path))
+    }
+
     func testNotAuthenticatedSurfacedFromFindError() async throws {
         // A `notAuthenticated` from the uploader during the find should
         // be returned as a distinct outcome (not a thrown error) so the

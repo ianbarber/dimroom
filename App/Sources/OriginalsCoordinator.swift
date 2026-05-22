@@ -70,6 +70,22 @@ final class OriginalsCoordinator: OriginalFetcher, Sendable {
     func handleEviction(assetId: UUID) {
         try? catalog.updateLocalPath(assetId: assetId, path: nil)
     }
+
+    /// Forward a new byte budget to the underlying cache so the
+    /// Settings UI / harness can retune eviction without rebuilding
+    /// the coordinator.
+    func setCacheBudget(_ bytes: Int64) async {
+        guard let cache = cacheBox.get() else { return }
+        await cache.setBudget(bytes)
+    }
+
+    /// Wipe every cached original on disk and clear the in-memory
+    /// index. Used by the "Clear originals cache" button and the
+    /// harness `clearOriginalsCache` command.
+    func clearCache() async {
+        guard let cache = cacheBox.get() else { return }
+        await cache.clearAll()
+    }
 }
 
 /// Tiny locked box holding the cache reference. Lets `OriginalsCoordinator`

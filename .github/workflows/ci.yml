@@ -180,6 +180,13 @@ jobs:
             exit 0
           fi
           bin/harness-restore-catalog-flow.sh
+      - name: Run harness restore-catalog outcomes flow
+        run: |
+          if [ ! -x bin/harness-restore-catalog-outcomes-flow.sh ]; then
+            echo "No harness restore-catalog-outcomes flow script yet — skipping."
+            exit 0
+          fi
+          bin/harness-restore-catalog-outcomes-flow.sh
       - name: Run harness crop flow
         run: |
           if [ ! -x bin/harness-crop-flow.sh ]; then

@@ -121,6 +121,18 @@ public actor PreviewStore {
         return FileManager.default.fileExists(atPath: master.path) ? master : nil
     }
 
+    /// Remove every cached preview file under the cache directory.
+    /// Best-effort; missing files are ignored. The directory itself is
+    /// recreated so subsequent `generate` calls can write into it.
+    public func removeAll() {
+        guard fileManager.fileExists(atPath: cacheDirectory.path) else { return }
+        if let contents = try? fileManager.contentsOfDirectory(at: cacheDirectory, includingPropertiesForKeys: nil) {
+            for url in contents {
+                try? fileManager.removeItem(at: url)
+            }
+        }
+    }
+
     /// Remove all cached thumbnail/preview JPEGs for `asset` across both
     /// tiers. After this call both URL accessors return `nil` until the
     /// next `generate` (and optional `regenerateWithEdit`) call rebuilds

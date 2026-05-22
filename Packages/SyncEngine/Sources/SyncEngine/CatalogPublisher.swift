@@ -15,12 +15,13 @@ public actor CatalogPublisher {
     private let uploader: any CatalogUploading
     private let fileIdStore: any DriveFileIdStore
     private let snapshotDirectory: URL
-    private let debounceInterval: Duration
+    private var debounceInterval: Duration
     private let maxDebounceInterval: Duration
     private let clock: any Clock<Duration>
 
     private var debouncer: Debouncer?
     private var isStarted = false
+    private var isEnabled = true
 
     public init(
         catalog: CatalogDatabase,
@@ -72,6 +73,38 @@ public actor CatalogPublisher {
         }
     }
 
+    /// Enable or disable scheduled publishes. Disabling cancels any
+    /// in-flight debounce immediately. Re-enabling does not re-arm a
+    /// previously dropped trigger — the next catalog mutation does.
+    /// Used by the Settings UI to mirror the "auto-publish catalog"
+    /// toggle into the live publisher.
+    public func setEnabled(_ enabled: Bool) async {
+        if enabled == isEnabled { return }
+        isEnabled = enabled
+        if !enabled {
+            await debouncer?.cancel()
+        }
+    }
+
+    /// Rebuild the debouncer with a new quiet-window interval. Cancels
+    /// any pending publish so the new interval applies cleanly to the
+    /// next trigger.
+    public func setDebounceInterval(_ interval: Duration) async {
+        guard interval != debounceInterval else { return }
+        debounceInterval = interval
+        if isStarted {
+            await debouncer?.cancel()
+            debouncer = Debouncer(
+                interval: debounceInterval,
+                maxInterval: maxDebounceInterval,
+                clock: clock,
+                fire: { [weak self] in
+                    await self?.runDebouncedPublish()
+                }
+            )
+        }
+    }
+
     /// True when an edit-driven publish is queued and waiting for the
     /// debouncer's quiet window. The change poller reads this to detect
     /// "local has pending changes since last sync" → emit a conflict
@@ -92,7 +125,7 @@ public actor CatalogPublisher {
     // MARK: - Internals
 
     private func triggerOnActor() async {
-        guard let debouncer else { return }
+        guard isEnabled, let debouncer else { return }
         await debouncer.scheduleTrigger()
     }
 

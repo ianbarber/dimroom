@@ -1,44 +1,51 @@
 import Foundation
-@testable import DriveClient
+import DriveClient
 
 /// HTTPClient stub that dispatches on `(method, URL path + query substring)`.
 /// Handles the multi-call flows (list → create → list → upload) that the
 /// uploader tests rely on without the sequence-of-responses ordering
 /// getting out of sync when we refactor.
-final class RoutingStubHTTPClient: HTTPClient, @unchecked Sendable {
+public final class RoutingStubHTTPClient: HTTPClient, @unchecked Sendable {
 
-    struct CannedResponse {
-        let status: Int
-        let body: Data
-        let headers: [String: String]
+    public struct CannedResponse {
+        public let status: Int
+        public let body: Data
+        public let headers: [String: String]
 
-        init(status: Int, body: Data = Data(), headers: [String: String] = [:]) {
+        public init(status: Int, body: Data = Data(), headers: [String: String] = [:]) {
             self.status = status
             self.body = body
             self.headers = headers
         }
     }
 
-    struct Route {
-        let method: String
+    public struct Route {
+        public let method: String
         /// Substring the full URL (including query) must contain for the
         /// route to match. Kept permissive so we don't have to pin
         /// escaped-query details.
-        let urlContains: String
+        public let urlContains: String
     }
 
-    struct CapturedRequest {
-        let url: URL?
-        let method: String?
-        let headers: [String: String]
-        let body: Data?
+    public struct CapturedRequest {
+        public let url: URL?
+        public let method: String?
+        public let headers: [String: String]
+        public let body: Data?
     }
 
     private let lock = NSLock()
     private var routes: [(Route, [CannedResponse])] = []
-    private(set) var captured: [CapturedRequest] = []
+    private var _captured: [CapturedRequest] = []
 
-    func route(
+    public init() {}
+
+    public var captured: [CapturedRequest] {
+        lock.lock(); defer { lock.unlock() }
+        return _captured
+    }
+
+    public func route(
         method: String,
         urlContains: String,
         responses: [CannedResponse]
@@ -48,19 +55,19 @@ final class RoutingStubHTTPClient: HTTPClient, @unchecked Sendable {
         lock.unlock()
     }
 
-    func route(method: String, urlContains: String, response: CannedResponse) {
+    public func route(method: String, urlContains: String, response: CannedResponse) {
         route(method: method, urlContains: urlContains, responses: [response])
     }
 
-    func requestsMatching(method: String, urlContains: String) -> [CapturedRequest] {
+    public func requestsMatching(method: String, urlContains: String) -> [CapturedRequest] {
         lock.lock(); defer { lock.unlock() }
-        return captured.filter { req in
+        return _captured.filter { req in
             (req.method ?? "") == method &&
                 (req.url?.absoluteString.contains(urlContains) ?? false)
         }
     }
 
-    func data(for request: URLRequest) async throws -> (Data, HTTPURLResponse) {
+    public func data(for request: URLRequest) async throws -> (Data, HTTPURLResponse) {
         lock.lock()
         let captured = CapturedRequest(
             url: request.url,
@@ -68,7 +75,7 @@ final class RoutingStubHTTPClient: HTTPClient, @unchecked Sendable {
             headers: request.allHTTPHeaderFields ?? [:],
             body: request.httpBody
         )
-        self.captured.append(captured)
+        _captured.append(captured)
 
         let method = request.httpMethod ?? ""
         let urlString = request.url?.absoluteString ?? ""

@@ -22,7 +22,10 @@ let package = Package(
         ),
         .testTarget(
             name: "SyncEngineTests",
-            dependencies: ["SyncEngine"]
+            dependencies: [
+                "SyncEngine",
+                .product(name: "DriveTestSupport", package: "DriveClient"),
+            ]
         ),
     ]
 )

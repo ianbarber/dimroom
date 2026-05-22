@@ -217,9 +217,7 @@ public actor DriveCatalogUploader: CatalogUploading {
             "parents": [parentId],
             "mimeType": Self.catalogMimeType,
         ]
-        if let appProperties = Self.appPropertiesPayload(photoCount: photoCount) {
-            metadata["appProperties"] = appProperties
-        }
+        metadata["appProperties"] = Self.appPropertiesPayload(photoCount: photoCount)
         let request = try Self.multipartRequest(
             url: endpoint,
             method: "POST",
@@ -243,9 +241,7 @@ public actor DriveCatalogUploader: CatalogUploading {
         var metadata: [String: Any] = [
             "mimeType": Self.catalogMimeType,
         ]
-        if let appProperties = Self.appPropertiesPayload(photoCount: photoCount) {
-            metadata["appProperties"] = appProperties
-        }
+        metadata["appProperties"] = Self.appPropertiesPayload(photoCount: photoCount)
         let request = try Self.multipartRequest(
             url: endpoint,
             method: "PATCH",
@@ -256,9 +252,18 @@ public actor DriveCatalogUploader: CatalogUploading {
         return try await performUpload(request: request)
     }
 
-    static func appPropertiesPayload(photoCount: Int?) -> [String: String]? {
-        guard let photoCount, photoCount >= 0 else { return nil }
-        return [photoCountAppPropertyKey: String(photoCount)]
+    /// Always returns the dimroom marker so the `ChangePoller` can drop
+    /// non-dimroom files in `drive.changes.list` (issue #273). When
+    /// `photoCount` is supplied it's merged in alongside the marker so
+    /// the restore prompt can still surface the asset count.
+    static func appPropertiesPayload(photoCount: Int?) -> [String: String] {
+        var payload: [String: String] = [
+            DriveAppProperties.dimroomMarkerKey: DriveAppProperties.dimroomMarkerValue,
+        ]
+        if let photoCount, photoCount >= 0 {
+            payload[photoCountAppPropertyKey] = String(photoCount)
+        }
+        return payload
     }
 
     private func performUpload(request: URLRequest) async throws -> String {

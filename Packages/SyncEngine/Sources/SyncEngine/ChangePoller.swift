@@ -1,4 +1,5 @@
 import Catalog
+import DriveClient
 import Foundation
 
 /// Polls Drive's `changes` endpoint for updates since the last sync,
@@ -18,6 +19,7 @@ public actor ChangePoller {
     private let fileIdStore: any DriveFileIdStore
     private let pollInterval: Duration
     private let clock: any Clock<Duration>
+    private let markerFilterEnabled: Bool
 
     private var loopTask: Task<Void, Never>?
 
@@ -31,7 +33,8 @@ public actor ChangePoller {
         publisher: CatalogPublisher?,
         fileIdStore: any DriveFileIdStore,
         pollInterval: Duration = .seconds(300),
-        clock: any Clock<Duration> = ContinuousClock()
+        clock: any Clock<Duration> = ContinuousClock(),
+        markerFilterEnabled: Bool = true
     ) {
         self.catalog = catalog
         self.fetcher = fetcher
@@ -39,6 +42,7 @@ public actor ChangePoller {
         self.fileIdStore = fileIdStore
         self.pollInterval = pollInterval
         self.clock = clock
+        self.markerFilterEnabled = markerFilterEnabled
     }
 
     /// Subscribe to poll outcomes. Single-subscriber: the AppDelegate
@@ -178,10 +182,21 @@ public actor ChangePoller {
             // itself; the next publish or asset fetch will surface it.
             if change.removed || change.trashed { continue }
             if let cachedCatalogId, change.fileId == cachedCatalogId {
+                // Matched cached catalog id wins regardless of marker —
+                // catalogs published before #273 won't carry the marker
+                // but we still want to act on changes to them.
                 catalogChange = change
-            } else {
-                nonCatalogCount += 1
+                continue
             }
+            // Drop changes for files dimroom didn't write. Drive v3 has
+            // no server-side parent filter on `changes.list`, so this
+            // filter is necessarily client-side. See #273.
+            if markerFilterEnabled,
+               change.appProperties[DriveAppProperties.dimroomMarkerKey]
+                   != DriveAppProperties.dimroomMarkerValue {
+                continue
+            }
+            nonCatalogCount += 1
         }
 
         if let catalogChange {

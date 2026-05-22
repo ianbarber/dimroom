@@ -34,7 +34,7 @@ public enum DriveChangesAPI {
             URLQueryItem(name: "spaces", value: "drive"),
             URLQueryItem(
                 name: "fields",
-                value: "nextPageToken,newStartPageToken,changes(changeType,removed,fileId,time,file(id,name,mimeType,modifiedTime,parents,trashed))"
+                value: "nextPageToken,newStartPageToken,changes(changeType,removed,fileId,time,file(id,name,mimeType,modifiedTime,parents,trashed,appProperties))"
             ),
         ]
         var request = URLRequest(url: components.url!)
@@ -51,6 +51,7 @@ public enum DriveChangesAPI {
         public let modifiedTime: String?
         public let parents: [String]?
         public let trashed: Bool?
+        public let appProperties: [String: String]?
 
         public init(
             id: String,
@@ -58,7 +59,8 @@ public enum DriveChangesAPI {
             mimeType: String? = nil,
             modifiedTime: String? = nil,
             parents: [String]? = nil,
-            trashed: Bool? = nil
+            trashed: Bool? = nil,
+            appProperties: [String: String]? = nil
         ) {
             self.id = id
             self.name = name
@@ -66,6 +68,7 @@ public enum DriveChangesAPI {
             self.modifiedTime = modifiedTime
             self.parents = parents
             self.trashed = trashed
+            self.appProperties = appProperties
         }
     }
 

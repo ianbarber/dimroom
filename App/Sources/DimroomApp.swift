@@ -26,7 +26,8 @@ struct DimroomApp: App {
                 uploadCoordinator: appDelegate.uploadCoordinator,
                 undoStack: appDelegate.undoStack,
                 catalog: appDelegate.catalog,
-                originalFetcher: appDelegate.originalFetcher
+                originalFetcher: appDelegate.originalFetcher,
+                appDelegate: appDelegate
             )
         }
         .commands {
@@ -37,6 +38,7 @@ struct DimroomApp: App {
                 .keyboardShortcut("i", modifiers: [.command, .shift])
 
                 Button("Export...") {
+                    ExportLog.logger.info("File → Export menu fired — posting .showExportSheet")
                     NotificationCenter.default.post(name: .showExportSheet, object: nil)
                 }
                 .keyboardShortcut("e", modifiers: [.command, .shift])
@@ -401,12 +403,17 @@ private struct SelectAllVisibleMenuItem: View {
 }
 
 @MainActor
-final class AppDelegate: NSObject, NSApplicationDelegate {
+final class AppDelegate: NSObject, NSApplicationDelegate, ObservableObject {
     let router = AppRouter()
     let importCoordinator = ImportCoordinator()
     let exportCoordinator = ExportCoordinator()
     let uploadCoordinator = UploadCoordinator()
     let editClipboard = EditClipboard()
+    /// Mirror of the SwiftUI `showExportSheet` state owned by `ContentView`.
+    /// `ContentView` writes this via `.onChange(of: showExportSheet)` so the
+    /// harness can assert the sheet round-tripped through SwiftUI before
+    /// firing `completeExportSheet` (#242).
+    @Published private(set) var isExportSheetVisible: Bool = false
     /// View model shared between the SwiftUI tree and the harness
     /// controller. Initialised eagerly with an in-memory empty catalog so
     /// the `@main App` scene can read it before `applicationDidFinishLaunching`
@@ -436,6 +443,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     private var catalogPublisher: CatalogPublisher?
     private var catalogUploader: DriveCatalogUploader?
     private var driveFileIdStore: FileSystemDriveFileIdStore?
+    private var changePoller: ChangePoller?
+    private var changePollerEventsTask: Task<Void, Never>?
     private var driveReauthCancellable: AnyCancellable?
     /// Catalog path resolved at launch. Stashed so the harness restore
     /// command can re-run `restoreIfNeeded` against the same local path.
@@ -445,6 +454,14 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     /// `restoreCatalogFromDrive` command so Layer C flows don't talk
     /// to Google.
     private var stubCatalogUploader: (any CatalogUploading)?
+
+    /// One-shot flag set by `attemptCatalogRestore` when the launch-time
+    /// "Connect Google Drive?" alert returns `true`. Consumed at the
+    /// tail of `applicationDidFinishLaunching` to kick off the same menu
+    /// Connect flow (#256). Re-entering the restore probe inside the
+    /// launch-blocking semaphore is out of scope; the next launch picks
+    /// up the refreshed token and restores the catalog normally.
+    private var pendingDriveConnectAfterLaunch = false
 
     /// Public read-only view of the wired-up `OriginalsCoordinator` so
     /// `ContentView` can route export-with-edits through it. Returns
@@ -527,6 +544,15 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             }
         }
 
+        // If the user clicked "Connect Google Drive…" on the launch-time
+        // restore alert (#256), kick off the same OAuth flow the menu
+        // uses. Safe to call here: the launch-blocking semaphore has
+        // been released, and `connectGoogleDriveFromMenu()` itself
+        // dispatches to `Task { @MainActor in ... }`.
+        if Self.consumePendingConnectFlag(&pendingDriveConnectAfterLaunch) {
+            connectGoogleDriveFromMenu()
+        }
+
         // Surface stale-token refresh failures (issue #195). When any
         // authorized DriveClient request hits `refreshFailed`, the auth
         // state publishes `needsReauthMessage`. Show a one-shot NSAlert
@@ -590,6 +616,42 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
                     publisher?.scheduleDebouncedPublish()
                 }
                 Task { await publisher.start() }
+
+                let fetcher: any DriveChangesFetching
+                if let fixturePath = ProcessInfo.processInfo.environment[
+                    "DIMROOM_HARNESS_DRIVE_CHANGES_FIXTURE"
+                ] {
+                    fetcher = HarnessStubChangesFetcher(fixturePath: fixturePath)
+                } else {
+                    fetcher = DriveChangesClient(session: session)
+                }
+                let poller = ChangePoller(
+                    catalog: resolvedCatalog,
+                    fetcher: fetcher,
+                    publisher: publisher,
+                    fileIdStore: driveFileIdStore ?? FileSystemDriveFileIdStore(
+                        path: FileSystemDriveFileIdStore.defaultPath()
+                    )
+                )
+                self.changePoller = poller
+                // Harness flows drive `pollOnce()` directly through
+                // `syncFromDrive` and the controller encodes the
+                // outcome back to the test — racing the periodic loop
+                // would make those assertions non-deterministic, and
+                // an NSAlert on a poll-driven tick would block the
+                // harness socket.
+                if !args.contains("--harness") {
+                    // Subscribe before start() so we don't miss the
+                    // bootstrap event from the periodic loop's first
+                    // tick.
+                    changePollerEventsTask = Task { @MainActor [weak self] in
+                        let stream = await poller.events()
+                        for await outcome in stream {
+                            self?.handleDeltaSyncOutcome(outcome)
+                        }
+                    }
+                    Task { await poller.start() }
+                }
             }
         }
 
@@ -614,7 +676,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
                     uploadCoordinator: uploadCoordinator,
                     undoStack: undoStack,
                     catalog: resolvedCatalog,
-                    originalFetcher: originalsCoordinator
+                    originalFetcher: originalsCoordinator,
+                    appDelegate: self
                 )
             )
             window.title = "Dimroom"
@@ -627,6 +690,10 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             ?? HarnessServer.defaultSocketPath
 
         let restoreUploader: (any CatalogUploading)? = stubCatalogUploader ?? catalogUploader
+        let tokenStoreKind = Self.chooseTokenStoreKind(
+            args: args,
+            env: ProcessInfo.processInfo.environment
+        ).rawValue
         let controller = HarnessController(
             router: router,
             catalog: resolvedCatalog,
@@ -637,14 +704,17 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             editClipboard: editClipboard,
             exportCoordinator: exportCoordinator,
             uploadCoordinator: uploadCoordinator,
+            appDelegate: self,
             driveUploader: driveUploader,
             originalsCoordinator: originalsCoordinator,
             undoStack: undoStack,
             catalogPublisher: catalogPublisher,
             driveAuthState: driveAuthState,
+            changePoller: changePoller,
             catalogRestoreUploader: restoreUploader,
             catalogRestorePath: catalogPath,
-            catalogRestoreFileIdStore: fileIdStore
+            catalogRestoreFileIdStore: fileIdStore,
+            tokenStoreKind: tokenStoreKind
         )
         do {
             try controller.start(socketPath: socketPath)
@@ -659,6 +729,69 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         } catch {
             print("[Dimroom] Failed to start harness server: \(error)")
         }
+    }
+
+    func applicationDidBecomeActive(_ notification: Notification) {
+        guard let poller = changePoller else { return }
+        let args = ProcessInfo.processInfo.arguments
+        if args.contains("--harness") { return }
+        Task { await poller.start() }
+    }
+
+    func applicationWillResignActive(_ notification: Notification) {
+        guard let poller = changePoller else { return }
+        Task { await poller.stop() }
+    }
+
+    func applicationWillTerminate(_ notification: Notification) {
+        changePollerEventsTask?.cancel()
+        if let poller = changePoller {
+            Task { await poller.stop() }
+        }
+    }
+
+    // MARK: - Export
+
+    /// Updates the sheet-visibility mirror so the harness flow can
+    /// assert the sheet was actually mounted by SwiftUI before firing
+    /// `completeExportSheet`. Called from `ContentView.onChange`.
+    func setExportSheetVisible(_ visible: Bool) {
+        ExportLog.logger.info("AppDelegate.setExportSheetVisible(\(visible, privacy: .public))")
+        isExportSheetVisible = visible
+    }
+
+    /// Single entry point for kicking off an export. Both the SwiftUI
+    /// sheet's `onExport` closure and the harness `completeExportSheet`
+    /// command call this so a regression in either path is caught by
+    /// the same harness flow. Previously the two paths each held their
+    /// own copy of the `ExportScope.resolve(...) → coordinator.run(...)`
+    /// chain; #242 collapses them.
+    func startExport(
+        destinationURL: URL,
+        format: ExportFormat,
+        jpegQuality: Int,
+        applyEdits: Bool
+    ) async {
+        ExportLog.logger.info("AppDelegate.startExport entered — destination=\(destinationURL.path, privacy: .public) format=\(format.rawValue, privacy: .public) applyEdits=\(applyEdits, privacy: .public)")
+        guard let catalog else {
+            ExportLog.logger.error("AppDelegate.startExport aborted: no catalog loaded")
+            return
+        }
+        let scoped = ExportScope.resolve(
+            selectedIds: libraryViewModel.selectedAssetIds,
+            rows: libraryViewModel.rows
+        )
+        ExportLog.logger.info("AppDelegate.startExport scope resolved — count=\(scoped.count, privacy: .public) selectedIds=\(self.libraryViewModel.selectedAssetIds.count, privacy: .public) rows=\(self.libraryViewModel.rows.count, privacy: .public)")
+        await exportCoordinator.run(
+            assets: scoped,
+            catalog: catalog,
+            format: format,
+            jpegQuality: jpegQuality,
+            applyEdits: applyEdits,
+            destinationDirectory: destinationURL,
+            originalFetcher: originalsCoordinator
+        )
+        ExportLog.logger.info("AppDelegate.startExport coordinator returned — phase=\(String(describing: self.exportCoordinator.phase), privacy: .public)")
     }
 
     // MARK: - Import from menu
@@ -737,6 +870,50 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         Task { @MainActor in
             await driveAuthState.disconnect()
         }
+    }
+
+    /// Routes a `DeltaSyncOutcome` from the periodic poller into the UI.
+    /// Bootstrap and steady-state results are silent; a catalog change
+    /// surfaces a reload prompt; a conflict surfaces a warning alert.
+    /// Reload-in-place is deferred to a follow-up — for now the alert
+    /// just tells the user to relaunch (see issue #235 risks).
+    func handleDeltaSyncOutcome(_ outcome: DeltaSyncOutcome) {
+        switch outcome {
+        case .bootstrapped, .noChanges, .originalsChangedOnly:
+            return
+        case .catalogChanged(_, let modifiedTime, _):
+            presentCatalogChangedAlert(modifiedTime: modifiedTime)
+        case .conflict(let localPending, _, _, _):
+            presentSyncConflictAlert(localPending: localPending)
+        }
+    }
+
+    private func presentCatalogChangedAlert(modifiedTime: String?) {
+        let alert = NSAlert()
+        alert.messageText = "Catalog Updated on Google Drive"
+        var info = "Another machine published a newer catalog."
+        if let modifiedTime {
+            info += " Last modified \(modifiedTime)."
+        }
+        info += "\n\nRelaunch Dimroom to pick up the changes."
+        alert.informativeText = info
+        alert.alertStyle = .informational
+        alert.addButton(withTitle: "OK")
+        _ = alert.runModal()
+    }
+
+    private func presentSyncConflictAlert(localPending: Bool) {
+        let alert = NSAlert()
+        alert.messageText = "Drive Sync Conflict"
+        var info = "Both this catalog and the copy on Drive have changed since the last sync."
+        if localPending {
+            info += " You have local edits that haven't been published yet."
+        }
+        info += "\n\nLast-write-wins: the next publish will overwrite the remote catalog."
+        alert.informativeText = info
+        alert.alertStyle = .warning
+        alert.addButton(withTitle: "OK")
+        _ = alert.runModal()
     }
 
     /// Shows a one-shot alert when a DriveClient operation has failed
@@ -919,9 +1096,14 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         case .offerConnectNoAuth:
             // No Drive auth available — offer connect-or-skip alert.
             // Skipping just returns and the empty local catalog is
-            // created below. The "Connect" path is a no-op for now;
-            // the user is steered to the menu-driven flow afterwards.
-            _ = Self.offerConnectForRestore()
+            // created below. The "Connect" path stashes a one-shot
+            // flag; the consumer at the tail of
+            // `applicationDidFinishLaunching` kicks off the menu
+            // Connect flow once the launch-blocking semaphore has
+            // been released (#256).
+            if Self.offerConnectForRestore() {
+                pendingDriveConnectAfterLaunch = true
+            }
             return
         case .attemptRestoreWithStub:
             uploader = stubUploader
@@ -985,7 +1167,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     private static func describeRestoreError(_ error: SyncEngineError) -> String {
         switch error {
         case .restoreFailed(let underlying), .uploadFailed(let underlying),
-             .snapshotFailed(let underlying), .fileIdStoreFailed(let underlying):
+             .snapshotFailed(let underlying), .fileIdStoreFailed(let underlying),
+             .changesFetchFailed(let underlying), .pageTokenStoreFailed(let underlying):
             return underlying
         case .notAuthenticated:
             return "Not authenticated"
@@ -1078,12 +1261,18 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     }
 
     /// Alert shown when the local catalog is missing and Drive auth is
-    /// not configured. "Connect Google Drive…" returns `true`; the
-    /// caller does not in-line the OAuth flow during launch — the user
-    /// is expected to use the menu's Connect path afterwards.
+    /// not configured. Returns `true` when the user picks
+    /// "Connect Google Drive…", which the caller turns into a one-shot
+    /// flag consumed at the tail of `applicationDidFinishLaunching`
+    /// (post-semaphore) — that flag triggers the same OAuth flow as
+    /// the Drive menu's Connect item (#256). The next launch picks up
+    /// the refreshed token and restores the catalog normally.
     @MainActor
     @discardableResult
     private static func offerConnectForRestore() -> Bool {
+        if Self.shouldAutoConfirmConnectForRestorePrompt() {
+            return Self.harnessConnectForRestoreValue()
+        }
         if Self.shouldAutoConfirmRestorePrompt() {
             return false
         }
@@ -1144,6 +1333,34 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         case "0", "false", "no", "decline": return false
         default: return true
         }
+    }
+
+    /// Sibling of `shouldAutoConfirmRestorePrompt` for the connect-or-skip
+    /// alert (#256). Lets Layer C flows pre-answer the launch-time
+    /// "Connect Google Drive?" prompt without showing a modal NSAlert.
+    /// Values: `connect` → click Connect, `skip` → click Start Fresh.
+    nonisolated static func shouldAutoConfirmConnectForRestorePrompt() -> Bool {
+        ProcessInfo.processInfo.environment["DIMROOM_HARNESS_AUTO_CONFIRM_CONNECT_FOR_RESTORE"] != nil
+    }
+
+    nonisolated static func harnessConnectForRestoreValue() -> Bool {
+        guard let raw = ProcessInfo.processInfo.environment["DIMROOM_HARNESS_AUTO_CONFIRM_CONNECT_FOR_RESTORE"] else {
+            return false
+        }
+        switch raw.lowercased() {
+        case "connect", "1", "true", "yes": return true
+        default: return false
+        }
+    }
+
+    /// One-shot read-and-clear for the pending Drive-connect flag.
+    /// Extracted as a `nonisolated static` helper so the set/consume
+    /// semantics can be pinned by a Layer A test without spinning up
+    /// `NSApplication` — see `PendingDriveConnectAtLaunchTests`.
+    nonisolated static func consumePendingConnectFlag(_ flag: inout Bool) -> Bool {
+        let was = flag
+        flag = false
+        return was
     }
 
     /// Parses `--preview-cache <path>` out of the argument vector. Falls
@@ -1214,12 +1431,70 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     /// wired against in-memory stubs that drive `authenticate()` /
     /// `fetchAccountEmail()` end-to-end without real Google traffic, so
     /// Layer C flows can exercise the connect path.
+    ///
+    /// When `DIMROOM_HARNESS_DISABLE_DRIVE` is set (issue #278), returns
+    /// `nil` *before* `OAuthConfig.load()` is consulted. This is the
+    /// "skip Drive entirely at launch" knob for harness flows that don't
+    /// exercise Drive — without it, dev machines with a previously
+    /// authenticated keychain entry hang at `attemptCatalogRestore` →
+    /// `runBlocking { await driveClient.isAuthenticated }` →
+    /// `SecItemCopyMatching` (the keychain prompt can't be served
+    /// because Main is parked on the semaphore). `DIMROOM_HARNESS_DRIVE_STUB`
+    /// takes precedence so flows that explicitly want a stub client
+    /// keep working.
+    ///
+    /// In `--harness` mode (with or without the stub) the `DriveClient`
+    /// is constructed with an `InMemoryTokenStore` so the Keychain is
+    /// never touched. SPM debug builds resign on every rebuild, which
+    /// invalidates the Keychain ACL and would otherwise pop a password
+    /// dialog on every harness run — see #260.
     private func resolveDriveClient() -> DriveClient? {
-        if ProcessInfo.processInfo.environment["DIMROOM_HARNESS_DRIVE_STUB"] != nil {
+        let args = ProcessInfo.processInfo.arguments
+        let env = ProcessInfo.processInfo.environment
+        switch Self.harnessDriveStrategy(env: env) {
+        case .stubClient:
             return makeHarnessStubDriveClient()
+        case .disabled:
+            return nil
+        case .useOAuthConfig:
+            guard let config = try? OAuthConfig.load() else { return nil }
+            switch Self.chooseTokenStoreKind(args: args, env: env) {
+            case .inMemory, .stubInMemory:
+                return DriveClient(config: config, tokenStore: InMemoryTokenStore())
+            case .keychain:
+                return DriveClient(config: config)
+            }
         }
-        guard let config = try? OAuthConfig.load() else { return nil }
-        return DriveClient(config: config)
+    }
+
+    /// Outcome of the harness env-var dispatch inside `resolveDriveClient`.
+    /// Extracted so #278's "skip Drive at launch" knob and its precedence
+    /// against `DIMROOM_HARNESS_DRIVE_STUB` are pinned in Layer A.
+    enum HarnessDriveStrategy: Equatable {
+        /// `DIMROOM_HARNESS_DRIVE_STUB` — fake `DriveClient` wired to
+        /// in-memory stubs so flows can exercise `authenticate()`.
+        case stubClient
+        /// `DIMROOM_HARNESS_DISABLE_DRIVE` — return `nil` before
+        /// `OAuthConfig.load()` so the keychain probe never fires.
+        case disabled
+        /// Production path: try `OAuthConfig.load()` and wire a real
+        /// `DriveClient` if it succeeds, otherwise `nil`.
+        case useOAuthConfig
+    }
+
+    nonisolated static func harnessDriveStrategy(env: [String: String]) -> HarnessDriveStrategy {
+        if env["DIMROOM_HARNESS_DRIVE_STUB"] != nil { return .stubClient }
+        if shouldDisableDriveForHarness(env: env) { return .disabled }
+        return .useOAuthConfig
+    }
+
+    /// Matches `shouldAutoConfirmRestorePrompt`'s "is set" semantics:
+    /// the variable being present in the env (even with an empty value)
+    /// is enough to opt in. Pinned by `HarnessDriveDisableTests`.
+    nonisolated static func shouldDisableDriveForHarness(
+        env: [String: String]
+    ) -> Bool {
+        env["DIMROOM_HARNESS_DISABLE_DRIVE"] != nil
     }
 
     private func makeHarnessStubDriveClient() -> DriveClient {
@@ -1230,6 +1505,36 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             tokenStore: InMemoryTokenStore(),
             browserLauncher: HarnessStubBrowserLauncher()
         )
+    }
+
+    /// Pure helper that picks the token store backing `DriveClient`
+    /// from the launch arguments and environment. Extracted so Layer A
+    /// tests can pin the three branches without instantiating
+    /// `DriveClient` (which would touch the real Keychain on the
+    /// keychain branch).
+    ///
+    ///   - no `--harness` → `.keychain` (production OAuth)
+    ///   - `--harness` alone → `.inMemory` (real-OAuth-config path in
+    ///     a harness run; Keychain skipped to avoid the rebuild-resign
+    ///     prompt described in #260)
+    ///   - `--harness` + `DIMROOM_HARNESS_DRIVE_STUB` → `.stubInMemory`
+    ///     (in-memory + stub HTTPClient + stub browser; the existing
+    ///     `harness-drive-auth-flow.sh` path)
+    enum TokenStoreKind: String, Equatable {
+        case keychain
+        case inMemory = "in-memory"
+        case stubInMemory = "stub-in-memory"
+    }
+
+    nonisolated static func chooseTokenStoreKind(
+        args: [String],
+        env: [String: String]
+    ) -> TokenStoreKind {
+        let harness = args.contains("--harness")
+        let stub = env["DIMROOM_HARNESS_DRIVE_STUB"] != nil
+        if harness && stub { return .stubInMemory }
+        if harness { return .inMemory }
+        return .keychain
     }
 
     /// Returns a harness-specific downloader when the env var requests

@@ -102,6 +102,7 @@ final class DevelopViewModelTests: XCTestCase {
             "exposure", "contrast", "highlights", "shadows", "whites", "blacks",
             "temperature", "tint", "clarity", "sharpening", "vibrance", "saturation",
             "vignetteAmount", "vignetteRoundness", "vignetteSoftness",
+            "perspectiveVertical", "perspectiveHorizontal", "perspectiveRotation",
         ]
 
         for name in names {
@@ -935,6 +936,7 @@ final class DevelopViewModelTests: XCTestCase {
             "exposure", "contrast", "highlights", "shadows", "whites", "blacks",
             "temperature", "tint", "clarity", "sharpening", "vibrance", "saturation",
             "vignetteAmount", "vignetteRoundness", "vignetteSoftness",
+            "perspectiveVertical", "perspectiveHorizontal", "perspectiveRotation",
         ]
         for name in names {
             XCTAssertNotNil(
@@ -947,6 +949,43 @@ final class DevelopViewModelTests: XCTestCase {
     func testKeyPathLookupReturnsNilForUnknownName() {
         XCTAssertNil(DevelopViewModel.keyPath(forParameter: "not-a-parameter"))
         XCTAssertNil(DevelopViewModel.keyPath(forParameter: "Exposure"))  // case-sensitive
+    }
+
+    func testKeyPathFlagLookupCoversAllFlags() {
+        XCTAssertNotNil(DevelopViewModel.keyPath(forFlag: "chromaticAberration"))
+        XCTAssertNotNil(DevelopViewModel.keyPath(forFlag: "lensVignette"))
+    }
+
+    func testKeyPathFlagLookupReturnsNilForUnknownName() {
+        XCTAssertNil(DevelopViewModel.keyPath(forFlag: "not-a-flag"))
+        XCTAssertNil(DevelopViewModel.keyPath(forFlag: "exposure"))
+    }
+
+    @MainActor
+    func testSetFlagUpdatesEditStateAndSchedulesSave() async throws {
+        let (vm, asset, catalog) = try await makeViewModelWithAsset(hash: "flag-save")
+        await vm.activate(assetId: asset.id)
+
+        vm.setFlag(\.chromaticAberration, value: true)
+        XCTAssertTrue(vm.editState.chromaticAberration)
+
+        // 500ms debounce; wait 800ms for the save to fire.
+        try await Task.sleep(nanoseconds: 800_000_000)
+
+        let latest = try catalog.latestEditState(for: asset.id)
+        XCTAssertEqual(latest?.chromaticAberration, true)
+    }
+
+    @MainActor
+    func testResetFlagClearsTrueValue() async throws {
+        let (vm, asset, _) = try await makeViewModelWithAsset(hash: "flag-reset")
+        await vm.activate(assetId: asset.id)
+
+        vm.setFlag(\.lensVignette, value: true)
+        XCTAssertTrue(vm.editState.lensVignette)
+
+        vm.resetFlag(\.lensVignette)
+        XCTAssertFalse(vm.editState.lensVignette)
     }
 
     // MARK: - showHistogram

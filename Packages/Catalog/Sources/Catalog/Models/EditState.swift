@@ -31,6 +31,14 @@ public struct EditState: Codable, Sendable, Equatable {
     public var luminanceNoiseReduction: Double
     public var chrominanceNoiseReduction: Double
 
+    // MARK: - Split Toning
+
+    public var splitToneHighlightHue: Double
+    public var splitToneHighlightSaturation: Double
+    public var splitToneShadowHue: Double
+    public var splitToneShadowSaturation: Double
+    public var splitToneBalance: Double
+
     // MARK: - Vignette
 
     public var vignetteAmount: Double
@@ -58,6 +66,17 @@ public struct EditState: Codable, Sendable, Equatable {
     public var greenCurvePoints: [CGPoint]
     public var blueCurvePoints: [CGPoint]
 
+    // MARK: - Geometry
+
+    public var perspectiveVertical: Double
+    public var perspectiveHorizontal: Double
+    public var perspectiveRotation: Double
+
+    // MARK: - Lens Corrections
+
+    public var chromaticAberration: Bool
+    public var lensVignette: Bool
+
     // MARK: - Crop
 
     public var cropRect: CGRect?
@@ -81,6 +100,11 @@ public struct EditState: Codable, Sendable, Equatable {
         saturation: Double = 0,
         luminanceNoiseReduction: Double = 0,
         chrominanceNoiseReduction: Double = 0,
+        splitToneHighlightHue: Double = 0,
+        splitToneHighlightSaturation: Double = 0,
+        splitToneShadowHue: Double = 0,
+        splitToneShadowSaturation: Double = 0,
+        splitToneBalance: Double = 0,
         vignetteAmount: Double = 0,
         vignetteRoundness: Double = 50,
         vignetteSoftness: Double = 50,
@@ -91,6 +115,11 @@ public struct EditState: Codable, Sendable, Equatable {
         redCurvePoints: [CGPoint] = EditState.identityCurve,
         greenCurvePoints: [CGPoint] = EditState.identityCurve,
         blueCurvePoints: [CGPoint] = EditState.identityCurve,
+        perspectiveVertical: Double = 0,
+        perspectiveHorizontal: Double = 0,
+        perspectiveRotation: Double = 0,
+        chromaticAberration: Bool = false,
+        lensVignette: Bool = false,
         cropRect: CGRect? = nil,
         cropAngle: Double? = nil
     ) {
@@ -108,6 +137,11 @@ public struct EditState: Codable, Sendable, Equatable {
         self.saturation = saturation
         self.luminanceNoiseReduction = luminanceNoiseReduction
         self.chrominanceNoiseReduction = chrominanceNoiseReduction
+        self.splitToneHighlightHue = splitToneHighlightHue
+        self.splitToneHighlightSaturation = splitToneHighlightSaturation
+        self.splitToneShadowHue = splitToneShadowHue
+        self.splitToneShadowSaturation = splitToneShadowSaturation
+        self.splitToneBalance = splitToneBalance
         self.vignetteAmount = vignetteAmount
         self.vignetteRoundness = vignetteRoundness
         self.vignetteSoftness = vignetteSoftness
@@ -118,6 +152,11 @@ public struct EditState: Codable, Sendable, Equatable {
         self.redCurvePoints = redCurvePoints
         self.greenCurvePoints = greenCurvePoints
         self.blueCurvePoints = blueCurvePoints
+        self.perspectiveVertical = perspectiveVertical
+        self.perspectiveHorizontal = perspectiveHorizontal
+        self.perspectiveRotation = perspectiveRotation
+        self.chromaticAberration = chromaticAberration
+        self.lensVignette = lensVignette
         self.cropRect = cropRect
         self.cropAngle = cropAngle
     }
@@ -132,9 +171,13 @@ public struct EditState: Codable, Sendable, Equatable {
         case temperature, tint
         case clarity, sharpening, vibrance, saturation
         case luminanceNoiseReduction, chrominanceNoiseReduction
+        case splitToneHighlightHue, splitToneHighlightSaturation
+        case splitToneShadowHue, splitToneShadowSaturation, splitToneBalance
         case vignetteAmount, vignetteRoundness, vignetteSoftness
         case hueShift, hslSaturation, hslLuminance
         case toneCurvePoints, redCurvePoints, greenCurvePoints, blueCurvePoints
+        case perspectiveVertical, perspectiveHorizontal, perspectiveRotation
+        case chromaticAberration, lensVignette
         case cropRect, cropAngle
     }
 
@@ -155,6 +198,11 @@ public struct EditState: Codable, Sendable, Equatable {
             saturation: try c.decodeIfPresent(Double.self, forKey: .saturation) ?? 0,
             luminanceNoiseReduction: try c.decodeIfPresent(Double.self, forKey: .luminanceNoiseReduction) ?? 0,
             chrominanceNoiseReduction: try c.decodeIfPresent(Double.self, forKey: .chrominanceNoiseReduction) ?? 0,
+            splitToneHighlightHue: try c.decodeIfPresent(Double.self, forKey: .splitToneHighlightHue) ?? 0,
+            splitToneHighlightSaturation: try c.decodeIfPresent(Double.self, forKey: .splitToneHighlightSaturation) ?? 0,
+            splitToneShadowHue: try c.decodeIfPresent(Double.self, forKey: .splitToneShadowHue) ?? 0,
+            splitToneShadowSaturation: try c.decodeIfPresent(Double.self, forKey: .splitToneShadowSaturation) ?? 0,
+            splitToneBalance: try c.decodeIfPresent(Double.self, forKey: .splitToneBalance) ?? 0,
             vignetteAmount: try c.decodeIfPresent(Double.self, forKey: .vignetteAmount) ?? 0,
             vignetteRoundness: try c.decodeIfPresent(Double.self, forKey: .vignetteRoundness) ?? 50,
             vignetteSoftness: try c.decodeIfPresent(Double.self, forKey: .vignetteSoftness) ?? 50,
@@ -165,6 +213,11 @@ public struct EditState: Codable, Sendable, Equatable {
             redCurvePoints: try c.decodeIfPresent([CGPoint].self, forKey: .redCurvePoints) ?? EditState.identityCurve,
             greenCurvePoints: try c.decodeIfPresent([CGPoint].self, forKey: .greenCurvePoints) ?? EditState.identityCurve,
             blueCurvePoints: try c.decodeIfPresent([CGPoint].self, forKey: .blueCurvePoints) ?? EditState.identityCurve,
+            perspectiveVertical: try c.decodeIfPresent(Double.self, forKey: .perspectiveVertical) ?? 0,
+            perspectiveHorizontal: try c.decodeIfPresent(Double.self, forKey: .perspectiveHorizontal) ?? 0,
+            perspectiveRotation: try c.decodeIfPresent(Double.self, forKey: .perspectiveRotation) ?? 0,
+            chromaticAberration: try c.decodeIfPresent(Bool.self, forKey: .chromaticAberration) ?? false,
+            lensVignette: try c.decodeIfPresent(Bool.self, forKey: .lensVignette) ?? false,
             cropRect: try c.decodeIfPresent(CGRect.self, forKey: .cropRect),
             cropAngle: try c.decodeIfPresent(Double.self, forKey: .cropAngle)
         )

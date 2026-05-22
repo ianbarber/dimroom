@@ -178,7 +178,16 @@ final class CommandCodingTests: XCTestCase {
 
     func testSetEditParameterRoundTrip() throws {
         let id = UUID(uuidString: "12345678-1234-1234-1234-123456789012")!
-        for (parameter, value) in [("exposure", 2.0), ("contrast", -0.5), ("temperature", 5500.0)] {
+        for (parameter, value) in [
+            ("exposure", 2.0),
+            ("contrast", -0.5),
+            ("temperature", 5500.0),
+            ("splitToneHighlightHue", 30.0),
+            ("splitToneHighlightSaturation", 50.0),
+            ("splitToneShadowHue", 210.0),
+            ("splitToneShadowSaturation", 50.0),
+            ("splitToneBalance", 25.0),
+        ] {
             let command = Command.setEditParameter(assetId: id, parameter: parameter, value: value)
             let data = try encoder.encode(command)
             let decoded = try decoder.decode(Command.self, from: data)
@@ -219,6 +228,38 @@ final class CommandCodingTests: XCTestCase {
         let command = try decoder.decode(Command.self, from: Data(json.utf8))
         let expected = UUID(uuidString: "12345678-1234-1234-1234-123456789012")!
         XCTAssertEqual(command, .resetEditParameter(assetId: expected, parameter: "exposure"))
+    }
+
+    func testSetEditFlagRoundTrip() throws {
+        let id = UUID(uuidString: "12345678-1234-1234-1234-123456789012")!
+        for (parameter, value) in [("chromaticAberration", true), ("lensVignette", false)] {
+            let command = Command.setEditFlag(assetId: id, parameter: parameter, value: value)
+            let data = try encoder.encode(command)
+            let decoded = try decoder.decode(Command.self, from: data)
+            XCTAssertEqual(command, decoded)
+        }
+    }
+
+    func testDecodeSetEditFlagFromJSON() throws {
+        let json = #"{"type":"setEditFlag","assetId":"12345678-1234-1234-1234-123456789012","parameter":"chromaticAberration","flagValue":true}"#
+        let command = try decoder.decode(Command.self, from: Data(json.utf8))
+        let expected = UUID(uuidString: "12345678-1234-1234-1234-123456789012")!
+        XCTAssertEqual(command, .setEditFlag(assetId: expected, parameter: "chromaticAberration", value: true))
+    }
+
+    func testResetEditFlagRoundTrip() throws {
+        let id = UUID(uuidString: "12345678-1234-1234-1234-123456789012")!
+        let command = Command.resetEditFlag(assetId: id, parameter: "lensVignette")
+        let data = try encoder.encode(command)
+        let decoded = try decoder.decode(Command.self, from: data)
+        XCTAssertEqual(command, decoded)
+    }
+
+    func testDecodeResetEditFlagFromJSON() throws {
+        let json = #"{"type":"resetEditFlag","assetId":"12345678-1234-1234-1234-123456789012","parameter":"lensVignette"}"#
+        let command = try decoder.decode(Command.self, from: Data(json.utf8))
+        let expected = UUID(uuidString: "12345678-1234-1234-1234-123456789012")!
+        XCTAssertEqual(command, .resetEditFlag(assetId: expected, parameter: "lensVignette"))
     }
 
     // MARK: - Command JSON shape
@@ -1102,6 +1143,81 @@ final class CommandCodingTests: XCTestCase {
         )
     }
 
+    func testSelectCurveChannelRoundTrip() throws {
+        for channel in ["luminance", "red", "green", "blue"] {
+            let command = Command.selectCurveChannel(channel: channel)
+            let data = try encoder.encode(command)
+            let decoded = try decoder.decode(Command.self, from: data)
+            XCTAssertEqual(command, decoded)
+        }
+    }
+
+    func testDecodeSelectCurveChannelFromJSON() throws {
+        let json = #"{"type":"selectCurveChannel","channel":"red"}"#
+        let command = try decoder.decode(Command.self, from: Data(json.utf8))
+        XCTAssertEqual(command, .selectCurveChannel(channel: "red"))
+    }
+
+    // MARK: - triggerExportMenu / completeExportSheet (#242)
+
+    func testTriggerExportMenuRoundTrip() throws {
+        let command = Command.triggerExportMenu
+        let data = try encoder.encode(command)
+        let decoded = try decoder.decode(Command.self, from: data)
+        XCTAssertEqual(command, decoded)
+    }
+
+    func testTriggerExportMenuJSON() throws {
+        let command = Command.triggerExportMenu
+        let data = try encoder.encode(command)
+        let json = String(data: data, encoding: .utf8)!
+        XCTAssertEqual(json, #"{"type":"triggerExportMenu"}"#)
+    }
+
+    func testDecodeTriggerExportMenuFromJSON() throws {
+        let json = #"{"type":"triggerExportMenu"}"#
+        let command = try decoder.decode(Command.self, from: Data(json.utf8))
+        XCTAssertEqual(command, .triggerExportMenu)
+    }
+
+    func testCompleteExportSheetRoundTrip() throws {
+        for format in ["original", "jpeg", "tiff"] {
+            for applyEdits in [true, false] {
+                let command = Command.completeExportSheet(
+                    destinationPath: "/tmp/export-menu",
+                    format: format,
+                    applyEdits: applyEdits
+                )
+                let data = try encoder.encode(command)
+                let decoded = try decoder.decode(Command.self, from: data)
+                XCTAssertEqual(command, decoded)
+            }
+        }
+    }
+
+    func testCompleteExportSheetJSON() throws {
+        let command = Command.completeExportSheet(
+            destinationPath: "/tmp/out",
+            format: "jpeg",
+            applyEdits: true
+        )
+        let data = try encoder.encode(command)
+        let json = String(data: data, encoding: .utf8)!
+        XCTAssertEqual(
+            json,
+            #"{"applyEdits":true,"destinationPath":"\/tmp\/out","format":"jpeg","type":"completeExportSheet"}"#
+        )
+    }
+
+    func testDecodeCompleteExportSheetFromJSON() throws {
+        let json = #"{"type":"completeExportSheet","destinationPath":"/tmp/out","format":"tiff","applyEdits":false}"#
+        let command = try decoder.decode(Command.self, from: Data(json.utf8))
+        XCTAssertEqual(
+            command,
+            .completeExportSheet(destinationPath: "/tmp/out", format: "tiff", applyEdits: false)
+        )
+    }
+
     // MARK: - releaseHeldDownloads
 
     func testReleaseHeldDownloadsRoundTrip() throws {
@@ -1122,6 +1238,28 @@ final class CommandCodingTests: XCTestCase {
         let json = #"{"type":"releaseHeldDownloads"}"#
         let command = try decoder.decode(Command.self, from: Data(json.utf8))
         XCTAssertEqual(command, .releaseHeldDownloads)
+    }
+
+    // MARK: - syncFromDrive
+
+    func testSyncFromDriveRoundTrip() throws {
+        let command = Command.syncFromDrive
+        let data = try encoder.encode(command)
+        let decoded = try decoder.decode(Command.self, from: data)
+        XCTAssertEqual(command, decoded)
+    }
+
+    func testSyncFromDriveJSON() throws {
+        let command = Command.syncFromDrive
+        let data = try encoder.encode(command)
+        let json = String(data: data, encoding: .utf8)!
+        XCTAssertEqual(json, #"{"type":"syncFromDrive"}"#)
+    }
+
+    func testDecodeSyncFromDriveFromJSON() throws {
+        let json = #"{"type":"syncFromDrive"}"#
+        let command = try decoder.decode(Command.self, from: Data(json.utf8))
+        XCTAssertEqual(command, .syncFromDrive)
     }
 
     // MARK: - Route

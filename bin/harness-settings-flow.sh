@@ -85,9 +85,11 @@ quit_app() {
 
 # Regression guard for issue #289: after clear-originals-cache the scoped
 # cache dir under $WORK_DIR must hold no cached originals — only the
-# regenerated empty index.json. If scoping ever regresses, the app would
-# clear the user's real cache and this dir would be untouched (or absent),
-# so this fails loudly.
+# regenerated empty index.json. The presence of that index.json is the
+# positive signal that the app actually used the scoped dir: if scoping
+# ever regresses, the app clears the user's real cache and writes its
+# index.json there instead, leaving this dir without one — so the
+# mandatory index.json check below fails loudly.
 assert_originals_cleared_under_workdir() {
     if [ ! -d "$ORIGINALS_CACHE" ]; then
         echo "ERROR: scoped originals dir $ORIGINALS_CACHE missing — cache was not scoped to \$WORK_DIR"
@@ -100,14 +102,20 @@ assert_originals_cleared_under_workdir() {
         find "$ORIGINALS_CACHE" -type f ! -name index.json
         exit 1
     fi
-    if [ -f "$ORIGINALS_CACHE/index.json" ]; then
-        # `entries` is a dict, not a list — an empty cache serialises to {}.
-        local entries
-        entries=$("$REPO_ROOT/bin/harness-json-extract" 'entries' < "$ORIGINALS_CACHE/index.json")
-        if [ "$entries" != "{}" ]; then
-            echo "ERROR: expected empty index entries {} after clear, got '$entries'"
-            exit 1
-        fi
+    # index.json MUST exist: clear-originals-cache writes it into the scoped
+    # dir unconditionally (an empty cache serialises to {"entries":{}}). Its
+    # absence means the app wrote its cache somewhere else (the real
+    # ~/Library/.../originals) — i.e. scoping regressed. Fail loudly.
+    if [ ! -f "$ORIGINALS_CACHE/index.json" ]; then
+        echo "ERROR: $ORIGINALS_CACHE/index.json missing — app wrote its cache elsewhere; scoping regressed"
+        exit 1
+    fi
+    # `entries` is a dict, not a list — an empty cache serialises to {}.
+    local entries
+    entries=$("$REPO_ROOT/bin/harness-json-extract" 'entries' < "$ORIGINALS_CACHE/index.json")
+    if [ "$entries" != "{}" ]; then
+        echo "ERROR: expected empty index entries {} after clear, got '$entries'"
+        exit 1
     fi
     echo "  OK: originals cache empty under \$WORK_DIR after clear"
 }

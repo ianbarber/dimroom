@@ -28,7 +28,7 @@ final class SettingsTabSnapshotTests: XCTestCase {
         }
     }
 
-    private static let tabSize = CGSize(width: 520, height: 360)
+    private static let tabSize = CGSize(width: 520, height: 520)
     private static let snapshotPrecision: Float = 0.99
     private static let snapshotPerceptualPrecision: Float = 0.98
 

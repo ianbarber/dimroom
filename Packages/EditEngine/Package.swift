@@ -15,7 +15,8 @@ let package = Package(
     targets: [
         .target(
             name: "EditEngine",
-            dependencies: ["Catalog"]
+            dependencies: ["Catalog"],
+            resources: [.process("Resources")]
         ),
         .testTarget(
             name: "EditEngineTests",

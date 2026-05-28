@@ -113,9 +113,59 @@ final class ExifExtractorTests: XCTestCase {
         let metadata = ExifExtractor.extract(from: url)
         XCTAssertNil(metadata.captureDate)
         XCTAssertNil(metadata.sourceDevice)
+        XCTAssertNil(metadata.lensMake)
+        XCTAssertNil(metadata.lensModel)
         XCTAssertEqual(metadata.width, 0)
         XCTAssertEqual(metadata.height, 0)
         XCTAssertEqual(metadata.rotationDegrees, 0)
+    }
+
+    func testExtractsLensMakeAndModel() throws {
+        let url = tmpDir.appendingPathComponent("lens.jpg")
+        try TestFixtureBuilder.writeJPEG(
+            exif: .init(lensMake: "Canon", lensModel: "RF 50mm F1.2 L USM"),
+            to: url
+        )
+
+        let metadata = ExifExtractor.extract(from: url)
+        XCTAssertEqual(metadata.lensMake, "Canon")
+        XCTAssertEqual(metadata.lensModel, "RF 50mm F1.2 L USM")
+    }
+
+    func testMissingLensFieldsStayNil() throws {
+        let url = tmpDir.appendingPathComponent("nolens.jpg")
+        try TestFixtureBuilder.writeJPEG(
+            exif: .init(dateTimeOriginal: "2024:06:01 12:34:56"),
+            to: url
+        )
+
+        let metadata = ExifExtractor.extract(from: url)
+        XCTAssertNil(metadata.lensMake)
+        XCTAssertNil(metadata.lensModel)
+    }
+
+    func testLensFieldsTrimWhitespace() throws {
+        let url = tmpDir.appendingPathComponent("lenswhitespace.jpg")
+        try TestFixtureBuilder.writeJPEG(
+            exif: .init(lensMake: "  Canon  ", lensModel: "\tRF 50mm F1.2 L USM\n"),
+            to: url
+        )
+
+        let metadata = ExifExtractor.extract(from: url)
+        XCTAssertEqual(metadata.lensMake, "Canon")
+        XCTAssertEqual(metadata.lensModel, "RF 50mm F1.2 L USM")
+    }
+
+    func testWhitespaceOnlyLensFieldsCollapseToNil() throws {
+        let url = tmpDir.appendingPathComponent("lensempty.jpg")
+        try TestFixtureBuilder.writeJPEG(
+            exif: .init(lensMake: "   ", lensModel: ""),
+            to: url
+        )
+
+        let metadata = ExifExtractor.extract(from: url)
+        XCTAssertNil(metadata.lensMake)
+        XCTAssertNil(metadata.lensModel)
     }
 
     func testJoinDeviceStringHandlesEmpties() {

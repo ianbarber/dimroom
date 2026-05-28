@@ -1,5 +1,6 @@
 import XCTest
 import Catalog
+import DriveClient
 @testable import SyncEngine
 
 final class ChangePollerTests: XCTestCase {
@@ -13,16 +14,22 @@ final class ChangePollerTests: XCTestCase {
     private func makePoller(
         catalog: CatalogDatabase,
         fetcher: StubDriveChangesFetcher,
-        cachedCatalogFileId: String? = nil
+        cachedCatalogFileId: String? = nil,
+        markerFilterEnabled: Bool = true
     ) -> (ChangePoller, InMemoryDriveFileIdStore) {
         let store = InMemoryDriveFileIdStore(initial: cachedCatalogFileId)
         let poller = ChangePoller(
             catalog: catalog,
             fetcher: fetcher,
             publisher: nil,
-            fileIdStore: store
+            fileIdStore: store,
+            markerFilterEnabled: markerFilterEnabled
         )
         return (poller, store)
+    }
+
+    private var markerProperties: [String: String] {
+        [DriveAppProperties.dimroomMarkerKey: DriveAppProperties.dimroomMarkerValue]
     }
 
     // MARK: - Bootstrap
@@ -209,8 +216,8 @@ final class ChangePollerTests: XCTestCase {
         let fetcher = StubDriveChangesFetcher()
         fetcher.enqueueListResponse(DriveChangesPage(
             changes: [
-                DriveChange(fileId: "asset-1"),
-                DriveChange(fileId: "asset-2"),
+                DriveChange(fileId: "asset-1", appProperties: markerProperties),
+                DriveChange(fileId: "asset-2", appProperties: markerProperties),
             ],
             newStartPageToken: "after-originals"
         ))
@@ -269,6 +276,129 @@ final class ChangePollerTests: XCTestCase {
         }
     }
 
+    // MARK: - appProperties marker filter (#273)
+
+    func testUntaggedNonCatalogChangeIsDroppedWhenFilterEnabled() async throws {
+        let catalog = try makeCatalog()
+        try catalog.saveDrivePageToken("stored")
+        let fetcher = StubDriveChangesFetcher()
+        fetcher.enqueueListResponse(DriveChangesPage(
+            changes: [
+                DriveChange(fileId: "foreign-1"),
+                DriveChange(fileId: "foreign-2"),
+            ],
+            newStartPageToken: "after-foreign"
+        ))
+        let (poller, _) = makePoller(
+            catalog: catalog,
+            fetcher: fetcher,
+            cachedCatalogFileId: "drive-catalog-abc"
+        )
+
+        let outcome = try await poller.pollOnce()
+
+        switch outcome {
+        case .noChanges(let pageToken):
+            XCTAssertEqual(pageToken, "after-foreign")
+        default:
+            XCTFail("expected .noChanges, got \(outcome)")
+        }
+    }
+
+    func testUntaggedNonCatalogChangeIsKeptWhenFilterDisabled() async throws {
+        let catalog = try makeCatalog()
+        try catalog.saveDrivePageToken("stored")
+        let fetcher = StubDriveChangesFetcher()
+        fetcher.enqueueListResponse(DriveChangesPage(
+            changes: [
+                DriveChange(fileId: "foreign-1"),
+                DriveChange(fileId: "foreign-2"),
+            ],
+            newStartPageToken: "after-foreign"
+        ))
+        let (poller, _) = makePoller(
+            catalog: catalog,
+            fetcher: fetcher,
+            cachedCatalogFileId: "drive-catalog-abc",
+            markerFilterEnabled: false
+        )
+
+        let outcome = try await poller.pollOnce()
+
+        switch outcome {
+        case .originalsChangedOnly(let addedCount, let pageToken):
+            XCTAssertEqual(addedCount, 2)
+            XCTAssertEqual(pageToken, "after-foreign")
+        default:
+            XCTFail("expected .originalsChangedOnly, got \(outcome)")
+        }
+    }
+
+    func testUntaggedCatalogIdMatchStillClassifiesAsCatalogChanged() async throws {
+        // Back-compat: catalogs published before #273 won't carry the
+        // marker, but a cached driveFileId match should still trump the
+        // missing tag so we don't ignore real catalog updates.
+        let catalog = try makeCatalog()
+        try catalog.saveDrivePageToken("stored")
+        let fetcher = StubDriveChangesFetcher()
+        let cachedId = "drive-catalog-legacy"
+        fetcher.enqueueListResponse(DriveChangesPage(
+            changes: [
+                DriveChange(
+                    fileId: cachedId,
+                    modifiedTime: "2026-05-17T08:00:00.000Z"
+                )
+            ],
+            newStartPageToken: "after-legacy-catalog"
+        ))
+        let (poller, _) = makePoller(
+            catalog: catalog,
+            fetcher: fetcher,
+            cachedCatalogFileId: cachedId
+        )
+
+        let outcome = try await poller.pollOnce()
+
+        switch outcome {
+        case .catalogChanged(let driveFileId, _, let pageToken):
+            XCTAssertEqual(driveFileId, cachedId)
+            XCTAssertEqual(pageToken, "after-legacy-catalog")
+        default:
+            XCTFail("expected .catalogChanged, got \(outcome)")
+        }
+    }
+
+    func testMixedBatchCountsOnlyTaggedNonCatalogChanges() async throws {
+        let catalog = try makeCatalog()
+        try catalog.saveDrivePageToken("stored")
+        let fetcher = StubDriveChangesFetcher()
+        fetcher.enqueueListResponse(DriveChangesPage(
+            changes: [
+                DriveChange(fileId: "tagged-1", appProperties: markerProperties),
+                DriveChange(fileId: "untagged-1"),
+                DriveChange(fileId: "tagged-2", appProperties: markerProperties),
+                DriveChange(fileId: "untagged-2"),
+                DriveChange(fileId: "untagged-3"),
+            ],
+            newStartPageToken: "after-mixed"
+        ))
+        let (poller, _) = makePoller(
+            catalog: catalog,
+            fetcher: fetcher,
+            cachedCatalogFileId: "drive-catalog-abc"
+        )
+
+        let outcome = try await poller.pollOnce()
+
+        switch outcome {
+        case .originalsChangedOnly(let addedCount, let pageToken):
+            XCTAssertEqual(addedCount, 2)
+            XCTAssertEqual(pageToken, "after-mixed")
+        default:
+            XCTFail("expected .originalsChangedOnly, got \(outcome)")
+        }
+    }
+
     // MARK: - Pagination
 
     func testPaginatedChangesFollowNextPageTokenBeforePersisting() async throws {
@@ -276,12 +406,12 @@ final class ChangePollerTests: XCTestCase {
         try catalog.saveDrivePageToken("stored")
         let fetcher = StubDriveChangesFetcher()
         fetcher.enqueueListResponse(DriveChangesPage(
-            changes: [DriveChange(fileId: "asset-1")],
+            changes: [DriveChange(fileId: "asset-1", appProperties: markerProperties)],
             nextPageToken: "page-2-token",
             newStartPageToken: nil
         ))
         fetcher.enqueueListResponse(DriveChangesPage(
-            changes: [DriveChange(fileId: "asset-2")],
+            changes: [DriveChange(fileId: "asset-2", appProperties: markerProperties)],
             newStartPageToken: "final-token"
         ))
         let (poller, _) = makePoller(catalog: catalog, fetcher: fetcher)

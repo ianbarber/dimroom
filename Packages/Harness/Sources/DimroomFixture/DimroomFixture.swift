@@ -48,6 +48,17 @@ extension DimroomFixture {
         )
         var duplicate: Int = 1
 
+        /// Stamp every seeded asset with this `lensModel` so harness flows
+        /// can exercise the `LensProfileLibrary` lookup path. The fixture
+        /// JPEGs in `library-seed/` don't carry EXIF `LensModel`, so without
+        /// this the seeded `Asset` rows have `lensModel == nil` and the
+        /// renderer always falls back to the placeholder magnitudes.
+        @Option(
+            name: .customLong("lens-model"),
+            help: "Optional lens model string stamped on every seeded asset."
+        )
+        var lensModel: String?
+
         /// Append one extra asset whose `driveFileId` is set and `localPath`
         /// is `nil`, so the harness download flow can route through
         /// `OriginalsCoordinator` → `OriginalsCache`. The preview reuses
@@ -125,6 +136,7 @@ extension DimroomFixture {
                         captureDate: baseDate.addingTimeInterval(Double(assetIndex) * 3600),
                         importedDate: baseDate,
                         sourceType: .digital,
+                        lensModel: lensModel,
                         width: width,
                         height: height,
                         bytes: Int64(size)

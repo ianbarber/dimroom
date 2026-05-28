@@ -72,5 +72,12 @@ enum CatalogMigrations {
                 t.column("value", .text).notNull()
             }
         }
+
+        migrator.registerMigration("005-addLensFieldsToAssets") { db in
+            try db.alter(table: "assets") { t in
+                t.add(column: "lensMake", .text)
+                t.add(column: "lensModel", .text)
+            }
+        }
     }
 }

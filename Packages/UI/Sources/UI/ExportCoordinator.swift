@@ -167,10 +167,12 @@ public final class ExportCoordinator: ObservableObject {
                 destinationURL: destinationURL
             )
 
+            let lensProfile = LensProfileLibrary.lookup(for: asset.lensModel)
             do {
                 try Exporter.export(
                     sourceURL: sourceURL,
                     editState: editState,
+                    lensProfile: lensProfile,
                     config: config,
                     context: context
                 )

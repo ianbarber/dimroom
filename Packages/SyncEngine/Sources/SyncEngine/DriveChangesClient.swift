@@ -82,7 +82,8 @@ public actor DriveChangesClient: DriveChangesFetching {
             name: change.file?.name,
             mimeType: change.file?.mimeType,
             modifiedTime: change.file?.modifiedTime,
-            parents: change.file?.parents ?? []
+            parents: change.file?.parents ?? [],
+            appProperties: change.file?.appProperties ?? [:]
         )
     }
 

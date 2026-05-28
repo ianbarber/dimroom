@@ -8,6 +8,13 @@ public struct ExtractedMetadata: Sendable, Equatable {
     public var captureDate: Date?
     /// `Make` + `Model` joined with a single space. Nil if both are missing.
     public var sourceDevice: String?
+    /// EXIF `LensMake` (raw, whitespace-trimmed). Nil if missing or empty.
+    /// Kept separate from `lensModel` so callers can choose whether to join
+    /// them — the lens-profile lookup uses `lensModel` alone.
+    public var lensMake: String?
+    /// EXIF `LensModel` (raw, whitespace-trimmed). Nil if missing or empty.
+    /// This is the lookup key for `LensProfileLibrary`.
+    public var lensModel: String?
     /// Pixel width as reported by ImageIO. Zero if unavailable.
     public var width: Int
     /// Pixel height as reported by ImageIO. Zero if unavailable.
@@ -19,12 +26,16 @@ public struct ExtractedMetadata: Sendable, Equatable {
     public init(
         captureDate: Date? = nil,
         sourceDevice: String? = nil,
+        lensMake: String? = nil,
+        lensModel: String? = nil,
         width: Int = 0,
         height: Int = 0,
         rotationDegrees: Int = 0
     ) {
         self.captureDate = captureDate
         self.sourceDevice = sourceDevice
+        self.lensMake = lensMake
+        self.lensModel = lensModel
         self.width = width
         self.height = height
         self.rotationDegrees = rotationDegrees
@@ -73,13 +84,23 @@ public enum ExifExtractor {
             metadata.sourceDevice = joinDeviceString(make: make, model: model)
         }
 
-        if let exif = properties[kCGImagePropertyExifDictionary] as? [CFString: Any],
-           let dateString = exif[kCGImagePropertyExifDateTimeOriginal] as? String
-        {
-            metadata.captureDate = Self.exifDateFormatter.date(from: dateString)
+        if let exif = properties[kCGImagePropertyExifDictionary] as? [CFString: Any] {
+            if let dateString = exif[kCGImagePropertyExifDateTimeOriginal] as? String {
+                metadata.captureDate = Self.exifDateFormatter.date(from: dateString)
+            }
+            metadata.lensMake = trimmedNonEmpty(exif[kCGImagePropertyExifLensMake] as? String)
+            metadata.lensModel = trimmedNonEmpty(exif[kCGImagePropertyExifLensModel] as? String)
         }
 
         return metadata
+    }
+
+    /// Trim leading/trailing whitespace+newlines and collapse the empty
+    /// string to `nil` so downstream code can use a simple optional check.
+    private static func trimmedNonEmpty(_ s: String?) -> String? {
+        guard let s else { return nil }
+        let trimmed = s.trimmingCharacters(in: .whitespacesAndNewlines)
+        return trimmed.isEmpty ? nil : trimmed
     }
 
     /// EXIF `DateTimeOriginal` is formatted as `"yyyy:MM:dd HH:mm:ss"` with no

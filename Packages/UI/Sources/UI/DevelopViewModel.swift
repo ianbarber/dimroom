@@ -53,6 +53,11 @@ public final class DevelopViewModel: ObservableObject {
     private var previewStore: PreviewStore
     private var originalFetcher: (any OriginalFetcher)?
     private var sourceImage: CIImage?
+    /// Cached lens profile for the active asset, resolved via
+    /// `LensProfileLibrary.lookup` at `activate` time. Nil for assets whose
+    /// `lensModel` is missing or not registered — the renderer falls back
+    /// to built-in placeholders in that case.
+    private var currentLensProfile: LensProfile?
     private let ciContext = CIContext()
     private var renderTask: Task<Void, Never>?
     private var saveTask: Task<Void, Never>?
@@ -152,6 +157,7 @@ public final class DevelopViewModel: ObservableObject {
         // `EditState` is applied once over unedited pixels, not over an
         // already-edited display JPEG (issue #186).
         let previewURL = previewStore.masterPreviewURL(for: asset)
+        currentLensProfile = LensProfileLibrary.lookup(for: asset.lensModel)
         guard let url = previewURL,
               let source = CIImage(contentsOf: url) else {
             currentAssetId = assetId
@@ -212,6 +218,7 @@ public final class DevelopViewModel: ObservableObject {
         renderedImage = nil
         histogram = nil
         currentAssetId = nil
+        currentLensProfile = nil
         editState = EditState()
         cropViewModel.resetToIdentity()
     }
@@ -536,8 +543,9 @@ public final class DevelopViewModel: ObservableObject {
         }
         isRendering = true
 
+        let lensProfile = currentLensProfile
         let result: (image: NSImage?, histogram: HistogramData?) = await Task.detached(priority: .userInitiated) { [ciContext] in
-            let output = Renderer.render(source: source, editState: state)
+            let output = Renderer.render(source: source, editState: state, lensProfile: lensProfile)
             let histogram = Histogram.compute(from: output, context: ciContext)
             guard let cgImage = ciContext.createCGImage(output, from: output.extent) else {
                 return (nil, histogram)

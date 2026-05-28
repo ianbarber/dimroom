@@ -18,6 +18,9 @@ public enum Exporter {
     ///   - sourceURL: Path to the original file on disk.
     ///   - editState: If non-nil and `config.applyEdits` is true, the edit
     ///     state is rendered through `Renderer` before writing.
+    ///   - lensProfile: Resolved lens profile for the asset, used by the
+    ///     renderer when CA / lens-vignette correction is enabled. Pass
+    ///     `nil` to fall back to the placeholder magnitudes.
     ///   - config: Format, quality, and destination settings.
     ///   - context: A shared `CIContext` for GPU-backed rendering. Reuse
     ///     across a batch to amortize setup cost.
@@ -26,6 +29,7 @@ public enum Exporter {
     public static func export(
         sourceURL: URL,
         editState: EditState?,
+        lensProfile: LensProfile? = nil,
         config: ExportConfiguration,
         context: CIContext
     ) throws -> URL {
@@ -37,6 +41,7 @@ public enum Exporter {
             return try exportRendered(
                 sourceURL: sourceURL,
                 editState: config.applyEdits ? editState : nil,
+                lensProfile: lensProfile,
                 destinationURL: config.destinationURL,
                 context: context,
                 writeImage: { rendered, dest, ctx in
@@ -51,6 +56,7 @@ public enum Exporter {
             return try exportRendered(
                 sourceURL: sourceURL,
                 editState: config.applyEdits ? editState : nil,
+                lensProfile: lensProfile,
                 destinationURL: config.destinationURL,
                 context: context,
                 writeImage: { rendered, dest, ctx in
@@ -114,6 +120,7 @@ public enum Exporter {
     private static func exportRendered(
         sourceURL: URL,
         editState: EditState?,
+        lensProfile: LensProfile?,
         destinationURL: URL,
         context: CIContext,
         writeImage: (CIImage, URL, CIContext) throws -> Void
@@ -123,7 +130,7 @@ public enum Exporter {
         }
 
         if let editState {
-            image = Renderer.render(source: image, editState: editState)
+            image = Renderer.render(source: image, editState: editState, lensProfile: lensProfile)
         }
 
         try writeImage(image, destinationURL, context)

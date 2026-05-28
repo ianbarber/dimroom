@@ -145,6 +145,12 @@ public enum Command: Codable, Sendable, Equatable {
     /// dialog branch). NSOpenPanel can't be driven from the harness, so
     /// `destinationPath` substitutes for the panel's URL output (#242).
     case completeExportSheet(destinationPath: String, format: String, applyEdits: Bool)
+    /// Clears the Library filter bar's "N new on Drive" badge, mirroring
+    /// the badge's own X dismiss button (added in #311). The badge is
+    /// persistent — it does not auto-dismiss like `undoToast`/`ratingToast`
+    /// — so this is the only way to exercise the dismiss path at Layer C
+    /// (#313).
+    case dismissRemoteAdditionsBadge
 
     private enum CodingKeys: String, CodingKey {
         case type
@@ -251,6 +257,7 @@ public enum Command: Codable, Sendable, Equatable {
         case reloadCatalogFromDrive
         case triggerExportMenu
         case completeExportSheet
+        case dismissRemoteAdditionsBadge
     }
 
     public init(from decoder: Decoder) throws {
@@ -471,6 +478,8 @@ public enum Command: Codable, Sendable, Equatable {
             let format = try container.decode(String.self, forKey: .format)
             let applyEdits = try container.decode(Bool.self, forKey: .applyEdits)
             self = .completeExportSheet(destinationPath: destinationPath, format: format, applyEdits: applyEdits)
+        case .dismissRemoteAdditionsBadge:
+            self = .dismissRemoteAdditionsBadge
         }
     }
 
@@ -680,6 +689,8 @@ public enum Command: Codable, Sendable, Equatable {
             try container.encode(destinationPath, forKey: .destinationPath)
             try container.encode(format, forKey: .format)
             try container.encode(applyEdits, forKey: .applyEdits)
+        case .dismissRemoteAdditionsBadge:
+            try container.encode(CommandType.dismissRemoteAdditionsBadge, forKey: .type)
         }
     }
 }

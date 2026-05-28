@@ -405,6 +405,10 @@ final class HarnessController: @unchecked Sendable {
                 modifiedTime: modifiedTime,
                 pageToken: pageToken
             )
+
+        case .dismissRemoteAdditionsBadge:
+            await MainActor.run { libraryViewModel.dismissRemoteAdditionsBadge() }
+            return .ok()
         }
     }
 

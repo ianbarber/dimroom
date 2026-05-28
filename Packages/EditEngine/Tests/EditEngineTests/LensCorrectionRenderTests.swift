@@ -79,8 +79,8 @@ final class LensCorrectionRenderTests: XCTestCase {
 
         let fallback = Renderer.render(source: source, editState: edit, lensProfile: nil)
 
-        // _test_strong has ±1.5 % per-channel scale — well outside the
-        // placeholder's ±0.5 %, so the rendered output must diverge.
+        // ±1.5 % per-channel scale — well outside the placeholder's
+        // ±0.5 %, so the rendered output must diverge.
         let strongProfile = LensProfile(
             caRedScale: 0.985,
             caBlueScale: 1.015,

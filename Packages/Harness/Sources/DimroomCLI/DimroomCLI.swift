@@ -72,6 +72,7 @@ struct DimroomCLI: ParsableCommand {
             ReloadCatalogFromDrive.self,
             TriggerExportMenu.self,
             CompleteExportSheet.self,
+            NudgeColorWheel.self,
         ]
     )
 }
@@ -582,6 +583,47 @@ extension DimroomCLI {
                 throw ValidationError("Invalid UUID '\(id)'.")
             }
             try runCommand(.resetEditParameter(assetId: uuid, parameter: parameter), socket: socket)
+        }
+    }
+
+    struct NudgeColorWheel: ParsableCommand {
+        static let configuration = CommandConfiguration(
+            commandName: "nudge-color-wheel",
+            abstract: "Drive the ColorWheelControl keyboard path. Plain arrows nudge hue, --shift nudges saturation, key 'reset' returns both to identity."
+        )
+
+        @Argument(help: "The UUID of the asset.")
+        var id: String
+
+        @Argument(help: "Hue parameter name (e.g. splitToneHighlightHue).")
+        var hueParameter: String
+
+        @Argument(help: "Saturation parameter name (e.g. splitToneHighlightSaturation).")
+        var saturationParameter: String
+
+        @Argument(help: "Key: left, right, up, down, or reset.")
+        var key: String
+
+        @Flag(name: .long, help: "Hold shift — nudges saturation instead of hue. Ignored for reset.")
+        var shift: Bool = false
+
+        @Option(name: .long, help: "Path to the harness socket.")
+        var socket: String = HarnessServer.defaultSocketPath
+
+        func run() throws {
+            guard let uuid = UUID(uuidString: id) else {
+                throw ValidationError("Invalid UUID '\(id)'.")
+            }
+            try runCommand(
+                .nudgeColorWheel(
+                    assetId: uuid,
+                    hueParameter: hueParameter,
+                    saturationParameter: saturationParameter,
+                    key: key,
+                    shift: shift
+                ),
+                socket: socket
+            )
         }
     }
 

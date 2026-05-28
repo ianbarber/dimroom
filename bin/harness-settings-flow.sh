@@ -2,10 +2,16 @@
 # harness-settings-flow.sh — Layer C flow for the Settings store
 # (issue #236).
 #
-# Exercises the new get-setting / set-setting / clear-originals-cache /
+# Exercises the get-setting / set-setting / clear-originals-cache /
 # clear-preview-cache harness commands against an isolated UserDefaults
 # suite, then relaunches the app with the same suite and verifies the
 # write survived process restart.
+#
+# Beyond the round-trips, the clear/budget commands are checked for their
+# actual side effects (issue #290), not just an "ok" response:
+#   - shrinking originalsCacheBudgetBytes evicts the LRU original;
+#   - clear-originals-cache wipes content without resetting settings;
+#   - clear-preview-cache deletes a sentinel file off disk.
 #
 # Assumes capture-screenshots skill has already built the app + CLI;
 # this script never rebuilds.
@@ -21,6 +27,7 @@ PREVIEW_CACHE="$WORK_DIR/previews"
 # clear-originals-cache step can't touch the user's real
 # ~/Library/Application Support/Dimroom/originals (issue #289).
 ORIGINALS_CACHE="$WORK_DIR/originals"
+ORIGINALS_INDEX="$ORIGINALS_CACHE/index.json"
 SOCKET="/tmp/dimroom-harness-settings-$$.sock"
 # Isolated UserDefaults suite so this flow can't trample the user's
 # real Dimroom preferences. The bundle id `com.dimroom.harness-settings`
@@ -50,6 +57,10 @@ for bin in "$APP_BIN" "$CLI_BIN" "$FIXTURE_BIN"; do
 done
 
 launch_app() {
+    # `--originals-cache` pins the LRU cache to $WORK_DIR so the eviction
+    # assertion below inspects our pre-seeded index, not the user's real
+    # cache; DIMROOM_ORIGINALS_DIR keeps import-staging out of Application
+    # Support too (the scoping itself comes from issue #289).
     DIMROOM_HARNESS_SOCKET="$SOCKET" \
         DIMROOM_ORIGINALS_DIR="$ORIGINALS_CACHE" \
         "$APP_BIN" --harness \
@@ -81,6 +92,40 @@ quit_app() {
     fi
     APP_PID=""
     rm -f "$SOCKET"
+}
+
+# Pre-seed the originals LRU cache with two equally-sized payloads so the
+# budget-shrink eviction assertion has something to evict. `A.bin` was
+# "accessed" two minutes ago, `B.bin` just now — so shrinking the budget to
+# fit one entry must evict A (the LRU) and keep B.
+#
+# This couples the flow to the on-disk shape of `OriginalsCacheIndex`
+# (entries keyed by asset UUID; ISO8601 `lastAccess`; the index `bytes`
+# field — not the file size — drives the eviction math). Kept in one place
+# on purpose so the coupling is obvious if that format ever changes.
+seed_originals_cache() {
+    mkdir -p "$ORIGINALS_CACHE"
+    dd if=/dev/zero of="$ORIGINALS_CACHE/A.bin" bs=1024 count=1 2>/dev/null
+    dd if=/dev/zero of="$ORIGINALS_CACHE/B.bin" bs=1024 count=1 2>/dev/null
+    local old_access new_access
+    old_access=$(date -u -v-120S +%Y-%m-%dT%H:%M:%SZ)
+    new_access=$(date -u +%Y-%m-%dT%H:%M:%SZ)
+    cat > "$ORIGINALS_INDEX" <<EOF
+{
+  "entries" : {
+    "00000000-0000-0000-0000-000000000001" : {
+      "bytes" : 1024,
+      "filename" : "A.bin",
+      "lastAccess" : "$old_access"
+    },
+    "00000000-0000-0000-0000-000000000002" : {
+      "bytes" : 1024,
+      "filename" : "B.bin",
+      "lastAccess" : "$new_access"
+    }
+  }
+}
+EOF
 }
 
 # Regression guard for issue #289: after clear-originals-cache the scoped
@@ -132,6 +177,9 @@ if [ ! -f "$CATALOG_PATH" ]; then
     echo "ERROR: dimroom-fixture did not produce $CATALOG_PATH"
     exit 1
 fi
+
+echo "=== Seeding originals cache (A.bin LRU, B.bin MRU) ==="
+seed_originals_cache
 
 echo "=== Launching app (round 1) ==="
 launch_app
@@ -190,6 +238,48 @@ else
     echo "  OK: unknown key rejected (non-zero exit)"
 fi
 
+# Shrinking originalsCacheBudgetBytes below the cache total must evict the
+# least-recently-accessed original. The two seeded entries total 2048 bytes;
+# a 1500-byte budget fits exactly one, so A.bin (LRU) is evicted and B.bin
+# (MRU) survives. The budget change routes through a Combine subscription
+# that dispatches `setBudget` onto the cache actor, so the eviction is async
+# — poll the index rather than asserting immediately.
+echo "=== set-setting originalsCacheBudgetBytes 1500 (expect A.bin evicted) ==="
+SET_OUT=$("$CLI_BIN" set-setting originalsCacheBudgetBytes 1500 --socket "$SOCKET")
+echo "$SET_OUT"
+if ! echo "$SET_OUT" | grep -q '"ok"'; then
+    echo "ERROR: set-setting originalsCacheBudgetBytes did not return ok"
+    exit 1
+fi
+
+ENTRY_COUNT=""
+for i in $(seq 1 15); do
+    ENTRY_COUNT=$(jq '.entries | length' "$ORIGINALS_INDEX" 2>/dev/null || echo "")
+    if [ "$ENTRY_COUNT" = "1" ]; then
+        break
+    fi
+    sleep 0.2
+done
+if [ "$ENTRY_COUNT" != "1" ]; then
+    echo "ERROR: expected exactly 1 cache entry after eviction, got '$ENTRY_COUNT'"
+    echo "index.json was:"; cat "$ORIGINALS_INDEX" 2>/dev/null || echo "(missing)"
+    exit 1
+fi
+SURVIVOR=$(jq -r '[.entries[].filename][0]' "$ORIGINALS_INDEX")
+if [ "$SURVIVOR" != "B.bin" ]; then
+    echo "ERROR: expected B.bin (MRU) to survive eviction, index kept '$SURVIVOR'"
+    exit 1
+fi
+if [ -f "$ORIGINALS_CACHE/A.bin" ]; then
+    echo "ERROR: A.bin (LRU) should have been deleted from disk on eviction"
+    exit 1
+fi
+if [ ! -f "$ORIGINALS_CACHE/B.bin" ]; then
+    echo "ERROR: B.bin (MRU) should still be on disk after eviction"
+    exit 1
+fi
+echo "  OK: budget shrink evicted A.bin (LRU), kept B.bin (MRU)"
+
 echo "=== clear-originals-cache ==="
 CLEAR_OUT=$("$CLI_BIN" clear-originals-cache --socket "$SOCKET")
 echo "$CLEAR_OUT"
@@ -200,14 +290,43 @@ fi
 echo "  OK: clear-originals-cache returned ok"
 assert_originals_cleared_under_workdir
 
-echo "=== clear-preview-cache ==="
+# clearOriginalsCache is a content-only wipe: it must not reset unrelated
+# settings. libraryGridColumns was set to 6 above; assert it survives the
+# clear. Guards against a future refactor that wires SettingsStore.reset()
+# into the clear path.
+echo "=== get-setting libraryGridColumns after clear (expect still 6) ==="
+GET_OUT=$("$CLI_BIN" get-setting libraryGridColumns --socket "$SOCKET")
+echo "$GET_OUT"
+VALUE=$(printf '%s' "$GET_OUT" | "$REPO_ROOT/bin/harness-json-extract" 'data.value')
+if [ "$VALUE" != "6" ]; then
+    echo "ERROR: clear-originals-cache reset libraryGridColumns to '$VALUE' (expected 6)"
+    exit 1
+fi
+echo "  OK: clear-originals-cache left libraryGridColumns == 6 (content-only)"
+
+# Prove clear-preview-cache actually wipes files, not just returns ok.
+# Drop a sentinel into the preview cache dir; PreviewStore.removeAll()
+# iterates the directory and removes each entry, so the top-level sentinel
+# must be gone afterwards.
+echo "=== seed preview-cache sentinel ==="
+printf '\xFF\xD8\xFF' > "$PREVIEW_CACHE/sentinel.jpg"
+if [ ! -f "$PREVIEW_CACHE/sentinel.jpg" ]; then
+    echo "ERROR: failed to write preview-cache sentinel"
+    exit 1
+fi
+
+echo "=== clear-preview-cache (expect sentinel wiped) ==="
 CLEAR_OUT=$("$CLI_BIN" clear-preview-cache --socket "$SOCKET")
 echo "$CLEAR_OUT"
 if ! echo "$CLEAR_OUT" | grep -q '"ok"'; then
     echo "ERROR: clear-preview-cache did not return ok"
     exit 1
 fi
-echo "  OK: clear-preview-cache returned ok"
+if [ -f "$PREVIEW_CACHE/sentinel.jpg" ]; then
+    echo "ERROR: clear-preview-cache left sentinel.jpg in place"
+    exit 1
+fi
+echo "  OK: clear-preview-cache wiped the sentinel file"
 
 # Settings persistence is guarded by an isolated UserDefaults suite —
 # `-DimroomSettingsSuite` overrides which suite the store reads from.

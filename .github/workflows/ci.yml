@@ -292,3 +292,66 @@ jobs:
             exit 0
           fi
           bin/harness-undo-flow.sh
+      - name: Run harness delta sync flow
+        run: |
+          if [ ! -x bin/harness-delta-sync-flow.sh ]; then
+            echo "No harness delta-sync flow script yet — skipping."
+            exit 0
+          fi
+          bin/harness-delta-sync-flow.sh
+      - name: Run harness develop geometry flow
+        run: |
+          if [ ! -x bin/harness-develop-geometry-flow.sh ]; then
+            echo "No harness develop-geometry flow script yet — skipping."
+            exit 0
+          fi
+          bin/harness-develop-geometry-flow.sh
+      - name: Run harness develop split tone flow
+        run: |
+          if [ ! -x bin/harness-develop-split-tone-flow.sh ]; then
+            echo "No harness develop-split-tone flow script yet — skipping."
+            exit 0
+          fi
+          bin/harness-develop-split-tone-flow.sh
+      - name: Run harness export empty flow
+        run: |
+          if [ ! -x bin/harness-export-empty-flow.sh ]; then
+            echo "No harness export-empty flow script yet — skipping."
+            exit 0
+          fi
+          bin/harness-export-empty-flow.sh
+      - name: Run harness keychain skip flow
+        run: |
+          if [ ! -x bin/harness-keychain-skip-flow.sh ]; then
+            echo "No harness keychain-skip flow script yet — skipping."
+            exit 0
+          fi
+          bin/harness-keychain-skip-flow.sh
+      - name: Run harness lens profile flow
+        run: |
+          if [ ! -x bin/harness-lens-profile-flow.sh ]; then
+            echo "No harness lens-profile flow script yet — skipping."
+            exit 0
+          fi
+          bin/harness-lens-profile-flow.sh
+      - name: Run harness restore-catalog connect flow
+        run: |
+          if [ ! -x bin/harness-restore-catalog-connect-flow.sh ]; then
+            echo "No harness restore-catalog-connect flow script yet — skipping."
+            exit 0
+          fi
+          bin/harness-restore-catalog-connect-flow.sh
+      - name: Run harness restore-catalog connect in-session flow
+        run: |
+          if [ ! -x bin/harness-restore-catalog-connect-in-session-flow.sh ]; then
+            echo "No harness restore-catalog-connect-in-session flow script yet — skipping."
+            exit 0
+          fi
+          bin/harness-restore-catalog-connect-in-session-flow.sh
+      - name: Run harness settings flow
+        run: |
+          if [ ! -x bin/harness-settings-flow.sh ]; then
+            echo "No harness settings flow script yet — skipping."
+            exit 0
+          fi
+          bin/harness-settings-flow.sh

@@ -200,8 +200,29 @@ public actor ChangePoller {
         }
 
         if let catalogChange {
-            let localPending = await (publisher?.hasPendingChanges() ?? false)
             let lastPublishedTime = try? catalog.loadLastPublishedCatalogModifiedTime()
+            // After a hot-reload (#259) the new catalog is stamped with
+            // the just-applied remote `modifiedTime`. A subsequent poll
+            // can replay the same change — most often because the
+            // harness fixture is deterministic, but also possible in
+            // production if Drive returns the same change row before
+            // the next mutation lands. Treat a perfect match against
+            // the stamped time as "we already have this state" and
+            // skip both the conflict and reload paths so the user
+            // isn't re-prompted for an update they applied seconds
+            // ago.
+            if let lastPublishedTime,
+               let remoteTime = catalogChange.modifiedTime,
+               remoteTime == lastPublishedTime {
+                if nonCatalogCount > 0 {
+                    return .originalsChangedOnly(
+                        addedCount: nonCatalogCount,
+                        pageToken: pageToken
+                    )
+                }
+                return .noChanges(pageToken: pageToken)
+            }
+            let localPending = await (publisher?.hasPendingChanges() ?? false)
             let remoteMovedPastLastPublish: Bool
             if let lastPublishedTime, let remoteTime = catalogChange.modifiedTime {
                 remoteMovedPastLastPublish = remoteTime != lastPublishedTime

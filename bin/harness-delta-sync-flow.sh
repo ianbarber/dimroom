@@ -91,6 +91,24 @@ if [ ! -f "$CATALOG_PATH" ]; then
     exit 1
 fi
 
+# Seed a *second* catalog with a different asset count so the hot-reload
+# step (#259) can assert the swap took effect — same seed dir, but
+# --duplicate 2 doubles every row so the asset count differs from the
+# initial bootstrap. Used as the stub remote when DIMROOM_HARNESS_STUB_REMOTE_CATALOG
+# points at this path.
+RELOAD_CATALOG="$WORK_DIR/reload-source.sqlite"
+RELOAD_PREVIEW_CACHE="$WORK_DIR/reload-previews"
+"$FIXTURE_BIN" seed \
+    --catalog "$RELOAD_CATALOG" \
+    --cache "$RELOAD_PREVIEW_CACHE" \
+    --seed-dir "$REPO_ROOT/fixtures/library-seed" \
+    --duplicate 2
+
+if [ ! -f "$RELOAD_CATALOG" ]; then
+    echo "ERROR: dimroom-fixture did not produce $RELOAD_CATALOG"
+    exit 1
+fi
+
 # Fixture describes the sequence of `listChanges` responses the stub
 # returns. The third page reports a change to "stub-catalog-id", which
 # the poller matches against the cached catalog driveFileId we'll plant
@@ -182,6 +200,7 @@ echo "=== Launching app in harness mode ==="
 DIMROOM_HARNESS_SOCKET="$SOCKET" \
 DIMROOM_HARNESS_DRIVE_STUB=1 \
 DIMROOM_HARNESS_DRIVE_CHANGES_FIXTURE="$FIXTURE_PATH" \
+DIMROOM_HARNESS_STUB_REMOTE_CATALOG="$RELOAD_CATALOG" \
     "$APP_BIN" --harness \
     --fixture-catalog "$CATALOG_PATH" \
     --preview-cache "$PREVIEW_CACHE" &
@@ -313,6 +332,55 @@ if [ "$DROP_TOKEN" != "stub-token-after-untagged-drop" ]; then
     exit 1
 fi
 echo "  OK: untagged change dropped, advanced to stub-token-after-untagged-drop"
+
+# The reload step (#259) runs last because it rebuilds the change poller
+# against the swapped catalog with a fresh HarnessStubChangesFetcher,
+# whose page cursor resets — so any sync-from-drive assertion that relies
+# on the fixture's page sequence (the catalogChanged / originalsChangedOnly /
+# untagged-drop polls above) has to happen before the reload, not after.
+echo "=== state — capture pre-reload asset count ==="
+PRE_STATE_OUT=$("$CLI_BIN" state --socket "$SOCKET")
+echo "$PRE_STATE_OUT"
+PRE_RELOAD_COUNT=$(printf '%s' "$PRE_STATE_OUT" | "$REPO_ROOT/bin/harness-json-extract" 'data.assetCount')
+echo "  Pre-reload asset count: $PRE_RELOAD_COUNT"
+
+echo "=== reload-catalog-from-drive — hot-reload the local catalog (#259) ==="
+RELOAD_OUT=$("$CLI_BIN" reload-catalog-from-drive \
+    --drive-file-id stub-catalog-id \
+    --modified-time 2026-05-17T08:00:00.000Z \
+    --page-token stub-token-after-catalog-change \
+    --socket "$SOCKET")
+echo "$RELOAD_OUT"
+RELOAD_OUTCOME=$(printf '%s' "$RELOAD_OUT" | "$REPO_ROOT/bin/harness-json-extract" 'data.outcome')
+if [ "$RELOAD_OUTCOME" != "reloaded" ]; then
+    echo "ERROR: expected reload outcome=reloaded, got '$RELOAD_OUTCOME'"
+    exit 1
+fi
+echo "  OK: catalog reloaded in-place"
+
+echo "=== state — asset count reflects new catalog, process survived ==="
+if ! kill -0 "$APP_PID" 2>/dev/null; then
+    echo "ERROR: app process died during reload"
+    exit 1
+fi
+POST_STATE_OUT=$("$CLI_BIN" state --socket "$SOCKET")
+echo "$POST_STATE_OUT"
+POST_RELOAD_COUNT=$(printf '%s' "$POST_STATE_OUT" | "$REPO_ROOT/bin/harness-json-extract" 'data.assetCount')
+if [ "$POST_RELOAD_COUNT" = "$PRE_RELOAD_COUNT" ]; then
+    echo "ERROR: post-reload asset count ($POST_RELOAD_COUNT) matches pre-reload ($PRE_RELOAD_COUNT) — swap didn't take"
+    exit 1
+fi
+echo "  OK: assetCount went $PRE_RELOAD_COUNT -> $POST_RELOAD_COUNT, PID $APP_PID survived"
+
+take_screenshot "delta-sync-after-reload"
+
+echo "=== sync-from-drive after reload — rebuilt poller responds against new catalog ==="
+# Confirms the poller rebuilt during the swap is wired up and doesn't
+# crash on the dropped queue. The rebuilt fixture fetcher resets its page
+# cursor, so this poll replays the empty first page (noChanges); #322
+# tracks turning this into an explicit noChanges assertion.
+DRAINED_OUT=$("$CLI_BIN" sync-from-drive --socket "$SOCKET" 2>&1 || true)
+echo "$DRAINED_OUT"
 
 echo "=== quit ==="
 "$CLI_BIN" quit --socket "$SOCKET" 2>&1 || true

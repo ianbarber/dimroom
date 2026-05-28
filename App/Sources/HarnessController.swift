@@ -11,13 +11,17 @@ import SyncEngine
 import UI
 
 /// Bridges harness commands to the app's state and AppKit operations.
+///
+/// Catalog-dependent dependencies (`catalog`, `catalogPublisher`,
+/// `changePoller`, `originalsCoordinator`, `undoStack`) are stored as
+/// closure-getters rather than direct references so the hot-reload path
+/// (#259) can swap the live `CatalogDatabase` and its derived objects
+/// underneath the controller without rebuilding the socket server. The
+/// `AppDelegate` owns the storage; every command resolves the live
+/// value at dispatch time.
 final class HarnessController: @unchecked Sendable {
     private let router: AppRouter
-    /// `var` rather than `let` so the same-session restore path
-    /// (#283) can swap the placeholder catalog out for the restored
-    /// one without tearing down the harness socket. The other
-    /// restore-managed refs follow the same pattern below.
-    private var catalog: CatalogDatabase?
+    private let catalogProvider: @Sendable () -> CatalogDatabase?
     private let originalsDirectory: URL
     private let previewStore: PreviewStore
     private let libraryViewModel: LibraryViewModel
@@ -26,12 +30,12 @@ final class HarnessController: @unchecked Sendable {
     private let exportCoordinator: ExportCoordinator
     private let uploadCoordinator: UploadCoordinator
     private let driveUploader: (any DriveUploading)?
-    private var originalsCoordinator: OriginalsCoordinator?
-    private let undoStack: UndoStack?
-    private var catalogPublisher: CatalogPublisher?
+    private let originalsCoordinatorProvider: @Sendable () -> OriginalsCoordinator?
+    private let undoStackProvider: @Sendable () -> UndoStack?
+    private let catalogPublisherProvider: @Sendable () -> CatalogPublisher?
     private let driveAuthState: DriveAuthState?
     private let settingsStore: SettingsStore?
-    private let changePoller: ChangePoller?
+    private let changePollerProvider: @Sendable () -> ChangePoller?
     private let catalogRestoreUploader: (any CatalogUploading)?
     private let catalogRestorePath: String?
     private let catalogRestoreFileIdStore: (any DriveFileIdStore)?
@@ -47,9 +51,18 @@ final class HarnessController: @unchecked Sendable {
     private let tokenStoreKind: String?
     private var server: HarnessServer?
 
+    /// Convenience accessors mirror the previous `let` field shape so the
+    /// command handlers don't have to thread a function call through every
+    /// site. Each read resolves the live value owned by `AppDelegate`.
+    private var catalog: CatalogDatabase? { catalogProvider() }
+    private var originalsCoordinator: OriginalsCoordinator? { originalsCoordinatorProvider() }
+    private var undoStack: UndoStack? { undoStackProvider() }
+    private var catalogPublisher: CatalogPublisher? { catalogPublisherProvider() }
+    private var changePoller: ChangePoller? { changePollerProvider() }
+
     init(
         router: AppRouter,
-        catalog: CatalogDatabase?,
+        catalog: @escaping @Sendable () -> CatalogDatabase?,
         originalsDirectory: URL,
         previewStore: PreviewStore,
         libraryViewModel: LibraryViewModel,
@@ -59,19 +72,19 @@ final class HarnessController: @unchecked Sendable {
         uploadCoordinator: UploadCoordinator,
         appDelegate: AppDelegate,
         driveUploader: (any DriveUploading)? = nil,
-        originalsCoordinator: OriginalsCoordinator? = nil,
-        undoStack: UndoStack? = nil,
-        catalogPublisher: CatalogPublisher? = nil,
+        originalsCoordinator: @escaping @Sendable () -> OriginalsCoordinator? = { nil },
+        undoStack: @escaping @Sendable () -> UndoStack? = { nil },
+        catalogPublisher: @escaping @Sendable () -> CatalogPublisher? = { nil },
         driveAuthState: DriveAuthState? = nil,
         settingsStore: SettingsStore? = nil,
-        changePoller: ChangePoller? = nil,
+        changePoller: @escaping @Sendable () -> ChangePoller? = { nil },
         catalogRestoreUploader: (any CatalogUploading)? = nil,
         catalogRestorePath: String? = nil,
         catalogRestoreFileIdStore: (any DriveFileIdStore)? = nil,
         tokenStoreKind: String? = nil
     ) {
         self.router = router
-        self.catalog = catalog
+        self.catalogProvider = catalog
         self.originalsDirectory = originalsDirectory
         self.previewStore = previewStore
         self.libraryViewModel = libraryViewModel
@@ -81,34 +94,16 @@ final class HarnessController: @unchecked Sendable {
         self.uploadCoordinator = uploadCoordinator
         self.appDelegate = appDelegate
         self.driveUploader = driveUploader
-        self.originalsCoordinator = originalsCoordinator
-        self.undoStack = undoStack
-        self.catalogPublisher = catalogPublisher
+        self.originalsCoordinatorProvider = originalsCoordinator
+        self.undoStackProvider = undoStack
+        self.catalogPublisherProvider = catalogPublisher
         self.driveAuthState = driveAuthState
         self.settingsStore = settingsStore
-        self.changePoller = changePoller
+        self.changePollerProvider = changePoller
         self.catalogRestoreUploader = catalogRestoreUploader
         self.catalogRestorePath = catalogRestorePath
         self.catalogRestoreFileIdStore = catalogRestoreFileIdStore
         self.tokenStoreKind = tokenStoreKind
-    }
-
-    /// Swap the catalog-side references after a same-session restore
-    /// (#283). The post-restore wiring builds a fresh catalog,
-    /// `CatalogPublisher`, and `OriginalsCoordinator`; pointing the
-    /// running harness at the new instances keeps commands like
-    /// `state`, `listAssets`, and `restoreCatalogFromDrive` consistent
-    /// with what the SwiftUI tree sees. The socket and `appDelegate`
-    /// reference do not change, so the live harness session can
-    /// continue without a reconnect.
-    func reconfigure(
-        catalog: CatalogDatabase?,
-        catalogPublisher: CatalogPublisher?,
-        originalsCoordinator: OriginalsCoordinator?
-    ) {
-        self.catalog = catalog
-        self.catalogPublisher = catalogPublisher
-        self.originalsCoordinator = originalsCoordinator
     }
 
     func start(socketPath: String = HarnessServer.defaultSocketPath) throws {
@@ -403,6 +398,41 @@ final class HarnessController: @unchecked Sendable {
 
         case .restoreCatalogFromDrive(let confirm):
             return await handleRestoreCatalogFromDrive(confirm: confirm)
+
+        case .reloadCatalogFromDrive(let driveFileId, let modifiedTime, let pageToken):
+            return await handleReloadCatalogFromDrive(
+                driveFileId: driveFileId,
+                modifiedTime: modifiedTime,
+                pageToken: pageToken
+            )
+        }
+    }
+
+    private func handleReloadCatalogFromDrive(
+        driveFileId: String,
+        modifiedTime: String?,
+        pageToken: String
+    ) async -> Response {
+        let outcome: AppDelegate.ReloadResult
+        do {
+            outcome = try await appDelegate.reloadCatalogFromDrive(
+                driveFileId: driveFileId,
+                modifiedTime: modifiedTime,
+                pageToken: pageToken
+            )
+        } catch {
+            return .error("reloadCatalogFromDrive failed: \(error)")
+        }
+        switch outcome {
+        case .reloaded:
+            return .ok(data: .dictionary([
+                "outcome": .string("reloaded"),
+                "driveFileId": .string(driveFileId),
+            ]))
+        case .pendingLocalChanges:
+            return .ok(data: .dictionary([
+                "outcome": .string("pendingLocalChanges"),
+            ]))
         }
     }
 

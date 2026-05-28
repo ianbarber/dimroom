@@ -116,6 +116,18 @@ public enum Command: Codable, Sendable, Equatable {
     /// in the response payload so flows can assert on the restore
     /// shape (issue #234).
     case restoreCatalogFromDrive(confirm: Bool)
+    /// Runs the in-place hot-reload orchestration the
+    /// `catalogChanged` delta-sync alert dispatches when the user
+    /// clicks "Reload Now". Downloads `driveFileId` through the same
+    /// catalog uploader the `restoreCatalogFromDrive` command uses
+    /// (real `DriveCatalogUploader` outside the harness; the local-
+    /// file stub when `DIMROOM_HARNESS_STUB_REMOTE_CATALOG` is set),
+    /// atomically replaces the local catalog, then re-wires the
+    /// view models / publisher / poller against the freshly-opened
+    /// `CatalogDatabase`. `modifiedTime` and `pageToken` come from
+    /// the prior `syncFromDrive` `catalogChanged` payload so the new
+    /// catalog's `sync_state` resumes from the right cursor (#259).
+    case reloadCatalogFromDrive(driveFileId: String, modifiedTime: String?, pageToken: String)
     /// Posts the same `.showExportSheet` notification the File → Export…
     /// menu item does, exercising the SwiftUI sheet presentation path
     /// end-to-end. Returns the post-tick value of
@@ -166,6 +178,9 @@ public enum Command: Codable, Sendable, Equatable {
         case key
         case valueJSON
         case confirm
+        case driveFileId
+        case modifiedTime
+        case pageToken
     }
 
     private enum CommandType: String, Codable {
@@ -233,6 +248,7 @@ public enum Command: Codable, Sendable, Equatable {
         case clearPreviewCache
         case syncFromDrive
         case restoreCatalogFromDrive
+        case reloadCatalogFromDrive
         case triggerExportMenu
         case completeExportSheet
     }
@@ -439,6 +455,15 @@ public enum Command: Codable, Sendable, Equatable {
         case .restoreCatalogFromDrive:
             let confirm = try container.decodeIfPresent(Bool.self, forKey: .confirm) ?? true
             self = .restoreCatalogFromDrive(confirm: confirm)
+        case .reloadCatalogFromDrive:
+            let driveFileId = try container.decode(String.self, forKey: .driveFileId)
+            let modifiedTime = try container.decodeIfPresent(String.self, forKey: .modifiedTime)
+            let pageToken = try container.decode(String.self, forKey: .pageToken)
+            self = .reloadCatalogFromDrive(
+                driveFileId: driveFileId,
+                modifiedTime: modifiedTime,
+                pageToken: pageToken
+            )
         case .triggerExportMenu:
             self = .triggerExportMenu
         case .completeExportSheet:
@@ -643,6 +668,11 @@ public enum Command: Codable, Sendable, Equatable {
         case .restoreCatalogFromDrive(let confirm):
             try container.encode(CommandType.restoreCatalogFromDrive, forKey: .type)
             try container.encode(confirm, forKey: .confirm)
+        case .reloadCatalogFromDrive(let driveFileId, let modifiedTime, let pageToken):
+            try container.encode(CommandType.reloadCatalogFromDrive, forKey: .type)
+            try container.encode(driveFileId, forKey: .driveFileId)
+            try container.encodeIfPresent(modifiedTime, forKey: .modifiedTime)
+            try container.encode(pageToken, forKey: .pageToken)
         case .triggerExportMenu:
             try container.encode(CommandType.triggerExportMenu, forKey: .type)
         case .completeExportSheet(let destinationPath, let format, let applyEdits):

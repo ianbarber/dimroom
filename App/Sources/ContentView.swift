@@ -1,4 +1,3 @@
-import Catalog
 import EditEngine
 import Harness
 import SwiftUI
@@ -12,7 +11,6 @@ struct ContentView: View {
     @ObservedObject var exportCoordinator: ExportCoordinator
     @ObservedObject var uploadCoordinator: UploadCoordinator
     @ObservedObject var undoStack: UndoStack
-    let catalog: CatalogDatabase?
     /// Fetcher used by the export flow to pull originals from Drive when
     /// an asset has been evicted from the local cache. `nil` outside the
     /// fully-wired production app (e.g. early-init before

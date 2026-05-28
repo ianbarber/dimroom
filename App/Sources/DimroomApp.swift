@@ -25,7 +25,6 @@ struct DimroomApp: App {
                 exportCoordinator: appDelegate.exportCoordinator,
                 uploadCoordinator: appDelegate.uploadCoordinator,
                 undoStack: appDelegate.undoStack,
-                catalog: appDelegate.catalog,
                 originalFetcher: appDelegate.originalFetcher,
                 appDelegate: appDelegate
             )
@@ -704,7 +703,6 @@ final class AppDelegate: NSObject, NSApplicationDelegate, ObservableObject {
                     exportCoordinator: exportCoordinator,
                     uploadCoordinator: uploadCoordinator,
                     undoStack: undoStack,
-                    catalog: resolvedCatalog,
                     originalFetcher: originalsCoordinator,
                     appDelegate: self
                 )
@@ -723,9 +721,15 @@ final class AppDelegate: NSObject, NSApplicationDelegate, ObservableObject {
             args: args,
             env: ProcessInfo.processInfo.environment
         ).rawValue
+        // Catalog-derived dependencies (catalog, publisher, poller,
+        // originals coordinator, undo stack) are passed as closure-getters
+        // so the harness keeps reading the live values after a
+        // `reloadCatalogFromDrive` swap (#259). The closures capture
+        // `self` weakly to mirror the rest of `AppDelegate`'s storage
+        // pattern; the controller's lifetime is bounded by the delegate.
         let controller = HarnessController(
             router: router,
-            catalog: resolvedCatalog,
+            catalog: { [weak self] in self?.catalog },
             originalsDirectory: resolvedOriginalsDirectory,
             previewStore: resolvedPreviewStore,
             libraryViewModel: libraryViewModel,
@@ -735,12 +739,12 @@ final class AppDelegate: NSObject, NSApplicationDelegate, ObservableObject {
             uploadCoordinator: uploadCoordinator,
             appDelegate: self,
             driveUploader: driveUploader,
-            originalsCoordinator: originalsCoordinator,
-            undoStack: undoStack,
-            catalogPublisher: catalogPublisher,
+            originalsCoordinator: { [weak self] in self?.originalsCoordinator },
+            undoStack: { [weak self] in self?.undoStack },
+            catalogPublisher: { [weak self] in self?.catalogPublisher },
             driveAuthState: driveAuthState,
             settingsStore: settingsStore,
-            changePoller: changePoller,
+            changePoller: { [weak self] in self?.changePoller },
             catalogRestoreUploader: restoreUploader,
             catalogRestorePath: catalogPath,
             catalogRestoreFileIdStore: fileIdStore,
@@ -893,14 +897,12 @@ final class AppDelegate: NSObject, NSApplicationDelegate, ObservableObject {
             }
         }
 
-        // Keep the running harness controller pointed at the new
-        // catalog/publisher/coordinator so `state`, `listAssets`, and
-        // `restoreCatalogFromDrive` reflect the restored data.
-        harnessController?.reconfigure(
-            catalog: catalog,
-            catalogPublisher: catalogPublisher,
-            originalsCoordinator: originalsCoordinator
-        )
+        // No explicit harness reconfigure needed: the controller reads
+        // `catalog` / `catalogPublisher` / `originalsCoordinator` /
+        // `changePoller` from this `AppDelegate` via closure-getters
+        // (#259), so the assignments above (`self.catalog = …` etc.)
+        // already point `state`, `listAssets`, and
+        // `restoreCatalogFromDrive` at the restored data.
     }
 
     /// Pure helper for `driveAuthState.$status` transitions. Returns
@@ -1132,16 +1134,20 @@ final class AppDelegate: NSObject, NSApplicationDelegate, ObservableObject {
     /// Routes a `DeltaSyncOutcome` from the periodic poller into the UI.
     /// Bootstrap and steady-state results are silent; an originals-only
     /// change surfaces a non-modal Library badge; a catalog change
-    /// surfaces a reload prompt; a conflict surfaces a warning alert.
-    /// Reload-in-place is deferred to a follow-up — for now the alert
-    /// just tells the user to relaunch (see issue #235 risks).
+    /// surfaces a Reload Now / Later prompt that dispatches the in-place
+    /// hot-reload orchestration (#259); a conflict surfaces a warning
+    /// alert.
     func handleDeltaSyncOutcome(_ outcome: DeltaSyncOutcome) {
         applyNonModalDeltaSyncOutcome(outcome)
         switch outcome {
         case .bootstrapped, .noChanges, .originalsChangedOnly:
             return
-        case .catalogChanged(_, let modifiedTime, _):
-            presentCatalogChangedAlert(modifiedTime: modifiedTime)
+        case .catalogChanged(let driveFileId, let modifiedTime, let pageToken):
+            presentCatalogChangedAlert(
+                driveFileId: driveFileId,
+                modifiedTime: modifiedTime,
+                pageToken: pageToken
+            )
         case .conflict(let localPending, _, _, _):
             presentSyncConflictAlert(localPending: localPending)
         }
@@ -1168,18 +1174,248 @@ final class AppDelegate: NSObject, NSApplicationDelegate, ObservableObject {
         }
     }
 
-    private func presentCatalogChangedAlert(modifiedTime: String?) {
+    private func presentCatalogChangedAlert(
+        driveFileId: String,
+        modifiedTime: String?,
+        pageToken: String
+    ) {
         let alert = NSAlert()
         alert.messageText = "Catalog Updated on Google Drive"
         var info = "Another machine published a newer catalog."
         if let modifiedTime {
             info += " Last modified \(modifiedTime)."
         }
-        info += "\n\nRelaunch Dimroom to pick up the changes."
+        info += "\n\nReload now to pick up the changes, or choose Later to keep editing against the local copy until you publish."
         alert.informativeText = info
         alert.alertStyle = .informational
+        alert.addButton(withTitle: "Reload Now")
+        alert.addButton(withTitle: "Later")
+        let response = alert.runModal()
+        guard response == .alertFirstButtonReturn else { return }
+        Task { @MainActor [weak self] in
+            guard let self else { return }
+            do {
+                let outcome = try await self.reloadCatalogFromDrive(
+                    driveFileId: driveFileId,
+                    modifiedTime: modifiedTime,
+                    pageToken: pageToken
+                )
+                if case .pendingLocalChanges = outcome {
+                    self.presentSyncConflictAlert(localPending: true)
+                }
+            } catch {
+                self.presentReloadFailedAlert(error: error)
+            }
+        }
+    }
+
+    private func presentReloadFailedAlert(error: Error) {
+        let alert = NSAlert()
+        alert.messageText = "Catalog Reload Failed"
+        alert.informativeText = "Couldn't apply the remote catalog update: \(error)\n\nRelaunch Dimroom to pick up the changes."
+        alert.alertStyle = .warning
         alert.addButton(withTitle: "OK")
         _ = alert.runModal()
+    }
+
+    /// Result of `reloadCatalogFromDrive`. `pendingLocalChanges` means
+    /// the user kept editing between the alert appearing and the reload
+    /// dispatching; the caller (alert handler or harness) routes that
+    /// to the conflict alert instead of losing the in-flight edits.
+    enum ReloadResult {
+        case reloaded
+        case pendingLocalChanges
+    }
+
+    /// In-place hot-reload of the local catalog from a published remote
+    /// (#259). Downloads via the live `CatalogUploading` (real Drive or
+    /// the harness local-file stub), atomically replaces the on-disk
+    /// catalog, then re-wires every view model / coordinator / publisher
+    /// / poller against the freshly-opened `CatalogDatabase` without
+    /// restarting the process. Resets the route to Library on success.
+    ///
+    /// Mirrors the post-`openCatalog` wiring in
+    /// `applicationDidFinishLaunching`; a future catalog consumer added
+    /// there needs the matching swap here.
+    @discardableResult
+    func reloadCatalogFromDrive(
+        driveFileId: String,
+        modifiedTime: String?,
+        pageToken: String
+    ) async throws -> ReloadResult {
+        guard let catalogPath = resolvedCatalogPath else {
+            throw NSError(
+                domain: "AppDelegate.reloadCatalogFromDrive",
+                code: 1,
+                userInfo: [NSLocalizedDescriptionKey: "catalog path not resolved"]
+            )
+        }
+        guard let previewStore else {
+            throw NSError(
+                domain: "AppDelegate.reloadCatalogFromDrive",
+                code: 2,
+                userInfo: [NSLocalizedDescriptionKey: "preview store not configured"]
+            )
+        }
+        let uploader: any CatalogUploading
+        if let stub = stubCatalogUploader {
+            uploader = stub
+        } else if let real = catalogUploader {
+            uploader = real
+        } else {
+            throw NSError(
+                domain: "AppDelegate.reloadCatalogFromDrive",
+                code: 3,
+                userInfo: [NSLocalizedDescriptionKey: "no catalog uploader available (no DriveClient and no DIMROOM_HARNESS_STUB_REMOTE_CATALOG)"]
+            )
+        }
+
+        let publisherSnapshot = catalogPublisher
+        let outcome = try await CatalogHotReloader.reload(
+            localPath: catalogPath,
+            driveFileId: driveFileId,
+            modifiedTime: modifiedTime,
+            pageToken: pageToken,
+            downloader: uploader,
+            hasPendingChanges: {
+                guard let publisherSnapshot else { return false }
+                return await publisherSnapshot.hasPendingChanges()
+            }
+        )
+
+        switch outcome {
+        case .pendingLocalChanges:
+            return .pendingLocalChanges
+        case .reloaded(let newCatalog):
+            await applyReloadedCatalog(newCatalog, previewStore: previewStore)
+            return .reloaded
+        }
+    }
+
+    /// Tear down the old catalog's derived objects and rewire everything
+    /// against the freshly-opened one. Extracted from
+    /// `reloadCatalogFromDrive` so the swap mechanics live next to the
+    /// equivalent launch-time wiring in `applicationDidFinishLaunching`.
+    @MainActor
+    private func applyReloadedCatalog(
+        _ newCatalog: CatalogDatabase,
+        previewStore: PreviewStore
+    ) async {
+        // 1. Stop the in-flight poller event subscription and the
+        //    publisher debouncer so they can't fire against the old
+        //    catalog after we drop the reference.
+        changePollerEventsTask?.cancel()
+        changePollerEventsTask = nil
+        if let oldPoller = changePoller {
+            await oldPoller.stop()
+        }
+        if let oldPublisher = catalogPublisher {
+            // Clear the onChange hook before stop so a late mutation
+            // can't re-schedule a publish via the about-to-be-released
+            // publisher.
+            catalog?.onChange = nil
+            await oldPublisher.stop()
+        }
+
+        // 2. Drop references so ARC can release the queue once the
+        //    SwiftUI view tree's next render lets go of the asset rows
+        //    derived from the previous catalog.
+        catalogPublisher = nil
+        changePoller = nil
+        catalog = newCatalog
+
+        // 3. Re-wire the view models. `configure` cancels in-flight
+        //    render/save/download tasks and clears transient state.
+        libraryViewModel.configure(catalog: newCatalog, previewStore: previewStore)
+        developViewModel.configure(catalog: newCatalog, previewStore: previewStore)
+        undoStack.configure(catalog: newCatalog, libraryViewModel: libraryViewModel)
+        undoStack.attach(developViewModel: developViewModel)
+        libraryViewModel.undoStack = undoStack
+        developViewModel.attach(undoStack: undoStack)
+
+        // 4. Rebuild the originals coordinator + cache against the new
+        //    catalog. Same resolvers `applicationDidFinishLaunching`
+        //    uses, so the on-disk LRU history survives.
+        let args = ProcessInfo.processInfo.arguments
+        let cacheDir = resolveOriginalsCacheDirectory(from: args)
+        let budget = resolveOriginalsCacheBudget()
+        let downloader: OriginalsDownloader = resolveHarnessDownloader()
+            ?? driveClient
+            ?? UnavailableOriginalsDownloader()
+        let coordinator = OriginalsCoordinator(catalog: newCatalog)
+        if let cache = try? OriginalsCache(
+            directory: cacheDir,
+            budgetBytes: budget,
+            downloader: downloader,
+            onEvict: { [weak coordinator] id in
+                coordinator?.handleEviction(assetId: id)
+            }
+        ) {
+            coordinator.attach(cache: cache)
+            libraryViewModel.originalFetcher = coordinator
+            developViewModel.attach(originalFetcher: coordinator)
+            originalsCoordinator = coordinator
+        }
+
+        // 5. Rebuild the publisher + poller against the new catalog.
+        //    Harness flows that drive `reloadCatalogFromDrive` with the
+        //    local-file stub keep talking to the real Drive HTTP shape
+        //    via the resolved DriveClient — the same wiring the launch
+        //    path uses.
+        if let resolvedDriveClient = driveClient {
+            let httpClient = URLSessionHTTPClient()
+            let session = AuthorizedSession(client: httpClient, provider: resolvedDriveClient)
+            let resolver = DriveFolderResolver(session: session)
+            let newUploader = DriveCatalogUploader(session: session, folderResolver: resolver)
+            self.catalogUploader = newUploader
+            let newPublisher = CatalogPublisher(
+                catalog: newCatalog,
+                uploader: newUploader,
+                fileIdStore: driveFileIdStore ?? FileSystemDriveFileIdStore(
+                    path: FileSystemDriveFileIdStore.defaultPath()
+                ),
+                debounceInterval: .seconds(settingsStore.driveAutoPublishDebounceSeconds)
+            )
+            self.catalogPublisher = newPublisher
+            await newPublisher.setEnabled(settingsStore.driveAutoPublish)
+            newCatalog.onChange = { [weak newPublisher] in
+                newPublisher?.scheduleDebouncedPublish()
+            }
+            await newPublisher.start()
+
+            let fetcher: any DriveChangesFetching
+            if let fixturePath = ProcessInfo.processInfo.environment[
+                "DIMROOM_HARNESS_DRIVE_CHANGES_FIXTURE"
+            ] {
+                fetcher = HarnessStubChangesFetcher(fixturePath: fixturePath)
+            } else {
+                fetcher = DriveChangesClient(session: session)
+            }
+            let newPoller = ChangePoller(
+                catalog: newCatalog,
+                fetcher: fetcher,
+                publisher: newPublisher,
+                fileIdStore: driveFileIdStore ?? FileSystemDriveFileIdStore(
+                    path: FileSystemDriveFileIdStore.defaultPath()
+                )
+            )
+            self.changePoller = newPoller
+            if !args.contains("--harness") {
+                changePollerEventsTask = Task { @MainActor [weak self] in
+                    let stream = await newPoller.events()
+                    for await outcome in stream {
+                        self?.handleDeltaSyncOutcome(outcome)
+                    }
+                }
+                await newPoller.start()
+            }
+        }
+
+        // 6. Reset the route. Preserving Develop selection across the
+        //    swap is explicitly noted as optional in #259, and the
+        //    `configure(...)` calls above already cleared
+        //    `currentAssetId` / `editState`.
+        router.route = .library
     }
 
     private func presentSyncConflictAlert(localPending: Bool) {

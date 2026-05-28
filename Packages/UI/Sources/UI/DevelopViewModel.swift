@@ -108,9 +108,39 @@ public final class DevelopViewModel: ObservableObject {
         return source.extent.size
     }
 
+    /// Swap the backing catalog and preview store. Used by the
+    /// AppDelegate at launch (placeholder → real) and by the hot-reload
+    /// path (#259, old catalog → freshly-downloaded one). Cancels any
+    /// render/save/download work in flight against the previous catalog
+    /// so the new one doesn't inherit a `renderTask` that's already
+    /// mid-decode of bytes the old catalog owned, or a `saveTask`
+    /// queued to write through the about-to-be-released `dbQueue`.
     public func configure(catalog: CatalogDatabase, previewStore: PreviewStore) {
+        renderTask?.cancel()
+        saveTask?.cancel()
+        downloadTask?.cancel()
+        renderTask = nil
+        saveTask = nil
+        downloadTask = nil
+
         self.catalog = catalog
         self.previewStore = previewStore
+
+        // Clear transient render state too. After a hot-reload the
+        // SwiftUI view tree may still be observing this model, so
+        // dropping `sourceImage` / `renderedImage` / `currentAssetId` /
+        // `editState` prevents a flash of pixels from the old catalog
+        // before the AppDelegate routes back to Library.
+        sourceImage = nil
+        renderedImage = nil
+        histogram = nil
+        currentAssetId = nil
+        editState = EditState()
+        hasUnsavedChanges = false
+        pendingUndoPrevious = nil
+        isDownloadingOriginal = false
+        downloadProgress = nil
+        cropViewModel.resetToIdentity()
     }
 
     public func activate(assetId: UUID?) async {

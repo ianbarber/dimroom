@@ -318,6 +318,19 @@ echo "  OK: badge surfaced 1 remote addition"
 
 take_screenshot "delta-sync-originals-added"
 
+echo "=== dismiss-remote-additions-badge — fire the badge's X dismiss path (#313) ==="
+"$CLI_BIN" dismiss-remote-additions-badge --socket "$SOCKET"
+DISMISS_STATE_OUT=$("$CLI_BIN" state --socket "$SOCKET")
+echo "$DISMISS_STATE_OUT"
+DISMISS_BADGE=$(printf '%s' "$DISMISS_STATE_OUT" | "$REPO_ROOT/bin/harness-json-extract" --absent 'data.libraryRemoteAdditionsCount')
+if [ "$DISMISS_BADGE" != "absent" ]; then
+    echo "ERROR: expected libraryRemoteAdditionsCount null after dismiss, got '$DISMISS_BADGE'"
+    exit 1
+fi
+echo "  OK: badge cleared after dismiss"
+
+take_screenshot "delta-sync-additions-dismissed"
+
 echo "=== sync-from-drive — fixture serves untagged change, expect filtered to noChanges (#273) ==="
 DROP_OUT=$("$CLI_BIN" sync-from-drive --socket "$SOCKET")
 echo "$DROP_OUT"

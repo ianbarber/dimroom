@@ -23,6 +23,9 @@ SEED_SRC="$REPO_ROOT/fixtures/library-seed"
 WORK_DIR="$REPO_ROOT/.artifacts/harness-settings"
 CATALOG_PATH="$WORK_DIR/catalog.sqlite"
 PREVIEW_CACHE="$WORK_DIR/previews"
+# Scope the originals staging + LRU cache under $WORK_DIR so the
+# clear-originals-cache step can't touch the user's real
+# ~/Library/Application Support/Dimroom/originals (issue #289).
 ORIGINALS_CACHE="$WORK_DIR/originals"
 ORIGINALS_INDEX="$ORIGINALS_CACHE/index.json"
 SOCKET="/tmp/dimroom-harness-settings-$$.sock"
@@ -57,9 +60,9 @@ launch_app() {
     # `--originals-cache` pins the LRU cache to $WORK_DIR so the eviction
     # assertion below inspects our pre-seeded index, not the user's real
     # cache; DIMROOM_ORIGINALS_DIR keeps import-staging out of Application
-    # Support too. (This scoping overlaps with issue #289 — see PR notes.)
+    # Support too (the scoping itself comes from issue #289).
     DIMROOM_HARNESS_SOCKET="$SOCKET" \
-    DIMROOM_ORIGINALS_DIR="$ORIGINALS_CACHE" \
+        DIMROOM_ORIGINALS_DIR="$ORIGINALS_CACHE" \
         "$APP_BIN" --harness \
         --fixture-catalog "$CATALOG_PATH" \
         --preview-cache "$PREVIEW_CACHE" \
@@ -125,9 +128,46 @@ seed_originals_cache() {
 EOF
 }
 
+# Regression guard for issue #289: after clear-originals-cache the scoped
+# cache dir under $WORK_DIR must hold no cached originals — only the
+# regenerated empty index.json. The presence of that index.json is the
+# positive signal that the app actually used the scoped dir: if scoping
+# ever regresses, the app clears the user's real cache and writes its
+# index.json there instead, leaving this dir without one — so the
+# mandatory index.json check below fails loudly.
+assert_originals_cleared_under_workdir() {
+    if [ ! -d "$ORIGINALS_CACHE" ]; then
+        echo "ERROR: scoped originals dir $ORIGINALS_CACHE missing — cache was not scoped to \$WORK_DIR"
+        exit 1
+    fi
+    local stray
+    stray=$(find "$ORIGINALS_CACHE" -type f ! -name index.json | wc -l | tr -d ' ')
+    if [ "$stray" != "0" ]; then
+        echo "ERROR: expected no cached originals under $ORIGINALS_CACHE, found $stray"
+        find "$ORIGINALS_CACHE" -type f ! -name index.json
+        exit 1
+    fi
+    # index.json MUST exist: clear-originals-cache writes it into the scoped
+    # dir unconditionally (an empty cache serialises to {"entries":{}}). Its
+    # absence means the app wrote its cache somewhere else (the real
+    # ~/Library/.../originals) — i.e. scoping regressed. Fail loudly.
+    if [ ! -f "$ORIGINALS_CACHE/index.json" ]; then
+        echo "ERROR: $ORIGINALS_CACHE/index.json missing — app wrote its cache elsewhere; scoping regressed"
+        exit 1
+    fi
+    # `entries` is a dict, not a list — an empty cache serialises to {}.
+    local entries
+    entries=$("$REPO_ROOT/bin/harness-json-extract" 'entries' < "$ORIGINALS_CACHE/index.json")
+    if [ "$entries" != "{}" ]; then
+        echo "ERROR: expected empty index entries {} after clear, got '$entries'"
+        exit 1
+    fi
+    echo "  OK: originals cache empty under \$WORK_DIR after clear"
+}
+
 echo "=== Seeding catalog from $SEED_SRC ==="
 rm -rf "$WORK_DIR"
-mkdir -p "$WORK_DIR" "$SCREENSHOT_DIR"
+mkdir -p "$WORK_DIR" "$ORIGINALS_CACHE" "$SCREENSHOT_DIR"
 "$FIXTURE_BIN" seed \
     --catalog "$CATALOG_PATH" \
     --cache "$PREVIEW_CACHE" \
@@ -248,6 +288,7 @@ if ! echo "$CLEAR_OUT" | grep -q '"ok"'; then
     exit 1
 fi
 echo "  OK: clear-originals-cache returned ok"
+assert_originals_cleared_under_workdir
 
 # clearOriginalsCache is a content-only wipe: it must not reset unrelated
 # settings. libraryGridColumns was set to 6 above; assert it survives the

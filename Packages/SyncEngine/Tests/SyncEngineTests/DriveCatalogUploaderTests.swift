@@ -98,6 +98,65 @@ final class DriveCatalogUploaderTests: XCTestCase {
             body.contains("\"dimroom_photo_count\":\"42\""),
             "expected dimroom_photo_count='42' (string-typed appProperty): \(body)"
         )
+        // Issue #273: every dimroom-uploaded file (including the catalog
+        // snapshot) carries the shared `dimroom: 1` marker so the
+        // ChangePoller can drop changes for files outside /PhotoTool/.
+        XCTAssertTrue(
+            body.contains("\"dimroom\":\"1\""),
+            "expected dimroom marker in catalog upload metadata: \(body)"
+        )
+    }
+
+    // MARK: - Upload: create without photoCount stamps marker
+
+    func testUploadCreateStillStampsDimroomMarkerWhenPhotoCountIsNil() async throws {
+        // Issue #273: the marker must be present even when the publisher
+        // doesn't supply a photo count (which previously caused the
+        // entire `appProperties` dict to be omitted).
+        let snapshotPath = try writeSnapshotFile()
+        defer { try? FileManager.default.removeItem(atPath: snapshotPath) }
+
+        let http = RoutingStubHTTPClient()
+        http.route(method: "GET", urlContains: "'PhotoTool'",
+                   response: .init(status: 200, body: folderListBody(id: "id-photo", name: "PhotoTool")))
+        http.route(method: "GET", urlContains: "'catalog'",
+                   response: .init(status: 200, body: folderListBody(id: "id-cat", name: "catalog")))
+        http.route(method: "POST", urlContains: "/upload/drive/v3/files",
+                   response: .init(status: 200, body: uploadResponseBody(id: "drive-new-2")))
+
+        let resolver = DriveFolderResolver(
+            session: sessionWith(client: http),
+            root: .folderId("root"),
+            retryPolicy: RetryPolicy(maxAttempts: 1, baseDelay: .zero, maxDelay: .zero)
+        )
+        let uploader = DriveCatalogUploader(
+            session: sessionWith(client: http),
+            folderResolver: resolver,
+            retryPolicy: RetryPolicy(maxAttempts: 1, baseDelay: .zero, maxDelay: .zero)
+        )
+
+        let result = try await uploader.upload(
+            snapshotPath: snapshotPath,
+            existingFileId: nil,
+            photoCount: nil
+        )
+        XCTAssertEqual(result.driveFileId, "drive-new-2")
+
+        let posts = http.requestsMatching(method: "POST", urlContains: "/upload/drive/v3/files")
+        XCTAssertEqual(posts.count, 1)
+        let body = String(data: posts[0].body ?? Data(), encoding: .utf8) ?? ""
+        XCTAssertTrue(
+            body.contains("\"appProperties\""),
+            "expected appProperties even when photoCount is nil: \(body)"
+        )
+        XCTAssertTrue(
+            body.contains("\"dimroom\":\"1\""),
+            "expected dimroom marker when photoCount is nil: \(body)"
+        )
+        XCTAssertFalse(
+            body.contains("\"dimroom_photo_count\""),
+            "must not stamp photo count when caller didn't supply one: \(body)"
+        )
     }
 
     // MARK: - Upload: update
@@ -143,6 +202,10 @@ final class DriveCatalogUploaderTests: XCTestCase {
         XCTAssertTrue(
             body.contains("\"dimroom_photo_count\":\"17\""),
             "PATCH must refresh photo count: \(body)"
+        )
+        XCTAssertTrue(
+            body.contains("\"dimroom\":\"1\""),
+            "PATCH must (re-)stamp the dimroom marker (#273): \(body)"
         )
     }
 

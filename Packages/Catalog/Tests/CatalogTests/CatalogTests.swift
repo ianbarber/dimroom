@@ -51,6 +51,30 @@ final class CatalogDatabaseTests: XCTestCase {
         XCTAssertEqual(fetched?.rating, 0)
         XCTAssertEqual(fetched?.rotation, 0)
         XCTAssertNil(fetched?.deletedAt)
+        XCTAssertNil(fetched?.lensMake)
+        XCTAssertNil(fetched?.lensModel)
+    }
+
+    func testLensFieldsRoundTrip() throws {
+        let db = try makeDatabase()
+        let asset = Asset(
+            contentHash: "lensrt",
+            originalFilename: "IMG_0002.CR3",
+            captureDate: Date(timeIntervalSince1970: 1_700_000_000),
+            sourceType: .digital,
+            sourceDevice: "Canon EOS R6",
+            lensMake: "Canon",
+            lensModel: "RF 50mm F1.2 L USM",
+            width: 6000,
+            height: 4000,
+            rawFormat: "CR3",
+            bytes: 25_000_000
+        )
+        try db.insertAsset(asset)
+
+        let fetched = try db.fetchAsset(byHash: "lensrt")
+        XCTAssertEqual(fetched?.lensMake, "Canon")
+        XCTAssertEqual(fetched?.lensModel, "RF 50mm F1.2 L USM")
     }
 
     // MARK: - Duplicate Hash Rejection

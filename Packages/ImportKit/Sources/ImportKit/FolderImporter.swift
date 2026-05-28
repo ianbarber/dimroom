@@ -74,6 +74,8 @@ public final class FolderImporter {
                 captureDate: metadata.captureDate,
                 sourceType: .digital,
                 sourceDevice: metadata.sourceDevice,
+                lensMake: metadata.lensMake,
+                lensModel: metadata.lensModel,
                 width: metadata.width,
                 height: metadata.height,
                 rawFormat: SupportedExtensions.isRaw(ext) ? ext : nil,

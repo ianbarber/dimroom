@@ -36,6 +36,7 @@ final class HarnessStubChangesFetcher: DriveChangesFetching, @unchecked Sendable
         var parents: [String]?
         var removed: Bool?
         var trashed: Bool?
+        var appProperties: [String: String]?
     }
 
     struct FixturePage: Codable {
@@ -81,7 +82,8 @@ final class HarnessStubChangesFetcher: DriveChangesFetching, @unchecked Sendable
                 name: change.name,
                 mimeType: change.mimeType,
                 modifiedTime: change.modifiedTime,
-                parents: change.parents ?? []
+                parents: change.parents ?? [],
+                appProperties: change.appProperties ?? [:]
             )
         }
         return DriveChangesPage(

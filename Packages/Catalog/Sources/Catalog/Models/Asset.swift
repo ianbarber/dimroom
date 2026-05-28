@@ -9,6 +9,8 @@ public struct Asset: Identifiable, Codable, Sendable {
     public var importedDate: Date
     public var sourceType: SourceType
     public var sourceDevice: String?
+    public var lensMake: String?
+    public var lensModel: String?
     public var width: Int
     public var height: Int
     public var rawFormat: String?
@@ -33,6 +35,8 @@ public struct Asset: Identifiable, Codable, Sendable {
         importedDate: Date = Date(),
         sourceType: SourceType,
         sourceDevice: String? = nil,
+        lensMake: String? = nil,
+        lensModel: String? = nil,
         width: Int,
         height: Int,
         rawFormat: String? = nil,
@@ -51,6 +55,8 @@ public struct Asset: Identifiable, Codable, Sendable {
         self.importedDate = importedDate
         self.sourceType = sourceType
         self.sourceDevice = sourceDevice
+        self.lensMake = lensMake
+        self.lensModel = lensModel
         self.width = width
         self.height = height
         self.rawFormat = rawFormat

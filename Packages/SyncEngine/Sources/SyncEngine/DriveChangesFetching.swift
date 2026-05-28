@@ -29,6 +29,7 @@ public struct DriveChange: Sendable, Equatable {
     public let mimeType: String?
     public let modifiedTime: String?
     public let parents: [String]
+    public let appProperties: [String: String]
 
     public init(
         fileId: String,
@@ -37,7 +38,8 @@ public struct DriveChange: Sendable, Equatable {
         name: String? = nil,
         mimeType: String? = nil,
         modifiedTime: String? = nil,
-        parents: [String] = []
+        parents: [String] = [],
+        appProperties: [String: String] = [:]
     ) {
         self.fileId = fileId
         self.removed = removed
@@ -46,6 +48,7 @@ public struct DriveChange: Sendable, Equatable {
         self.mimeType = mimeType
         self.modifiedTime = modifiedTime
         self.parents = parents
+        self.appProperties = appProperties
     }
 }
 

@@ -74,6 +74,7 @@ public actor DriveUploader {
         let appProperties: [String: String] = [
             "contentHash": ref.contentHash,
             "dimroomAssetId": ref.assetId.uuidString,
+            DriveAppProperties.dimroomMarkerKey: DriveAppProperties.dimroomMarkerValue,
         ]
 
         if ref.bytes <= simpleUploadThreshold {

@@ -39,6 +39,6 @@ struct SettingsRootView: View {
             DevelopSettingsTab(store: store)
                 .tabItem { Label("Develop", systemImage: "slider.horizontal.3") }
         }
-        .frame(width: 520, height: 360)
+        .frame(width: 520, height: 520)
     }
 }

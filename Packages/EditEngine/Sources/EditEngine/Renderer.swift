@@ -227,18 +227,34 @@ public enum Renderer {
         chrominance: Double
     ) -> CIImage {
         guard luminance != 0 || chrominance != 0 else { return image }
-        // CINoiseReduction packs both luma and chroma NR into a single pass:
-        // `inputNoiseLevel` is the chroma noise threshold (more aggressive
-        // chroma denoising as it climbs), and `inputSharpness` is how much
-        // luminance detail to keep afterward (lower = more luma smoothing).
-        // Map chroma 0…100 → 0…0.1 and luma 0…100 → 0.9…0.4 (inverted) so
-        // a slider at zero leaves that axis at the filter's near-identity
-        // value while the other slider acts independently.
-        let filter = CIFilter(name: "CINoiseReduction")!
-        filter.setValue(image, forKey: kCIInputImageKey)
-        filter.setValue(chrominance / 1000.0, forKey: "inputNoiseLevel")
-        filter.setValue(0.9 - (luminance / 100.0) * 0.5, forKey: "inputSharpness")
-        return filter.outputImage!.cropped(to: image.extent)
+        guard let kernel = NoiseReductionKernel.kernel else { return image }
+
+        // Two genuinely independent axes. A single small blur supplies the
+        // smoothed channels; `NoiseReductionKernel` then pulls only the
+        // Rec.601 luma channel toward it by `lumaBlend` and only the Cb/Cr
+        // pair by `chromaBlend`. The recombination keeps the untouched axis
+        // bit-stable (luma blending leaves B−R fixed, chroma blending leaves
+        // luma fixed), so a slider at zero is a true no-op on the other axis.
+        //
+        // The previous single `CINoiseReduction` pass could not do this: its
+        // `inputNoiseLevel` gated smoothing for both channels off the chroma
+        // slider, while the luma slider drove `inputSharpness` and so could
+        // only sharpen — raising luma variance instead of lowering it (#303).
+        let lumaBlend = luminance / 100.0
+        let chromaBlend = chrominance / 100.0
+
+        // Clamp before blurring so edge pixels aren't pulled toward the
+        // transparent black outside the extent.
+        let blur = CIFilter(name: "CIGaussianBlur")!
+        blur.setValue(image.clampedToExtent(), forKey: kCIInputImageKey)
+        blur.setValue(2.0, forKey: "inputRadius")
+        let blurred = blur.outputImage!.cropped(to: image.extent)
+
+        let result = kernel.apply(
+            extent: image.extent,
+            arguments: [image, blurred, lumaBlend, chromaBlend]
+        )
+        return (result ?? image).cropped(to: image.extent)
     }
 
     private static func applySplitTone(

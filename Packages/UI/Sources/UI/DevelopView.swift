@@ -117,8 +117,6 @@ public struct DevelopView: View {
                 slider("Softness", keyPath: \.vignetteSoftness, range: 0...100, step: 1, identity: 50)
             }
 
-            hslSection
-
             sliderSection("Geometry") {
                 slider("Vertical", keyPath: \.perspectiveVertical, range: -100...100, step: 1, identity: 0)
                 slider("Horizontal", keyPath: \.perspectiveHorizontal, range: -100...100, step: 1, identity: 0)

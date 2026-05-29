@@ -627,6 +627,12 @@ final class RendererTests: XCTestCase {
     /// never crushed all the way to RGB=0. Regression for #240, where
     /// an alpha-driven tint made the output translucent and the
     /// underlying dark view background showed through as pure black.
+    ///
+    /// The floor is `> 5` rather than `> 0` (#316): the recalibrated
+    /// curve drives a 128-grey corner to ≈13 at amount=-100, so a small
+    /// positive floor guards against a future tune drifting the extreme
+    /// back toward crushed black while staying comfortably below the
+    /// expected value.
     func testFullNegativeVignetteDoesNotCrushCornersToBlack() {
         let source = makeMidGreyImage()
         let cornerX = 2
@@ -638,16 +644,16 @@ final class RendererTests: XCTestCase {
         let resCorner = samplePixel(image: result, x: cornerX, y: cornerY, context: ctx)
 
         XCTAssertGreaterThan(
-            Int(resCorner.r), 0,
-            "Corner red channel should retain some source signal at amount=-100"
+            Int(resCorner.r), 5,
+            "Corner red channel should retain source signal (not crushed) at amount=-100"
         )
         XCTAssertGreaterThan(
-            Int(resCorner.g), 0,
-            "Corner green channel should retain some source signal at amount=-100"
+            Int(resCorner.g), 5,
+            "Corner green channel should retain source signal (not crushed) at amount=-100"
         )
         XCTAssertGreaterThan(
-            Int(resCorner.b), 0,
-            "Corner blue channel should retain some source signal at amount=-100"
+            Int(resCorner.b), 5,
+            "Corner blue channel should retain source signal (not crushed) at amount=-100"
         )
         // Output must be fully opaque — the previous implementation made
         // corners translucent so the view background bled through.
@@ -658,6 +664,12 @@ final class RendererTests: XCTestCase {
     /// the magnitude of `vignetteAmount`. Regression for #240 where
     /// any negative value saturated to fully black, eliminating the
     /// difference between -10 and -100.
+    ///
+    /// The `> 70` floor on `largeDelta` (#316) locks in a strong extreme:
+    /// the recalibrated curve darkens a 128-grey corner by ≈115 at
+    /// amount=-100, so a meaningful floor catches a regression that
+    /// flattens the curve back to the "imperceptible at the extremes"
+    /// state this issue fixed — `largeDelta > smallDelta` alone did not.
     func testNegativeVignetteIsMonotonicInStrength() {
         let source = makeMidGreyImage()
         let cornerX = 2
@@ -677,10 +689,17 @@ final class RendererTests: XCTestCase {
             largeDelta, smallDelta,
             "amount=-100 must darken corners more than amount=-10 — got -10:\(smallDelta) vs -100:\(largeDelta)"
         )
+        XCTAssertGreaterThan(
+            largeDelta, 70,
+            "amount=-100 must produce a strong (not imperceptible) darkening — got \(largeDelta)"
+        )
     }
 
     /// Mirror of the negative test: +100 must brighten the corner
-    /// more than +10, but never push it to fully white.
+    /// more than +10, but never push it to fully white. The `> 70`
+    /// floor on `largeDelta` (#316) locks in a strong-but-usable extreme
+    /// (the recalibrated curve lifts a 128-grey corner by ≈114 at
+    /// amount=+100) the same way the negative test does.
     func testPositiveVignetteIsMonotonicAndNotBlownOut() {
         let source = makeMidGreyImage()
         let cornerX = 2
@@ -699,6 +718,10 @@ final class RendererTests: XCTestCase {
         XCTAssertGreaterThan(
             largeDelta, smallDelta,
             "amount=+100 must brighten corners more than amount=+10"
+        )
+        XCTAssertGreaterThan(
+            largeDelta, 70,
+            "amount=+100 must produce a strong (not imperceptible) brightening — got \(largeDelta)"
         )
         XCTAssertLessThan(
             Int(largeCorner.r), 255,

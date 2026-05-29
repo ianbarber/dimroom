@@ -313,6 +313,13 @@ jobs:
             exit 0
           fi
           bin/harness-develop-split-tone-flow.sh
+      - name: Run harness develop split tone keyboard flow
+        run: |
+          if [ ! -x bin/harness-develop-split-tone-keyboard-flow.sh ]; then
+            echo "No harness develop-split-tone-keyboard flow script yet — skipping."
+            exit 0
+          fi
+          bin/harness-develop-split-tone-keyboard-flow.sh
       - name: Run harness export empty flow
         run: |
           if [ ! -x bin/harness-export-empty-flow.sh ]; then
@@ -327,6 +334,13 @@ jobs:
             exit 0
           fi
           bin/harness-keychain-skip-flow.sh
+      - name: Run harness lens profile flow
+        run: |
+          if [ ! -x bin/harness-lens-profile-flow.sh ]; then
+            echo "No harness lens-profile flow script yet — skipping."
+            exit 0
+          fi
+          bin/harness-lens-profile-flow.sh
       - name: Run harness restore-catalog connect flow
         run: |
           if [ ! -x bin/harness-restore-catalog-connect-flow.sh ]; then
@@ -334,3 +348,17 @@ jobs:
             exit 0
           fi
           bin/harness-restore-catalog-connect-flow.sh
+      - name: Run harness restore-catalog connect in-session flow
+        run: |
+          if [ ! -x bin/harness-restore-catalog-connect-in-session-flow.sh ]; then
+            echo "No harness restore-catalog-connect-in-session flow script yet — skipping."
+            exit 0
+          fi
+          bin/harness-restore-catalog-connect-in-session-flow.sh
+      - name: Run harness settings flow
+        run: |
+          if [ ! -x bin/harness-settings-flow.sh ]; then
+            echo "No harness settings flow script yet — skipping."
+            exit 0
+          fi
+          bin/harness-settings-flow.sh

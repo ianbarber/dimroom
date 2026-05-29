@@ -23,6 +23,10 @@ SCREENSHOT_DIR="${SCREENSHOT_DIR:-$REPO_ROOT/.artifacts/restore-catalog-connect}
 WORK_DIR="$REPO_ROOT/.artifacts/harness-restore-catalog-connect"
 LOCAL_CATALOG="$WORK_DIR/local/catalog.sqlite"
 LOCAL_PREVIEW_CACHE="$WORK_DIR/local-previews"
+# Scope the originals staging dir + LRU originals cache under $WORK_DIR so
+# any originals fetch writes its downloads + index.json here, never into the
+# user's real ~/Library/Application Support/Dimroom/originals (issue #331).
+ORIGINALS_CACHE="$WORK_DIR/originals"
 SOCKET="/tmp/dimroom-harness-restore-catalog-connect-$$.sock"
 APP_PID=""
 
@@ -94,7 +98,7 @@ rm -rf "$WORK_DIR"
 # create the file later (mirrors real first-launch where
 # `resolveCatalogPath` mkdir's the default path). We do NOT create the
 # catalog file itself — that's what triggers `.offerConnectNoAuth`.
-mkdir -p "$WORK_DIR/local" "$SCREENSHOT_DIR"
+mkdir -p "$WORK_DIR/local" "$ORIGINALS_CACHE" "$SCREENSHOT_DIR"
 
 # ---------------------------------------------------------------------
 # Case 1: user picks "Connect Google Drive…" on the launch alert.
@@ -121,9 +125,11 @@ DIMROOM_HARNESS_SOCKET="$SOCKET" \
 DIMROOM_HARNESS_DRIVE_STUB=1 \
 DIMROOM_HARNESS_AUTO_CONFIRM_CONNECT_FOR_RESTORE=connect \
 DIMROOM_HARNESS_AUTO_CONFIRM_RESTORE=1 \
+DIMROOM_ORIGINALS_DIR="$ORIGINALS_CACHE" \
     "$APP_BIN" --harness \
     --fixture-catalog "$LOCAL_CATALOG" \
-    --preview-cache "$LOCAL_PREVIEW_CACHE" &
+    --preview-cache "$LOCAL_PREVIEW_CACHE" \
+    --originals-cache "$ORIGINALS_CACHE" &
 APP_PID=$!
 wait_for_socket
 
@@ -164,15 +170,17 @@ stop_app
 
 # Fresh workspace so the launch path again hits `.offerConnectNoAuth`.
 rm -rf "$WORK_DIR"
-mkdir -p "$WORK_DIR/local"
+mkdir -p "$WORK_DIR/local" "$ORIGINALS_CACHE"
 
 echo "=== [skip] Launching app — no local catalog, stub OAuth, auto-confirm=skip ==="
 DIMROOM_HARNESS_SOCKET="$SOCKET" \
 DIMROOM_HARNESS_DRIVE_STUB=1 \
 DIMROOM_HARNESS_AUTO_CONFIRM_CONNECT_FOR_RESTORE=skip \
+DIMROOM_ORIGINALS_DIR="$ORIGINALS_CACHE" \
     "$APP_BIN" --harness \
     --fixture-catalog "$LOCAL_CATALOG" \
-    --preview-cache "$LOCAL_PREVIEW_CACHE" &
+    --preview-cache "$LOCAL_PREVIEW_CACHE" \
+    --originals-cache "$ORIGINALS_CACHE" &
 APP_PID=$!
 wait_for_socket
 

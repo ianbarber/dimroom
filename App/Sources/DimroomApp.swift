@@ -1334,10 +1334,50 @@ final class AppDelegate: NSObject, NSApplicationDelegate, ObservableObject {
     /// against the freshly-opened one. Extracted from
     /// `reloadCatalogFromDrive` so the swap mechanics live next to the
     /// equivalent launch-time wiring in `applicationDidFinishLaunching`.
+    ///
+    /// Resolves the originals-cache inputs from `ProcessInfo`/Settings
+    /// and then delegates the actual teardown to
+    /// `rewireForReloadedCatalog`. Keeping the `ProcessInfo` reads here
+    /// lets the rewire kernel be driven directly by the Layer A leak
+    /// tests (#321) without standing up the launch environment.
     @MainActor
     private func applyReloadedCatalog(
         _ newCatalog: CatalogDatabase,
         previewStore: PreviewStore
+    ) async {
+        let args = ProcessInfo.processInfo.arguments
+        let cacheDir = resolveOriginalsCacheDirectory(from: args)
+        let budget = resolveOriginalsCacheBudget()
+        let downloader: OriginalsDownloader = resolveHarnessDownloader()
+            ?? driveClient
+            ?? UnavailableOriginalsDownloader()
+        await rewireForReloadedCatalog(
+            newCatalog,
+            previewStore: previewStore,
+            cacheDirectory: cacheDir,
+            budgetBytes: budget,
+            originalsDownloader: downloader,
+            driveClient: driveClient
+        )
+    }
+
+    /// The teardown + rewire kernel of the hot-reload swap, with the
+    /// originals-cache inputs and the `DriveClient` injected rather than
+    /// resolved from `ProcessInfo`. Split out of `applyReloadedCatalog`
+    /// so `CatalogReloadLeakTests` can drive the real property teardown
+    /// against a seeded old-catalog object graph and assert the previous
+    /// `CatalogDatabase` / `OriginalsCoordinator` / `ChangePoller`
+    /// deallocate — pinning the no-leak property #259 called for but
+    /// #314 shipped without (#321). `internal`, not `private`, only so
+    /// the test target (`@testable import Dimroom`) can call it.
+    @MainActor
+    func rewireForReloadedCatalog(
+        _ newCatalog: CatalogDatabase,
+        previewStore: PreviewStore,
+        cacheDirectory: URL,
+        budgetBytes: Int64,
+        originalsDownloader: OriginalsDownloader,
+        driveClient: DriveClient?
     ) async {
         // 1. Stop the in-flight poller event subscription and the
         //    publisher debouncer so they can't fire against the old
@@ -1372,28 +1412,34 @@ final class AppDelegate: NSObject, NSApplicationDelegate, ObservableObject {
         developViewModel.attach(undoStack: undoStack)
 
         // 4. Rebuild the originals coordinator + cache against the new
-        //    catalog. Same resolvers `applicationDidFinishLaunching`
-        //    uses, so the on-disk LRU history survives.
-        let args = ProcessInfo.processInfo.arguments
-        let cacheDir = resolveOriginalsCacheDirectory(from: args)
-        let budget = resolveOriginalsCacheBudget()
-        let downloader: OriginalsDownloader = resolveHarnessDownloader()
-            ?? driveClient
-            ?? UnavailableOriginalsDownloader()
+        //    catalog, using the injected resolvers so the on-disk LRU
+        //    history survives. The coordinator is wired into the view
+        //    models and `originalsCoordinator` *unconditionally* — only
+        //    the cache attach is gated on a successful `OriginalsCache`
+        //    init. `configure` above does not reset the view models'
+        //    `originalFetcher`, so if these assignments were skipped on
+        //    cache-init failure (as they were before #321) the view
+        //    models and `originalsCoordinator` would keep pointing at
+        //    the *previous* catalog's coordinator, pinning the
+        //    swapped-out `CatalogDatabase`. Always binding the new,
+        //    possibly cacheless, coordinator keeps every consumer on the
+        //    current catalog; a cacheless coordinator returns `nil` for
+        //    fetches — the same degraded behaviour the launch path
+        //    produces when the cache can't be created.
         let coordinator = OriginalsCoordinator(catalog: newCatalog)
         if let cache = try? OriginalsCache(
-            directory: cacheDir,
-            budgetBytes: budget,
-            downloader: downloader,
+            directory: cacheDirectory,
+            budgetBytes: budgetBytes,
+            downloader: originalsDownloader,
             onEvict: { [weak coordinator] id in
                 coordinator?.handleEviction(assetId: id)
             }
         ) {
             coordinator.attach(cache: cache)
-            libraryViewModel.originalFetcher = coordinator
-            developViewModel.attach(originalFetcher: coordinator)
-            originalsCoordinator = coordinator
         }
+        libraryViewModel.originalFetcher = coordinator
+        developViewModel.attach(originalFetcher: coordinator)
+        originalsCoordinator = coordinator
 
         // 5. Rebuild the publisher + poller against the new catalog.
         //    Harness flows that drive `reloadCatalogFromDrive` with the
@@ -1401,6 +1447,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, ObservableObject {
         //    via the resolved DriveClient — the same wiring the launch
         //    path uses.
         if let resolvedDriveClient = driveClient {
+            let args = ProcessInfo.processInfo.arguments
             let httpClient = URLSessionHTTPClient()
             let session = AuthorizedSession(client: httpClient, provider: resolvedDriveClient)
             let resolver = DriveFolderResolver(session: session)
@@ -1454,6 +1501,34 @@ final class AppDelegate: NSObject, NSApplicationDelegate, ObservableObject {
         //    `configure(...)` calls above already cleared
         //    `currentAssetId` / `editState`.
         router.route = .library
+    }
+
+    // MARK: - Test helpers
+
+    /// Install a pre-reload object graph so `CatalogReloadLeakTests` can
+    /// drive `rewireForReloadedCatalog` against a realistic "old catalog
+    /// plus derived objects" precondition without standing up
+    /// `applicationDidFinishLaunching`. Mirrors the post-`openCatalog`
+    /// wiring: the coordinator becomes the live `originalFetcher` on both
+    /// view models (which is exactly what turns a missed teardown into a
+    /// leak of the old catalog), and the catalog / publisher / poller /
+    /// events-task occupy the same slots the reload path tears down.
+    /// These slots are `private`, so the test can't seed them directly
+    /// even with `@testable import`; this is the single seam it uses.
+    func installReloadStateForTesting(
+        catalog: CatalogDatabase,
+        coordinator: OriginalsCoordinator,
+        publisher: CatalogPublisher?,
+        poller: ChangePoller?,
+        eventsTask: Task<Void, Never>?
+    ) {
+        self.catalog = catalog
+        self.originalsCoordinator = coordinator
+        self.catalogPublisher = publisher
+        self.changePoller = poller
+        self.changePollerEventsTask = eventsTask
+        libraryViewModel.originalFetcher = coordinator
+        developViewModel.attach(originalFetcher: coordinator)
     }
 
     private func presentSyncConflictAlert(localPending: Bool) {

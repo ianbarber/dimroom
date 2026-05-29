@@ -71,6 +71,34 @@ final class SameSessionRestoreGateTests: XCTestCase {
         XCTAssertFalse(hydrate)
     }
 
+    // MARK: - Destructive-restore guard (#293)
+
+    func testRunSameSessionRestoreFiresWhenPlaceholderEmpty() {
+        // The #283 happy path: launch-time Connect landed, the user
+        // hasn't imported anything, so the empty placeholder is safe to
+        // delete and replace with the remote catalog.
+        XCTAssertTrue(
+            AppDelegate.shouldRunSameSessionRestore(placeholderAssetCount: 0)
+        )
+    }
+
+    func testRunSameSessionRestoreSkippedWhenPlaceholderHasOneAsset() {
+        // The #293 scenario, minimally provoked: a single import between
+        // a failed launch-time OAuth and a menu-driven retry must block
+        // the destructive restore so the user's work survives.
+        XCTAssertFalse(
+            AppDelegate.shouldRunSameSessionRestore(placeholderAssetCount: 1)
+        )
+    }
+
+    func testRunSameSessionRestoreSkippedWhenPlaceholderHasManyAssets() {
+        // Belt-and-braces against a future "only block at threshold N"
+        // regression — any non-zero count must skip the restore.
+        XCTAssertFalse(
+            AppDelegate.shouldRunSameSessionRestore(placeholderAssetCount: 42)
+        )
+    }
+
     // MARK: - Launch-time stub uploader gate (#283)
 
     func testStubUploaderAtLaunchGateOff() {

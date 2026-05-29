@@ -923,6 +923,29 @@ final class AppDelegate: NSObject, NSApplicationDelegate, ObservableObject {
         return false
     }
 
+    /// Guards the destructive half of the same-session restore (#293).
+    /// Returns `true` only when the placeholder catalog is empty.
+    ///
+    /// `runSameSessionRestore()` deletes the local catalog before
+    /// downloading the remote one. That is safe when the placeholder is
+    /// the pristine file the launch path opened, but a non-zero
+    /// live-asset count means the user imported into it between a failed
+    /// launch-time OAuth and a menu-driven retry — work that only exists
+    /// locally. In that case we'd rather skip the restore and keep the
+    /// `assets` rows the user can't recover than clobber them with the
+    /// remote catalog; the regular `CatalogPublisher` cycle pushes the
+    /// interim imports to Drive on its next run.
+    ///
+    /// On a `countAssets()` read failure the caller passes `0` (the
+    /// `try?` / `?? 0` collapse), so we lean toward running the restore
+    /// — preserving the #283 behaviour rather than letting a transient
+    /// read error permanently block the in-session restore.
+    nonisolated static func shouldRunSameSessionRestore(
+        placeholderAssetCount: Int
+    ) -> Bool {
+        placeholderAssetCount == 0
+    }
+
     /// Tears down the placeholder catalog opened during the launch
     /// path and re-runs `CatalogPublisher.restoreIfNeeded` against a
     /// live `DriveClient`, then re-wires the view models so the
@@ -937,9 +960,24 @@ final class AppDelegate: NSObject, NSApplicationDelegate, ObservableObject {
     /// - If `restoreIfNeeded` throws, `offerFreshStartAfterFailure`
     ///   surfaces the same alert the launch path uses and the
     ///   placeholder catalog is re-opened so the app stays usable.
+    /// - If the placeholder already holds imported assets (#293), the
+    ///   function bails before teardown, leaving the user's interim work
+    ///   and the live launch-path catalog wiring untouched.
     private func runSameSessionRestore() async {
         guard let catalogPath = resolvedCatalogPath else { return }
         guard let driveClient else { return }
+
+        // Read the live-asset count BEFORE the teardown below drops
+        // `catalog`; reading after would always see `nil → 0` and the
+        // guard would never fire. A non-empty placeholder means the user
+        // imported between a failed launch-time OAuth and this retry, so
+        // we skip the destructive restore rather than clobber their work
+        // (#293). The existing launch-path catalog wiring stays live.
+        let placeholderAssetCount = (try? catalog?.countAssets()) ?? 0
+        guard Self.shouldRunSameSessionRestore(placeholderAssetCount: placeholderAssetCount) else {
+            print("[Dimroom] same-session restore skipped: placeholder catalog has \(placeholderAssetCount) asset(s), keeping local work")
+            return
+        }
 
         // Drop refs that pin the placeholder catalog before deleting
         // the file. GRDB releases the underlying SQLite connection on

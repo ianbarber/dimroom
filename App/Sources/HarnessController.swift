@@ -277,6 +277,15 @@ final class HarnessController: @unchecked Sendable {
         case .fetchOriginal(let assetId):
             return await handleFetchOriginal(assetId: assetId)
 
+        case .nudgeColorWheel(let assetId, let hueParameter, let saturationParameter, let key, let shift):
+            return await handleNudgeColorWheel(
+                assetId: assetId,
+                hueParameter: hueParameter,
+                saturationParameter: saturationParameter,
+                key: key,
+                shift: shift
+            )
+
         case .setEditParameter(let assetId, let parameter, let value):
             return await handleSetEditParameter(assetId: assetId, parameter: parameter, value: value)
 
@@ -1248,6 +1257,63 @@ final class HarnessController: @unchecked Sendable {
         // which debounces slider/crop mutations to one `.editSave` per
         // save window. Pushing here as well would produce two undo
         // entries per setCrop.
+        return .ok()
+    }
+
+    /// Keyboard / VoiceOver path for `ColorWheelControl` (#305). Reads the
+    /// wheel's current hue/saturation off the live edit state, applies the
+    /// same `ColorWheelKeyboardModel` the view's `onKeyPress` does, and
+    /// writes the changed axis back through `setParameter`. Synthesising
+    /// NSEvents into the focused view is unreliable in harness mode (see
+    /// `postMenuAction`), so this drives the shared model directly.
+    private func handleNudgeColorWheel(
+        assetId: UUID,
+        hueParameter: String,
+        saturationParameter: String,
+        key: String,
+        shift: Bool
+    ) async -> Response {
+        guard let hueKeyPath = DevelopViewModel.keyPath(forParameter: hueParameter) else {
+            return .error("unknown parameter: \(hueParameter)")
+        }
+        guard let satKeyPath = DevelopViewModel.keyPath(forParameter: saturationParameter) else {
+            return .error("unknown parameter: \(saturationParameter)")
+        }
+        let alreadyActive: Bool = await MainActor.run {
+            if developViewModel.currentAssetId != assetId {
+                router.route = .develop
+                return false
+            }
+            return true
+        }
+        if !alreadyActive {
+            await developViewModel.activate(assetId: assetId)
+        }
+        if key == "reset" {
+            await MainActor.run {
+                developViewModel.resetParameter(hueKeyPath)
+                developViewModel.resetParameter(satKeyPath)
+            }
+            return .ok()
+        }
+        guard let arrow = ColorWheelKeyboardModel.ArrowKey(wireName: key) else {
+            return .error("unknown key '\(key)'; expected left, right, up, down, or reset")
+        }
+        await MainActor.run {
+            let hue = developViewModel.editState[keyPath: hueKeyPath]
+            let saturation = developViewModel.editState[keyPath: satKeyPath]
+            let (newHue, newSaturation) = ColorWheelKeyboardModel.nudge(
+                hue: hue,
+                saturation: saturation,
+                key: arrow,
+                shift: shift
+            )
+            if shift {
+                developViewModel.setParameter(satKeyPath, value: newSaturation)
+            } else {
+                developViewModel.setParameter(hueKeyPath, value: newHue)
+            }
+        }
         return .ok()
     }
 

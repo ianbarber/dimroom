@@ -101,6 +101,53 @@ final class ColorWheelControlSnapshotTests: XCTestCase {
         }
     }
 
+    /// Highlights wheel holding keyboard focus (#305) — pins the accent
+    /// focus ring drawn around the focused wheel. Uses
+    /// `focusedAppearanceOverride` because an offscreen `NSHostingView`
+    /// can't drive `@FocusState`. Shadows is left unfocused so the diff
+    /// between the two is what the ring contributes.
+    @MainActor
+    func test_split_toning_wheels_focused_highlights() throws {
+        let panel = VStack(alignment: .leading, spacing: 6) {
+            Text("Split Toning")
+                .font(.system(size: 11, weight: .semibold))
+                .foregroundStyle(Color(white: 0.5))
+                .textCase(.uppercase)
+            ColorWheelControl(
+                label: "Highlights",
+                hue: 30,
+                saturation: 50,
+                onHueChange: { _ in },
+                onSaturationChange: { _ in },
+                onReset: { },
+                focusedAppearanceOverride: true
+            )
+            ColorWheelControl(
+                label: "Shadows",
+                hue: 210,
+                saturation: 50,
+                onHueChange: { _ in },
+                onSaturationChange: { _ in },
+                onReset: { }
+            )
+        }
+        .padding(12)
+        .frame(width: 256)
+        .background(Color(white: 0.1))
+
+        let image = renderFixedPixelImage(
+            for: panel,
+            size: CGSize(width: 280, height: 360)
+        )
+
+        runAssertSnapshot {
+            assertSnapshot(
+                of: image,
+                as: .image(precision: 0.99, perceptualPrecision: 0.98)
+            )
+        }
+    }
+
     /// Both wheels at identity (hue=0, sat=0). Pins the empty-state
     /// indicator-at-centre rendering.
     @MainActor

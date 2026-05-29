@@ -19,6 +19,17 @@ struct ColorWheelControl: View {
     var onHueChange: (Double) -> Void
     var onSaturationChange: (Double) -> Void
     var onReset: () -> Void
+    /// Forces the focus-ring appearance for snapshot tests. Offscreen
+    /// `NSHostingView`s can't drive `@FocusState`, so there is no other
+    /// way to pin the focused look. `nil` (the default) defers to the
+    /// live focus state.
+    var focusedAppearanceOverride: Bool? = nil
+
+    @FocusState private var isFocused: Bool
+
+    private var showsFocusRing: Bool {
+        focusedAppearanceOverride ?? isFocused
+    }
 
     private static let wheelSize: CGFloat = 110
     private static let indicatorDiameter: CGFloat = 12
@@ -59,11 +70,82 @@ struct ColorWheelControl: View {
             Circle().stroke(Color(white: 0.2), lineWidth: 1)
         )
         .overlay(indicator)
+        .overlay(focusRing)
         .contentShape(Circle())
         .gesture(dragGesture)
         .simultaneousGesture(
             TapGesture(count: 2).onEnded { onReset() }
         )
+        .focusable()
+        .focused($isFocused)
+        .onKeyPress(keys: [.leftArrow, .rightArrow, .upArrow, .downArrow, "0"]) { press in
+            handleKeyPress(press)
+        }
+        .accessibilityElement(children: .ignore)
+        .accessibilityLabel("\(label) colour")
+        .accessibilityValue(accessibilityValueText)
+        .accessibilityAdjustableAction { direction in
+            switch direction {
+            case .increment: onHueChange(ColorWheelKeyboardModel.nudge(
+                hue: hue, saturation: saturation, key: .up, shift: false
+            ).hue)
+            case .decrement: onHueChange(ColorWheelKeyboardModel.nudge(
+                hue: hue, saturation: saturation, key: .down, shift: false
+            ).hue)
+            @unknown default: break
+            }
+        }
+    }
+
+    /// Accent ring drawn just outside the wheel while it holds keyboard
+    /// focus. `.focusable()` alone doesn't paint a ring around custom
+    /// content, so we draw our own.
+    @ViewBuilder
+    private var focusRing: some View {
+        if showsFocusRing {
+            Circle()
+                .strokeBorder(Color.accentColor, lineWidth: 2)
+                .padding(-3)
+        }
+    }
+
+    private var accessibilityValueText: String {
+        "hue \(Int(hue.rounded()))°, saturation \(Int(saturation.rounded()))"
+    }
+
+    /// Plain arrows nudge hue; shift+arrows nudge saturation; `0` resets.
+    /// Mirrors `ColorWheelKeyboardModel`, which the harness drives too.
+    private func handleKeyPress(_ press: KeyPress) -> KeyPress.Result {
+        let character = press.key.character
+        if character == "0" {
+            onReset()
+            return .handled
+        }
+        let arrow: ColorWheelKeyboardModel.ArrowKey
+        if character == KeyEquivalent.leftArrow.character {
+            arrow = .left
+        } else if character == KeyEquivalent.rightArrow.character {
+            arrow = .right
+        } else if character == KeyEquivalent.upArrow.character {
+            arrow = .up
+        } else if character == KeyEquivalent.downArrow.character {
+            arrow = .down
+        } else {
+            return .ignored
+        }
+        let shift = press.modifiers.contains(.shift)
+        let (newHue, newSaturation) = ColorWheelKeyboardModel.nudge(
+            hue: hue,
+            saturation: saturation,
+            key: arrow,
+            shift: shift
+        )
+        if shift {
+            onSaturationChange(newSaturation)
+        } else {
+            onHueChange(newHue)
+        }
+        return .handled
     }
 
     private var indicator: some View {

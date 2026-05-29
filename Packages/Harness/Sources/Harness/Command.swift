@@ -145,6 +145,18 @@ public enum Command: Codable, Sendable, Equatable {
     /// dialog branch). NSOpenPanel can't be driven from the harness, so
     /// `destinationPath` substitutes for the panel's URL output (#242).
     case completeExportSheet(destinationPath: String, format: String, applyEdits: Bool)
+    /// Drives the `ColorWheelControl` keyboard path (#305) without
+    /// synthesising NSEvents — the harness has no reliable way to land
+    /// SwiftUI focus on a child view (see `postMenuAction`). The handler
+    /// reads the wheel's current hue/saturation off the live edit state,
+    /// applies `ColorWheelKeyboardModel.nudge` (the same function the
+    /// view's `onKeyPress` calls), and writes the changed axis back
+    /// through `DevelopViewModel.setParameter`. The two wheels are
+    /// addressed by their hue/saturation parameter names (e.g.
+    /// `splitToneHighlightHue` / `splitToneHighlightSaturation`). `key`
+    /// is `left`/`right`/`up`/`down` (plain → hue, shift → saturation)
+    /// or `reset` (→ identity). `shift` is ignored for `reset`.
+    case nudgeColorWheel(assetId: UUID, hueParameter: String, saturationParameter: String, key: String, shift: Bool)
 
     private enum CodingKeys: String, CodingKey {
         case type
@@ -181,6 +193,9 @@ public enum Command: Codable, Sendable, Equatable {
         case driveFileId
         case modifiedTime
         case pageToken
+        case hueParameter
+        case saturationParameter
+        case shift
     }
 
     private enum CommandType: String, Codable {
@@ -251,6 +266,7 @@ public enum Command: Codable, Sendable, Equatable {
         case reloadCatalogFromDrive
         case triggerExportMenu
         case completeExportSheet
+        case nudgeColorWheel
     }
 
     public init(from decoder: Decoder) throws {
@@ -471,6 +487,19 @@ public enum Command: Codable, Sendable, Equatable {
             let format = try container.decode(String.self, forKey: .format)
             let applyEdits = try container.decode(Bool.self, forKey: .applyEdits)
             self = .completeExportSheet(destinationPath: destinationPath, format: format, applyEdits: applyEdits)
+        case .nudgeColorWheel:
+            let assetId = try container.decode(UUID.self, forKey: .assetId)
+            let hueParameter = try container.decode(String.self, forKey: .hueParameter)
+            let saturationParameter = try container.decode(String.self, forKey: .saturationParameter)
+            let key = try container.decode(String.self, forKey: .key)
+            let shift = try container.decodeIfPresent(Bool.self, forKey: .shift) ?? false
+            self = .nudgeColorWheel(
+                assetId: assetId,
+                hueParameter: hueParameter,
+                saturationParameter: saturationParameter,
+                key: key,
+                shift: shift
+            )
         }
     }
 
@@ -680,6 +709,13 @@ public enum Command: Codable, Sendable, Equatable {
             try container.encode(destinationPath, forKey: .destinationPath)
             try container.encode(format, forKey: .format)
             try container.encode(applyEdits, forKey: .applyEdits)
+        case .nudgeColorWheel(let assetId, let hueParameter, let saturationParameter, let key, let shift):
+            try container.encode(CommandType.nudgeColorWheel, forKey: .type)
+            try container.encode(assetId, forKey: .assetId)
+            try container.encode(hueParameter, forKey: .hueParameter)
+            try container.encode(saturationParameter, forKey: .saturationParameter)
+            try container.encode(key, forKey: .key)
+            try container.encode(shift, forKey: .shift)
         }
     }
 }

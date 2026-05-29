@@ -30,6 +30,7 @@ final class HarnessController: @unchecked Sendable {
     private let exportCoordinator: ExportCoordinator
     private let uploadCoordinator: UploadCoordinator
     private let driveUploader: (any DriveUploading)?
+    private let driveMarkerBackfill: DriveMarkerBackfill?
     private let originalsCoordinatorProvider: @Sendable () -> OriginalsCoordinator?
     private let undoStackProvider: @Sendable () -> UndoStack?
     private let catalogPublisherProvider: @Sendable () -> CatalogPublisher?
@@ -72,6 +73,7 @@ final class HarnessController: @unchecked Sendable {
         uploadCoordinator: UploadCoordinator,
         appDelegate: AppDelegate,
         driveUploader: (any DriveUploading)? = nil,
+        driveMarkerBackfill: DriveMarkerBackfill? = nil,
         originalsCoordinator: @escaping @Sendable () -> OriginalsCoordinator? = { nil },
         undoStack: @escaping @Sendable () -> UndoStack? = { nil },
         catalogPublisher: @escaping @Sendable () -> CatalogPublisher? = { nil },
@@ -94,6 +96,7 @@ final class HarnessController: @unchecked Sendable {
         self.uploadCoordinator = uploadCoordinator
         self.appDelegate = appDelegate
         self.driveUploader = driveUploader
+        self.driveMarkerBackfill = driveMarkerBackfill
         self.originalsCoordinatorProvider = originalsCoordinator
         self.undoStackProvider = undoStack
         self.catalogPublisherProvider = catalogPublisher
@@ -404,6 +407,9 @@ final class HarnessController: @unchecked Sendable {
 
         case .syncFromDrive:
             return await handleSyncFromDrive()
+
+        case .backfillDriveMarkers:
+            return await handleBackfillDriveMarkers()
 
         case .restoreCatalogFromDrive(let confirm):
             return await handleRestoreCatalogFromDrive(confirm: confirm)
@@ -802,6 +808,24 @@ final class HarnessController: @unchecked Sendable {
             return .error("syncFromDrive failed: \(error)")
         } catch {
             return .error("syncFromDrive failed: \(error.localizedDescription)")
+        }
+    }
+
+    // MARK: - Marker backfill (#328)
+
+    private func handleBackfillDriveMarkers() async -> Response {
+        guard let driveMarkerBackfill else {
+            return .error("drive marker backfill not configured (drive not authenticated)")
+        }
+        do {
+            let summary = try await driveMarkerBackfill.run()
+            return .ok(data: .dictionary([
+                "scanned": .int(summary.scanned),
+                "patched": .int(summary.patched),
+                "skipped": .int(summary.skipped),
+            ]))
+        } catch {
+            return .error("backfillDriveMarkers failed: \(error.localizedDescription)")
         }
     }
 

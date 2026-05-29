@@ -81,6 +81,14 @@ struct ColorWheelControl: View {
         .onKeyPress(keys: [.leftArrow, .rightArrow, .upArrow, .downArrow, "0"]) { press in
             handleKeyPress(press)
         }
+        // `wheel` is a ZStack of decorative layers (gradients, indicator,
+        // focus ring), not a leaf, so `.accessibilityElement(children: .contain)`
+        // is what collapses it into a single container element that carries the
+        // combined `hue …, saturation …` value announced on first focus.
+        // `.accessibilityChildren` then supplies the two synthetic axes as that
+        // container's children. (On a leaf view `.accessibilityChildren` alone
+        // would establish the container; here the explicit element call earns
+        // its keep.)
         .accessibilityElement(children: .contain)
         .accessibilityLabel("\(label) colour")
         .accessibilityValue(accessibilityValueText)

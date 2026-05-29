@@ -397,11 +397,15 @@ public enum Renderer {
     /// All three controls fold into one warped quad so we resample once.
     ///
     /// Slider mapping: ±100 vertical inset = ±25 % of image width applied to the
-    /// top/bottom edges (positive vertical pulls the top edge inward to correct
-    /// converging verticals shot looking up). Horizontal mirrors that on the left
-    /// and right edges. Rotation is a corner rotation about the centre and is
-    /// composed into the same quad — separate from `cropAngle`, which lives on
-    /// the crop tool and is not destructive to perspective.
+    /// top/bottom edges. `CIPerspectiveTransform` maps the source *into* the
+    /// destination quad, so insetting an edge squeezes the source content along
+    /// it. To straighten verticals that converge at the top (the looking-up
+    /// building case) the *wide* bottom must be squeezed to match the narrow
+    /// top — so positive vertical insets the bottom edge. Horizontal mirrors
+    /// that: positive insets the left edge to straighten a looking-right shot.
+    /// Rotation is a corner rotation about the centre and is composed into the
+    /// same quad — separate from `cropAngle`, which lives on the crop tool and
+    /// is not destructive to perspective.
     ///
     /// `CIPerspectiveTransform` expands the extent to the bounding box of the
     /// warped corners; we `cropped(to:)` the original extent so downstream
@@ -420,18 +424,20 @@ public enum Renderer {
         let cx = extent.midX
         let cy = extent.midY
 
-        // Vertical keystone: positive pulls the top edge inward (corrects
-        // looking-up converging verticals). Negative pulls the bottom.
+        // Vertical keystone: positive insets the bottom edge, squeezing the
+        // (wide) foot of a looking-up shot to match its narrow top so the
+        // converging verticals straighten. Negative insets the top edge.
         // ±100 → ±25 % of width inset on the corresponding edge.
         let vFrac = vertical / 400.0
-        let topInset = max(0.0, vFrac) * w
-        let bottomInset = max(0.0, -vFrac) * w
+        let topInset = max(0.0, -vFrac) * w
+        let bottomInset = max(0.0, vFrac) * w
 
-        // Horizontal keystone: positive pulls the right edge inward (corrects
-        // looking-right). Negative pulls the left edge.
+        // Horizontal keystone: positive insets the left edge to straighten a
+        // looking-right shot (whose near left side is the wide, converging
+        // one). Negative insets the right edge.
         let hFrac = horizontal / 400.0
-        let rightInset = max(0.0, hFrac) * h
-        let leftInset = max(0.0, -hFrac) * h
+        let rightInset = max(0.0, -hFrac) * h
+        let leftInset = max(0.0, hFrac) * h
 
         // Build the warped quad in image coordinates (origin bottom-left).
         var tl = CGPoint(x: extent.minX + topInset, y: extent.maxY - leftInset)

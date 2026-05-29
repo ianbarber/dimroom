@@ -78,14 +78,15 @@ final class GeometryRenderTests: XCTestCase {
             editState: EditState(perspectiveVertical: 80)
         )
 
-        // Top-row pixels should differ because the top edge is pulled inward.
-        // Sample close to the corner where the inset is most visible.
-        let topY = Int(source.extent.height) - 4
+        // Positive vertical insets the bottom edge, so the bottom corners move
+        // and the source content there is displaced into the (transparent)
+        // inset triangle. Sample close to a bottom corner where it's clearest.
+        let bottomY = 4
         let cornerX = 4
-        let srcPx = samplePixel(image: source, x: cornerX, y: topY, context: ctx)
-        let resPx = samplePixel(image: result, x: cornerX, y: topY, context: ctx)
+        let srcPx = samplePixel(image: source, x: cornerX, y: bottomY, context: ctx)
+        let resPx = samplePixel(image: result, x: cornerX, y: bottomY, context: ctx)
         let differs = srcPx.r != resPx.r || srcPx.g != resPx.g || srcPx.b != resPx.b
-        XCTAssertTrue(differs, "Vertical keystone should change top-corner pixels")
+        XCTAssertTrue(differs, "Vertical keystone should change bottom-corner pixels")
         XCTAssertEqual(result.extent, source.extent)
     }
 
@@ -96,13 +97,13 @@ final class GeometryRenderTests: XCTestCase {
             editState: EditState(perspectiveHorizontal: 80)
         )
 
-        // Right edge is pulled inward at +horizontal; sample near a right-edge corner.
-        let rightX = Int(source.extent.width) - 4
+        // Left edge is inset at +horizontal; sample near a left-edge corner.
+        let leftX = 4
         let topY = Int(source.extent.height) - 4
-        let srcPx = samplePixel(image: source, x: rightX, y: topY, context: ctx)
-        let resPx = samplePixel(image: result, x: rightX, y: topY, context: ctx)
+        let srcPx = samplePixel(image: source, x: leftX, y: topY, context: ctx)
+        let resPx = samplePixel(image: result, x: leftX, y: topY, context: ctx)
         let differs = srcPx.r != resPx.r || srcPx.g != resPx.g || srcPx.b != resPx.b
-        XCTAssertTrue(differs, "Horizontal keystone should change right-corner pixels")
+        XCTAssertTrue(differs, "Horizontal keystone should change left-corner pixels")
         XCTAssertEqual(result.extent, source.extent)
     }
 
@@ -123,6 +124,70 @@ final class GeometryRenderTests: XCTestCase {
         let differs = srcPx.r != resPx.r || srcPx.g != resPx.g || srcPx.b != resPx.b
         XCTAssertTrue(differs, "Rotation should change corner pixels")
         XCTAssertEqual(result.extent, source.extent)
+    }
+
+    /// Count the white-run width on a single image row: sample a full-width,
+    /// 1px-high patch and count bright pixels (luma > 128). Pixels outside the
+    /// warped quad read as transparent black, so they don't count.
+    private func whiteRunWidth(in image: CIImage, atY y: Int) -> Int {
+        let extent = image.extent
+        let rect = CGRect(x: extent.minX, y: CGFloat(y), width: extent.width, height: 1)
+        let row = samplePatch(image: image, rect: rect, context: ctx)
+        return row.filter { luma($0) > 128 }.count
+    }
+
+    /// The issue's core ask: confirm positive vertical keystone *corrects*
+    /// (rather than worsens) converging verticals, against a keystone-affected
+    /// target. We use a synthetic looking-up building proxy — white verticals
+    /// that converge toward the top — rather than a real/personal photo (per
+    /// the fixtures rule). Correcting straightens the verticals, i.e. moves the
+    /// top/bottom white-run ratio toward 1; a negative value must move it away,
+    /// which pins the sign so a future regression can't pass silently.
+    func testPositiveVerticalKeystoneStraightensConvergingVerticals() {
+        let source = makeKeystoneTargetImage(width: 240, height: 240)
+
+        // Sample a few rows in from each edge to dodge resampling fuzz right at
+        // the warped quad's boundary.
+        let topY = 240 - 12
+        let bottomY = 12
+
+        func gapRatio(_ image: CIImage) -> Double {
+            let top = Double(whiteRunWidth(in: image, atY: topY))
+            let bottom = Double(whiteRunWidth(in: image, atY: bottomY))
+            XCTAssertGreaterThan(bottom, 0, "bottom row should contain white pixels")
+            return top / bottom
+        }
+
+        let sourceRatio = gapRatio(source)
+        let corrected = Renderer.render(
+            source: source,
+            editState: EditState(perspectiveVertical: 60)
+        )
+        let worsened = Renderer.render(
+            source: source,
+            editState: EditState(perspectiveVertical: -60)
+        )
+        let correctedRatio = gapRatio(corrected)
+        let worsenedRatio = gapRatio(worsened)
+
+        // Source converges toward the top: narrow top run, wide bottom → < 1.
+        XCTAssertLessThan(sourceRatio, 1.0, "source should have converging verticals")
+
+        // Positive vertical straightens: the ratio moves toward parallel (1).
+        XCTAssertGreaterThan(
+            correctedRatio, sourceRatio,
+            "positive vertical keystone should straighten converging verticals"
+        )
+        XCTAssertLessThan(
+            abs(1.0 - correctedRatio), abs(1.0 - sourceRatio),
+            "corrected ratio should sit closer to parallel than the source"
+        )
+
+        // Negative vertical worsens the convergence — pins the sign.
+        XCTAssertLessThan(
+            worsenedRatio, sourceRatio,
+            "negative vertical keystone should worsen the convergence"
+        )
     }
 
     // MARK: - Chromatic aberration

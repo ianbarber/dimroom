@@ -46,7 +46,10 @@ public struct DevelopView: View {
     private var sliderSidebar: some View {
         ScrollView {
             VStack(alignment: .leading, spacing: 12) {
-                cropToggle
+                HStack(spacing: 8) {
+                    cropToggle
+                    magnifierToggle
+                }
 
                 if cropViewModel.isActive {
                     cropSection
@@ -59,6 +62,25 @@ public struct DevelopView: View {
         .frame(width: 280)
         .background(Color(white: 0.1))
         .disabled(viewModel.isDownloadingOriginal)
+    }
+
+    /// Toggle the floating pixel magnifier. Sits next to the crop button so
+    /// the two workspace tools share a row at the top of the sidebar.
+    private var magnifierToggle: some View {
+        Button {
+            viewModel.toggleMagnifier()
+        } label: {
+            HStack(spacing: 6) {
+                Image(systemName: "plus.magnifyingglass")
+                Text("Magnifier")
+                    .font(.system(size: 12, weight: .medium))
+            }
+            .frame(maxWidth: .infinity)
+            .padding(.vertical, 6)
+        }
+        .buttonStyle(.bordered)
+        .tint(viewModel.magnifierVisible ? .accentColor : Color(white: 0.3))
+        .accessibilityIdentifier("magnifier-toggle")
     }
 
     /// Tone + White Balance + Presence slider stack. Animated on
@@ -324,17 +346,26 @@ public struct DevelopView: View {
                         frame: geo.size,
                         sourceAspect: previewSourceAspect(fallback: image)
                     )
-                    Image(nsImage: image)
-                        .resizable()
-                        .frame(width: imageRect.width, height: imageRect.height)
-                        .offset(x: imageRect.minX, y: imageRect.minY)
-                        .overlay(alignment: .topLeading) {
-                            if cropViewModel.isActive {
-                                CropOverlayView(viewModel: cropViewModel)
-                                    .frame(width: imageRect.width, height: imageRect.height)
-                                    .offset(x: imageRect.minX, y: imageRect.minY)
+                    ZStack(alignment: .topLeading) {
+                        Image(nsImage: image)
+                            .resizable()
+                            .frame(width: imageRect.width, height: imageRect.height)
+                            .offset(x: imageRect.minX, y: imageRect.minY)
+                            .overlay(alignment: .topLeading) {
+                                if cropViewModel.isActive {
+                                    CropOverlayView(viewModel: cropViewModel)
+                                        .frame(width: imageRect.width, height: imageRect.height)
+                                        .offset(x: imageRect.minX, y: imageRect.minY)
+                                }
                             }
+
+                        // Magnifier sample-region reticle + click/drag to
+                        // move the sample point. Suppressed while the crop
+                        // overlay owns the preview's gestures.
+                        if viewModel.magnifierVisible && !cropViewModel.isActive {
+                            magnifierSampleLayer(imageRect: imageRect)
                         }
+                    }
                 }
             }
 
@@ -348,8 +379,54 @@ public struct DevelopView: View {
                     .padding(12)
                     .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topTrailing)
             }
+
+            if viewModel.magnifierVisible {
+                PixelMagnifierView(viewModel: viewModel)
+                    .offset(
+                        x: viewModel.magnifierWindowOffset.width,
+                        y: viewModel.magnifierWindowOffset.height
+                    )
+                    .padding(12)
+                    .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topTrailing)
+            }
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity)
+    }
+
+    /// Transparent hit layer over the fitted image that maps a click or
+    /// drag to a normalised sample point, plus the reticle showing the
+    /// region the magnifier is currently sampling.
+    private func magnifierSampleLayer(imageRect: CGRect) -> some View {
+        ZStack(alignment: .topLeading) {
+            Color.clear
+                .contentShape(Rectangle())
+                .frame(width: imageRect.width, height: imageRect.height)
+                .offset(x: imageRect.minX, y: imageRect.minY)
+                .gesture(
+                    DragGesture(minimumDistance: 0)
+                        .onChanged { value in
+                            guard imageRect.width > 0, imageRect.height > 0 else { return }
+                            let nx = (value.location.x - imageRect.minX) / imageRect.width
+                            let ny = (value.location.y - imageRect.minY) / imageRect.height
+                            viewModel.setMagnifierSamplePoint(CGPoint(x: nx, y: ny))
+                        }
+                )
+
+            if let reticle = viewModel.magnifierReticleRect {
+                Rectangle()
+                    .stroke(Color.yellow, lineWidth: 1.5)
+                    .background(Rectangle().stroke(Color.black.opacity(0.5), lineWidth: 3))
+                    .frame(
+                        width: max(reticle.width * imageRect.width, 6),
+                        height: max(reticle.height * imageRect.height, 6)
+                    )
+                    .offset(
+                        x: imageRect.minX + reticle.minX * imageRect.width,
+                        y: imageRect.minY + reticle.minY * imageRect.height
+                    )
+                    .allowsHitTesting(false)
+            }
+        }
     }
 
     /// Aspect ratio of the source image the Develop pipeline is rendering

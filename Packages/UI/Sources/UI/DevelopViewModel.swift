@@ -4,6 +4,7 @@ import CoreImage
 import EditEngine
 import Foundation
 import Previews
+import UniformTypeIdentifiers
 
 @MainActor
 public final class DevelopViewModel: ObservableObject {
@@ -44,6 +45,38 @@ public final class DevelopViewModel: ObservableObject {
     @Published public private(set) var downloadProgress: Double?
     public private(set) var currentAssetId: UUID?
 
+    // MARK: - Pixel magnifier (#324)
+
+    /// Whether the floating pixel magnifier is shown. App-level workspace
+    /// UI state — *not* part of `EditState` — so it survives asset
+    /// switches and is seeded from a Settings default. Toggled by the L
+    /// key, the sidebar button, the View menu, and the harness.
+    @Published public var magnifierVisible: Bool = false
+    /// Rendered magnifier patch (a small native-resolution crop around
+    /// `magnifierSamplePoint`), or `nil` when hidden / not yet rendered.
+    @Published public private(set) var magnifierImage: NSImage?
+    /// Sample point the magnifier is centred on, normalised `0…1` with a
+    /// top-left origin (matching the on-screen reticle). Session-only.
+    @Published public private(set) var magnifierSamplePoint: CGPoint = CGPoint(x: 0.5, y: 0.5)
+    /// Magnifier zoom factor: 1 (1:1) or 2 (2:1). Session-only.
+    @Published public private(set) var magnifierZoom: Int = 2
+    /// True while the magnifier is sampling the 2048px preview rather than
+    /// the full-resolution original (original not local yet, or a crop /
+    /// rotation makes the original's pixel grid diverge from the preview).
+    /// Drives the "Lower resolution" badge.
+    @Published public private(set) var magnifierUsingPreviewFallback: Bool = false
+    /// Drag offset of the floating magnifier window from its default
+    /// top-right anchor. Persisted across launches via Settings.
+    @Published public var magnifierWindowOffset: CGSize = .zero
+    /// The region the magnifier is showing, normalised `0…1` top-left
+    /// within the rendered preview — drives the reticle overlay. Kept in
+    /// lock-step with the magnifier render so reticle and patch agree.
+    @Published public private(set) var magnifierReticleRect: CGRect?
+
+    /// Side of the square magnifier window, in points. A 200pt window at
+    /// 1:1 samples 200px; at 2:1 samples 100px.
+    public static let magnifierPointSize: CGFloat = 200
+
     /// Child view model driving the interactive crop overlay. Owned
     /// here so DevelopView can bind to it and so `commitCrop` has a
     /// direct write path when the harness fires `setCrop`.
@@ -69,6 +102,11 @@ public final class DevelopViewModel: ObservableObject {
     /// so a continuous slider drag collapses to a single undo step.
     private var pendingUndoPrevious: EditState?
     private weak var undoStack: UndoStack?
+    /// Source image the magnifier samples from — the full-resolution
+    /// original when available, else the preview `sourceImage`.
+    private var magnifierSource: CIImage?
+    private var magnifierRenderTask: Task<Void, Never>?
+    private var magnifierSourceTask: Task<Void, Never>?
 
     public init(
         catalog: CatalogDatabase,
@@ -122,6 +160,7 @@ public final class DevelopViewModel: ObservableObject {
         renderTask = nil
         saveTask = nil
         downloadTask = nil
+        resetMagnifierRenderState()
 
         self.catalog = catalog
         self.previewStore = previewStore
@@ -153,6 +192,11 @@ public final class DevelopViewModel: ObservableObject {
         // `cropRect` pointing at the prior asset's crop (issue #239 bug 2).
         cropViewModel.resetToIdentity()
 
+        // Reset per-asset magnifier render state before loading the new
+        // asset. Visibility persists (workspace preference); the source +
+        // patch are reloaded below if the magnifier is showing.
+        resetMagnifierRenderState()
+
         // Drive the Develop pipeline from the master preview so the saved
         // `EditState` is applied once over unedited pixels, not over an
         // already-edited display JPEG (issue #186).
@@ -177,6 +221,9 @@ public final class DevelopViewModel: ObservableObject {
         hydrateUndoStack(for: assetId)
         triggerRender()
         fetchOriginalIfNeeded(for: asset)
+        if magnifierVisible {
+            loadMagnifierSourceIfNeeded()
+        }
     }
 
     public func deactivate() {
@@ -186,6 +233,7 @@ public final class DevelopViewModel: ObservableObject {
         renderTask = nil
         saveTask = nil
         downloadTask = nil
+        resetMagnifierRenderState()
         isDownloadingOriginal = false
         downloadProgress = nil
 
@@ -442,6 +490,70 @@ public final class DevelopViewModel: ObservableObject {
         setParameter(keyPath, value: identity)
     }
 
+    // MARK: - Pixel magnifier (#324)
+
+    /// Flip the magnifier on/off. Backs the L key, the sidebar button, and
+    /// the View → Show Pixel Magnifier menu item.
+    public func toggleMagnifier() {
+        setMagnifierVisible(!magnifierVisible)
+    }
+
+    /// Show or hide the magnifier. Showing it loads the sample source and
+    /// renders the first patch; hiding it tears down the render state but
+    /// keeps the sample point + zoom so re-showing resumes in place.
+    public func setMagnifierVisible(_ visible: Bool) {
+        let changed = visible != magnifierVisible
+        magnifierVisible = visible
+        if visible {
+            loadMagnifierSourceIfNeeded()
+        } else if changed {
+            resetMagnifierRenderState()
+        }
+    }
+
+    /// Move the magnifier sample point. `point` is normalised `0…1` with a
+    /// top-left origin (the on-screen reticle's coordinate space).
+    public func setMagnifierSamplePoint(_ point: CGPoint) {
+        magnifierSamplePoint = Self.clampPoint(point)
+        scheduleMagnifierRender()
+    }
+
+    /// Set the magnifier zoom factor. Any value ≤ 1 is treated as 1:1;
+    /// anything else as 2:1 (the two supported levels).
+    public func setMagnifierZoom(_ zoom: Int) {
+        magnifierZoom = zoom <= 1 ? 1 : 2
+        scheduleMagnifierRender()
+    }
+
+    /// Cycle the magnifier between 1:1 and 2:1 — backs the in-window zoom
+    /// button and scroll-wheel.
+    public func cycleMagnifierZoom() {
+        setMagnifierZoom(magnifierZoom == 1 ? 2 : 1)
+    }
+
+    /// Update the floating window's drag offset. The AppDelegate mirrors
+    /// `magnifierWindowOffset` into Settings so the position persists.
+    public func setMagnifierWindowOffset(_ offset: CGSize) {
+        magnifierWindowOffset = offset
+    }
+
+    /// Unified entry used by the harness `setMagnifier` command. Fields
+    /// left `nil` keep their current value.
+    public func setMagnifier(visible: Bool, samplePoint: CGPoint?, zoom: Int?) {
+        if let samplePoint {
+            magnifierSamplePoint = Self.clampPoint(samplePoint)
+        }
+        if let zoom {
+            magnifierZoom = zoom <= 1 ? 1 : 2
+        }
+        if visible != magnifierVisible {
+            setMagnifierVisible(visible)
+        } else if visible {
+            // Already visible — only the sample point / zoom moved.
+            scheduleMagnifierRender()
+        }
+    }
+
     /// Look up a `CurveChannel` by its wire string. Used by the
     /// harness handler so the wire format and view-model agree on the
     /// channel name set.
@@ -529,18 +641,24 @@ public final class DevelopViewModel: ObservableObject {
         }
     }
 
-    private func performRender() async {
-        guard let source = sourceImage else { return }
-        // While the crop overlay is active the user must see the full
-        // frame with the overlay drawn on top — otherwise adjusting or
-        // undoing an existing crop is impossible (#156 bug 2). Strip
-        // the crop rect for the live render but keep `cropAngle` so
-        // the straighten slider still reflects its rotation.
+    /// The `EditState` the live preview renders. While the crop overlay is
+    /// active the user must see the full frame with the overlay drawn on
+    /// top — otherwise adjusting or undoing an existing crop is impossible
+    /// (#156 bug 2) — so the crop rect is stripped while `cropAngle` is
+    /// kept. Shared by `performRender` and `renderMagnifier` so the
+    /// magnifier patch matches exactly what the preview shows.
+    private func currentRenderEditState() -> EditState {
         var state = editState
         if cropViewModel.isActive {
             state.cropRect = nil
             state.cropAngle = cropViewModel.cropAngle == 0 ? nil : cropViewModel.cropAngle
         }
+        return state
+    }
+
+    private func performRender() async {
+        guard let source = sourceImage else { return }
+        let state = currentRenderEditState()
         isRendering = true
 
         let lensProfile = currentLensProfile
@@ -558,6 +676,161 @@ public final class DevelopViewModel: ObservableObject {
         renderedImage = result.image
         histogram = result.histogram
         isRendering = false
+
+        // Keep the magnifier patch in step with every preview render so a
+        // slider change updates both. Cheap — it samples only a small region.
+        if magnifierVisible {
+            scheduleMagnifierRender()
+        }
+    }
+
+    // MARK: - Magnifier rendering (private)
+
+    private static func clampPoint(_ point: CGPoint) -> CGPoint {
+        CGPoint(
+            x: min(max(point.x, 0), 1),
+            y: min(max(point.y, 0), 1)
+        )
+    }
+
+    /// Region size, in source pixels, the magnifier samples: a 200pt
+    /// window covers 200px at 1:1 and 100px at 2:1.
+    private var magnifierRegionPixelSize: CGSize {
+        let side = Self.magnifierPointSize / CGFloat(max(1, magnifierZoom))
+        return CGSize(width: side, height: side)
+    }
+
+    /// Drop per-asset magnifier render state (source, patch, reticle,
+    /// fallback flag) and cancel its in-flight tasks. Leaves
+    /// `magnifierVisible`, `magnifierSamplePoint`, `magnifierZoom`, and
+    /// `magnifierWindowOffset` untouched — those are workspace state.
+    private func resetMagnifierRenderState() {
+        magnifierRenderTask?.cancel()
+        magnifierSourceTask?.cancel()
+        magnifierRenderTask = nil
+        magnifierSourceTask = nil
+        magnifierSource = nil
+        magnifierImage = nil
+        magnifierReticleRect = nil
+        magnifierUsingPreviewFallback = false
+    }
+
+    /// Pick the image the magnifier samples from. The full-resolution
+    /// original is preferred so sharpening / NR / clarity show real
+    /// pixels, but a crop or a non-zero user rotation makes the original's
+    /// pixel grid diverge from the rotated/cropped preview the reticle is
+    /// drawn over, so we fall back to the preview (lower-resolution badge)
+    /// in those cases — and while the original is still downloading.
+    private func loadMagnifierSourceIfNeeded() {
+        magnifierSourceTask?.cancel()
+        magnifierSourceTask = nil
+
+        guard magnifierVisible,
+              let assetId = currentAssetId,
+              let preview = sourceImage else {
+            return
+        }
+
+        // Show the preview immediately so the window isn't blank while any
+        // original download / decode runs.
+        magnifierSource = preview
+        magnifierUsingPreviewFallback = true
+        scheduleMagnifierRender()
+
+        let asset = try? catalog.fetchAsset(id: assetId)
+        let cropActive = editState.cropRect != nil
+        let rotated = (asset?.rotation ?? 0) % 360 != 0
+        guard let asset, let fetcher = originalFetcher, !cropActive, !rotated else {
+            return
+        }
+
+        magnifierSourceTask = Task { [weak self] in
+            guard let url = await fetcher.fetchOriginal(assetId: assetId) else { return }
+            let decoded: CIImage? = await Task.detached {
+                Self.decodeOriginal(url: url, asset: asset)
+            }.value
+            await MainActor.run { [weak self] in
+                guard let self, !Task.isCancelled else { return }
+                // Asset / crop may have changed while the original loaded.
+                guard self.magnifierVisible,
+                      self.currentAssetId == assetId,
+                      self.editState.cropRect == nil,
+                      let decoded else { return }
+                self.magnifierSource = decoded
+                self.magnifierUsingPreviewFallback = false
+                self.scheduleMagnifierRender()
+            }
+        }
+    }
+
+    private func scheduleMagnifierRender() {
+        magnifierRenderTask?.cancel()
+        guard magnifierVisible, magnifierSource != nil else { return }
+        // ~30ms debounce so drag-to-move and live slider updates stay smooth.
+        magnifierRenderTask = Task { [weak self] in
+            try? await Task.sleep(nanoseconds: 30_000_000)
+            guard !Task.isCancelled else { return }
+            await self?.renderMagnifier()
+        }
+    }
+
+    private func renderMagnifier() async {
+        guard magnifierVisible, let source = magnifierSource else { return }
+        let state = currentRenderEditState()
+        let lensProfile = currentLensProfile
+        let sampleCenter = magnifierSamplePoint
+        let regionSize = magnifierRegionPixelSize
+
+        let result: (image: NSImage?, reticle: CGRect?) = await Task.detached(priority: .userInitiated) { [ciContext] in
+            let region = Renderer.renderRegion(
+                source: source,
+                editState: state,
+                context: ciContext,
+                sampleCenter: sampleCenter,
+                regionPixelSize: regionSize,
+                lensProfile: lensProfile
+            )
+            guard let cg = region.image, region.outputExtent.width > 0, region.outputExtent.height > 0 else {
+                return (nil, nil)
+            }
+            let image = NSImage(cgImage: cg, size: NSSize(width: cg.width, height: cg.height))
+            // Convert the sampled region into a normalised, top-left-origin
+            // rect within the rendered output so the reticle overlay lines
+            // up exactly with what the patch shows.
+            let ext = region.outputExtent
+            let r = region.regionRect
+            let reticle = CGRect(
+                x: (r.minX - ext.minX) / ext.width,
+                y: (ext.maxY - r.maxY) / ext.height,
+                width: r.width / ext.width,
+                height: r.height / ext.height
+            )
+            return (image, reticle)
+        }.value
+
+        guard !Task.isCancelled, magnifierVisible else { return }
+        magnifierImage = result.image
+        magnifierReticleRect = result.reticle
+    }
+
+    /// Decode an original into a `CIImage`, mirroring `PreviewStore.decode`:
+    /// RAW files go through `CIRAWFilter`, everything else through
+    /// `CIImage(contentsOf:)`. Only ever called for assets at zero user
+    /// rotation, so no orientation transform is needed to match the preview.
+    nonisolated private static func decodeOriginal(url: URL, asset: Asset) -> CIImage? {
+        if isRAW(asset: asset, url: url) {
+            guard let filter = CIRAWFilter(imageURL: url) else { return nil }
+            return filter.outputImage
+        }
+        return CIImage(contentsOf: url)
+    }
+
+    nonisolated private static func isRAW(asset: Asset, url: URL) -> Bool {
+        if asset.rawFormat != nil { return true }
+        guard let type = UTType(filenameExtension: url.pathExtension.lowercased()) else {
+            return false
+        }
+        return type.conforms(to: .rawImage)
     }
 
     private func scheduleSave() {
@@ -684,6 +957,11 @@ public final class DevelopViewModel: ObservableObject {
                 guard self.currentAssetId == assetId else { return }
                 self.isDownloadingOriginal = false
                 self.downloadProgress = nil
+                // The original is now local — if the magnifier is showing a
+                // preview fallback, upgrade it to full resolution.
+                if self.magnifierVisible, self.magnifierUsingPreviewFallback {
+                    self.loadMagnifierSourceIfNeeded()
+                }
             }
         }
     }

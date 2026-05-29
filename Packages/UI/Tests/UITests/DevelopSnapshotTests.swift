@@ -427,6 +427,32 @@ final class DevelopSnapshotTests: XCTestCase {
     }
 
 
+    /// Develop view with the pixel magnifier visible, centred at (0.5, 0.5)
+    /// at 2:1. Locks the floating window chrome (header, zoom button,
+    /// "Lower resolution" badge), the centre reticle, and the sample-region
+    /// reticle drawn over the preview. With no fetcher the magnifier samples
+    /// the preview, so the patch is the deterministic preview colour.
+    @MainActor
+    func test_develop_with_magnifier() async throws {
+        let vm = try await makeActivatedViewModel(hash: "snap-magnifier")
+
+        vm.setMagnifier(visible: true, samplePoint: CGPoint(x: 0.5, y: 0.5), zoom: 2)
+        // Give the magnifier render (30ms debounce) time to publish.
+        try await Task.sleep(nanoseconds: 300_000_000)
+
+        let image = renderFixedPixelImage(for: DevelopView(viewModel: vm))
+
+        runAssertSnapshot {
+            assertSnapshot(
+                of: image,
+                as: .image(
+                    precision: Self.snapshotPrecision,
+                    perceptualPrecision: Self.snapshotPerceptualPrecision
+                )
+            )
+        }
+    }
+
     /// Develop view with no selected asset — placeholder state.
     @MainActor
     func test_develop_empty_placeholder() async throws {

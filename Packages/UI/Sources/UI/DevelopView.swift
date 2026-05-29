@@ -330,9 +330,16 @@ public struct DevelopView: View {
                         .offset(x: imageRect.minX, y: imageRect.minY)
                         .overlay(alignment: .topLeading) {
                             if cropViewModel.isActive {
-                                CropOverlayView(viewModel: cropViewModel)
-                                    .frame(width: imageRect.width, height: imageRect.height)
-                                    .offset(x: imageRect.minX, y: imageRect.minY)
+                                CropOverlayView(
+                                    viewModel: cropViewModel,
+                                    // Route rotate-handle drags through the
+                                    // same live-render path as the straighten
+                                    // slider (line ~197) so the preview
+                                    // updates and debounces identically.
+                                    onAngleChange: { viewModel.setCropAngleLive($0) }
+                                )
+                                .frame(width: imageRect.width, height: imageRect.height)
+                                .offset(x: imageRect.minX, y: imageRect.minY)
                             }
                         }
                 }

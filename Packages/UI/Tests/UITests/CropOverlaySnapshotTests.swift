@@ -62,10 +62,16 @@ final class CropOverlaySnapshotTests: XCTestCase {
     /// darkened exterior, handles, and rule-of-thirds grid are all
     /// clearly visible in the snapshot.
     @MainActor
-    private func overlayOnBackdrop(viewModel: CropViewModel) -> some View {
+    private func overlayOnBackdrop(
+        viewModel: CropViewModel,
+        forceRotationHandlesVisible: Bool = false
+    ) -> some View {
         ZStack {
             Color(red: 0.3, green: 0.45, blue: 0.6)
-            CropOverlayView(viewModel: viewModel)
+            CropOverlayView(
+                viewModel: viewModel,
+                forceRotationHandlesVisible: forceRotationHandlesVisible
+            )
         }
         .frame(
             width: CropOverlaySnapshotTests.frameSize.width,
@@ -116,6 +122,34 @@ final class CropOverlaySnapshotTests: XCTestCase {
         )
 
         let image = renderFixedPixelImage(for: overlayOnBackdrop(viewModel: vm))
+
+        runAssertSnapshot {
+            assertSnapshot(
+                of: image,
+                as: .image(
+                    precision: Self.snapshotPrecision,
+                    perceptualPrecision: Self.snapshotPerceptualPrecision
+                )
+            )
+        }
+    }
+
+    /// Rotation handles revealed at all four corners. Hover events don't
+    /// fire in a headless render, so `forceRotationHandlesVisible` lights
+    /// the curved-arrow affordances unconditionally. Verifies they sit
+    /// just outside each corner, clear of the resize handles.
+    @MainActor
+    func test_crop_overlay_rotation_handles_visible() {
+        let vm = CropViewModel()
+        vm.activate(
+            cropRect: CGRect(x: 0.15, y: 0.15, width: 0.7, height: 0.7),
+            angle: 0,
+            imageAspect: 4.0 / 3.0
+        )
+
+        let image = renderFixedPixelImage(
+            for: overlayOnBackdrop(viewModel: vm, forceRotationHandlesVisible: true)
+        )
 
         runAssertSnapshot {
             assertSnapshot(

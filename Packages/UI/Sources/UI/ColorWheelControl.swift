@@ -81,20 +81,58 @@ struct ColorWheelControl: View {
         .onKeyPress(keys: [.leftArrow, .rightArrow, .upArrow, .downArrow, "0"]) { press in
             handleKeyPress(press)
         }
-        .accessibilityElement(children: .ignore)
+        .accessibilityElement(children: .contain)
         .accessibilityLabel("\(label) colour")
         .accessibilityValue(accessibilityValueText)
-        .accessibilityAdjustableAction { direction in
-            switch direction {
-            case .increment: onHueChange(ColorWheelKeyboardModel.nudge(
-                hue: hue, saturation: saturation, key: .up, shift: false
-            ).hue)
-            case .decrement: onHueChange(ColorWheelKeyboardModel.nudge(
-                hue: hue, saturation: saturation, key: .down, shift: false
-            ).hue)
-            @unknown default: break
-            }
+        .accessibilityChildren {
+            hueAccessibilityElement
+            saturationAccessibilityElement
         }
+    }
+
+    /// Accessibility-only child exposing hue as an adjustable axis. Supplied via
+    /// `.accessibilityChildren`, so it lives in the accessibility tree only —
+    /// never rendered — and has no effect on layout or pixels. Increment /
+    /// decrement route through the shared `ColorWheelKeyboardModel` (no shift)
+    /// so the step / wrap rules match the keyboard and harness paths.
+    private var hueAccessibilityElement: some View {
+        Color.clear
+            .accessibilityElement()
+            .accessibilityLabel("\(label) hue")
+            .accessibilityValue("\(Int(hue.rounded()))°")
+            .accessibilityAdjustableAction { direction in
+                switch direction {
+                case .increment: onHueChange(ColorWheelKeyboardModel.nudge(
+                    hue: hue, saturation: saturation, key: .up, shift: false
+                ).hue)
+                case .decrement: onHueChange(ColorWheelKeyboardModel.nudge(
+                    hue: hue, saturation: saturation, key: .down, shift: false
+                ).hue)
+                @unknown default: break
+                }
+            }
+    }
+
+    /// Accessibility-only child exposing saturation as an adjustable axis — the
+    /// second axis #343 adds so a VoiceOver-only user can reach saturation, not
+    /// just hue. Routes through the shift path of `ColorWheelKeyboardModel`,
+    /// which clamps saturation to `[0, 100]`.
+    private var saturationAccessibilityElement: some View {
+        Color.clear
+            .accessibilityElement()
+            .accessibilityLabel("\(label) saturation")
+            .accessibilityValue("\(Int(saturation.rounded()))")
+            .accessibilityAdjustableAction { direction in
+                switch direction {
+                case .increment: onSaturationChange(ColorWheelKeyboardModel.nudge(
+                    hue: hue, saturation: saturation, key: .up, shift: true
+                ).saturation)
+                case .decrement: onSaturationChange(ColorWheelKeyboardModel.nudge(
+                    hue: hue, saturation: saturation, key: .down, shift: true
+                ).saturation)
+                @unknown default: break
+                }
+            }
     }
 
     /// Accent ring drawn just outside the wheel while it holds keyboard

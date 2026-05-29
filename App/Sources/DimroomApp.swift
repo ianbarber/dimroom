@@ -107,6 +107,10 @@ struct DimroomApp: App {
                     router: appDelegate.router,
                     developViewModel: appDelegate.developViewModel
                 )
+                MagnifierMenuItem(
+                    router: appDelegate.router,
+                    developViewModel: appDelegate.developViewModel
+                )
             }
             CommandMenu("Image") {
                 RotateMenuItems(libraryViewModel: appDelegate.libraryViewModel)
@@ -297,6 +301,24 @@ private struct HistogramMenuItem: View {
             )
         }
         .keyboardShortcut("h", modifiers: [])
+        .disabled(router.route != .develop)
+    }
+}
+
+/// View → Show/Hide Pixel Magnifier. `L` toggles the Develop magnifier
+/// overlay (#324); greyed out outside Develop. Mirrors `HistogramMenuItem`.
+private struct MagnifierMenuItem: View {
+    let router: AppRouter
+    @ObservedObject var developViewModel: DevelopViewModel
+
+    var body: some View {
+        Button(developViewModel.magnifierVisible ? "Hide Pixel Magnifier" : "Show Pixel Magnifier") {
+            NotificationCenter.default.post(
+                name: MenuActionName.toggleMagnifier.notificationName,
+                object: nil
+            )
+        }
+        .keyboardShortcut("l", modifiers: [])
         .disabled(router.route != .develop)
     }
 }
@@ -572,6 +594,11 @@ final class AppDelegate: NSObject, NSApplicationDelegate, ObservableObject {
         developViewModel.showHistogram = settingsStore.developHistogramVisible
         developViewModel.renderDebounceMillis = settingsStore.developRenderDebounceMillis
         developViewModel.saveDebounceMillis = settingsStore.developSaveDebounceMillis
+        developViewModel.magnifierVisible = settingsStore.developShowMagnifierByDefault
+        developViewModel.magnifierWindowOffset = CGSize(
+            width: settingsStore.developMagnifierOffsetX,
+            height: settingsStore.developMagnifierOffsetY
+        )
 
         // Resolve drive client first so restoreIfNeeded can probe Drive
         // before the catalog is opened.
@@ -2176,6 +2203,29 @@ final class AppDelegate: NSObject, NSApplicationDelegate, ObservableObject {
                 self?.developViewModel.saveDebounceMillis = newValue
             }
             .store(in: &settingsCancellables)
+
+        settingsStore.$developShowMagnifierByDefault
+            .dropFirst()
+            .sink { [weak self] newValue in
+                // Like the histogram default: only re-seed when no asset is
+                // active so a live L-key toggle isn't clobbered.
+                guard let self else { return }
+                if self.developViewModel.currentAssetId == nil {
+                    self.developViewModel.magnifierVisible = newValue
+                }
+            }
+            .store(in: &settingsCancellables)
+
+        // Mirror the magnifier window's drag offset back into Settings so
+        // its position persists across launches (stored as rounded Ints).
+        developViewModel.$magnifierWindowOffset
+            .dropFirst()
+            .sink { [weak self] offset in
+                guard let self else { return }
+                self.settingsStore.developMagnifierOffsetX = Int(offset.width.rounded())
+                self.settingsStore.developMagnifierOffsetY = Int(offset.height.rounded())
+            }
+            .store(in: &settingsCancellables)
     }
 
     // MARK: - Settings actions
@@ -2307,6 +2357,7 @@ enum MenuActionName: String, CaseIterable {
     case zoomToggle = "zoom-toggle"
     case zoomReset = "zoom-reset"
     case toggleHistogram = "toggle-histogram"
+    case toggleMagnifier = "toggle-magnifier"
     case selectNext = "select-next"
     case selectPrevious = "select-previous"
     case selectUp = "select-up"

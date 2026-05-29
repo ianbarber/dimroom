@@ -129,7 +129,7 @@ final class SettingsStoreTests: XCTestCase {
 
     func testKeysListContainsEveryDefinedKey() {
         // Each key string starts with the `dimroom.settings.` prefix.
-        XCTAssertEqual(SettingsStore.Keys.all.count, 11)
+        XCTAssertEqual(SettingsStore.Keys.all.count, 14)
         for key in SettingsStore.Keys.all {
             XCTAssertTrue(key.hasPrefix("dimroom.settings."), "\(key) is missing the dimroom.settings. prefix")
         }

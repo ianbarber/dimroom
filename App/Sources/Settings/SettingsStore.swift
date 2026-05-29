@@ -71,6 +71,23 @@ public final class SettingsStore: ObservableObject {
         didSet { defaults.set(developSaveDebounceMillis, forKey: Keys.developSaveDebounceMillis) }
     }
 
+    /// Whether the Develop pixel magnifier (#324) is shown by default when
+    /// entering Develop. The L key / sidebar button still toggle it live.
+    @Published public var developShowMagnifierByDefault: Bool {
+        didSet { defaults.set(developShowMagnifierByDefault, forKey: Keys.developShowMagnifierByDefault) }
+    }
+
+    /// Persisted drag offset of the magnifier window from its top-right
+    /// anchor, in points rounded to whole pixels (the wire bridge only
+    /// coerces Int/Int64/Bool, so position is stored as Int).
+    @Published public var developMagnifierOffsetX: Int {
+        didSet { defaults.set(developMagnifierOffsetX, forKey: Keys.developMagnifierOffsetX) }
+    }
+
+    @Published public var developMagnifierOffsetY: Int {
+        didSet { defaults.set(developMagnifierOffsetY, forKey: Keys.developMagnifierOffsetY) }
+    }
+
     public init(defaults: UserDefaults = .standard) {
         self.defaults = defaults
         self.libraryGridColumns = Self.readInt(defaults, key: Keys.libraryGridColumns,
@@ -96,6 +113,12 @@ public final class SettingsStore: ObservableObject {
             fallback: Defaults.developRenderDebounceMillis)
         self.developSaveDebounceMillis = Self.readInt(defaults, key: Keys.developSaveDebounceMillis,
             fallback: Defaults.developSaveDebounceMillis)
+        self.developShowMagnifierByDefault = Self.readBool(defaults, key: Keys.developShowMagnifierByDefault,
+            fallback: Defaults.developShowMagnifierByDefault)
+        self.developMagnifierOffsetX = Self.readInt(defaults, key: Keys.developMagnifierOffsetX,
+            fallback: Defaults.developMagnifierOffsetX)
+        self.developMagnifierOffsetY = Self.readInt(defaults, key: Keys.developMagnifierOffsetY,
+            fallback: Defaults.developMagnifierOffsetY)
     }
 
     /// Remove every stored value so the next read returns the default.
@@ -115,6 +138,9 @@ public final class SettingsStore: ObservableObject {
         developHistogramVisible = Defaults.developHistogramVisible
         developRenderDebounceMillis = Defaults.developRenderDebounceMillis
         developSaveDebounceMillis = Defaults.developSaveDebounceMillis
+        developShowMagnifierByDefault = Defaults.developShowMagnifierByDefault
+        developMagnifierOffsetX = Defaults.developMagnifierOffsetX
+        developMagnifierOffsetY = Defaults.developMagnifierOffsetY
     }
 
     // MARK: - Harness bridge
@@ -135,6 +161,9 @@ public final class SettingsStore: ObservableObject {
         case "developHistogramVisible": return developHistogramVisible
         case "developRenderDebounceMillis": return developRenderDebounceMillis
         case "developSaveDebounceMillis": return developSaveDebounceMillis
+        case "developShowMagnifierByDefault": return developShowMagnifierByDefault
+        case "developMagnifierOffsetX": return developMagnifierOffsetX
+        case "developMagnifierOffsetY": return developMagnifierOffsetY
         default: return nil
         }
     }
@@ -179,6 +208,15 @@ public final class SettingsStore: ObservableObject {
         case "developSaveDebounceMillis":
             guard let v = Self.asInt(value) else { return false }
             developSaveDebounceMillis = v
+        case "developShowMagnifierByDefault":
+            guard let v = Self.asBool(value) else { return false }
+            developShowMagnifierByDefault = v
+        case "developMagnifierOffsetX":
+            guard let v = Self.asInt(value) else { return false }
+            developMagnifierOffsetX = v
+        case "developMagnifierOffsetY":
+            guard let v = Self.asInt(value) else { return false }
+            developMagnifierOffsetY = v
         default:
             return false
         }
@@ -203,6 +241,10 @@ public final class SettingsStore: ObservableObject {
         /// drop the slider to 30ms in the UI.
         public static let developRenderDebounceMillis: Int = 50
         public static let developSaveDebounceMillis: Int = 500
+        /// Magnifier is opt-in: hidden until the user shows it (#324).
+        public static let developShowMagnifierByDefault: Bool = false
+        public static let developMagnifierOffsetX: Int = 0
+        public static let developMagnifierOffsetY: Int = 0
     }
 
     public enum Keys {
@@ -217,6 +259,9 @@ public final class SettingsStore: ObservableObject {
         public static let developHistogramVisible = "dimroom.settings.developHistogramVisible"
         public static let developRenderDebounceMillis = "dimroom.settings.developRenderDebounceMillis"
         public static let developSaveDebounceMillis = "dimroom.settings.developSaveDebounceMillis"
+        public static let developShowMagnifierByDefault = "dimroom.settings.developShowMagnifierByDefault"
+        public static let developMagnifierOffsetX = "dimroom.settings.developMagnifierOffsetX"
+        public static let developMagnifierOffsetY = "dimroom.settings.developMagnifierOffsetY"
 
         public static let all: [String] = [
             libraryGridColumns,
@@ -230,6 +275,9 @@ public final class SettingsStore: ObservableObject {
             developHistogramVisible,
             developRenderDebounceMillis,
             developSaveDebounceMillis,
+            developShowMagnifierByDefault,
+            developMagnifierOffsetX,
+            developMagnifierOffsetY,
         ]
     }
 

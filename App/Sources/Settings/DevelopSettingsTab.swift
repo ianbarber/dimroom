@@ -12,6 +12,13 @@ struct DevelopSettingsTab: View {
                 )
             }
 
+            Section("Pixel Magnifier") {
+                Toggle(
+                    "Show pixel magnifier by default",
+                    isOn: $store.developShowMagnifierByDefault
+                )
+            }
+
             Section("Render debounce") {
                 VStack(alignment: .leading, spacing: 6) {
                     Text("\(store.developRenderDebounceMillis) ms")

@@ -10,6 +10,18 @@ final class LensProfileLibraryTests: XCTestCase {
         )
     }
 
+    func testBundleContainsNoTestFixtureEntries() {
+        // Synthetic `_test_*` profiles must never ship in the bundled
+        // resource: they'd surface in `allProfiles` in production and
+        // pollute the real lens catalogue. Renderer tests construct their
+        // `LensProfile` values directly, so the bundle needs no fixtures.
+        let leaked = LensProfileLibrary.allProfiles.keys.filter { $0.hasPrefix("_test_") }
+        XCTAssertTrue(
+            leaked.isEmpty,
+            "lens-profiles.json must not contain synthetic test entries, found: \(leaked)"
+        )
+    }
+
     func testKnownLensReturnsProfile() {
         let profile = LensProfileLibrary.lookup(for: "RF 50mm F1.2 L USM")
         XCTAssertNotNil(profile)

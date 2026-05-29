@@ -797,7 +797,11 @@ final class AppDelegate: NSObject, NSApplicationDelegate, ObservableObject {
     /// `self.catalog`, `self.catalogPublisher`, and
     /// `self.originalsCoordinator` without releasing whatever was
     /// already there.
-    private func wireCatalog(_ catalog: CatalogDatabase, args: [String]) {
+    ///
+    /// `internal` rather than `private` so `CatalogReloadLeakTests` can
+    /// seed pre-reload state against a known catalog via
+    /// `@testable import` (#330). No behaviour change.
+    func wireCatalog(_ catalog: CatalogDatabase, args: [String]) {
         self.catalog = catalog
 
         libraryViewModel.configure(
@@ -1334,8 +1338,12 @@ final class AppDelegate: NSObject, NSApplicationDelegate, ObservableObject {
     /// against the freshly-opened one. Extracted from
     /// `reloadCatalogFromDrive` so the swap mechanics live next to the
     /// equivalent launch-time wiring in `applicationDidFinishLaunching`.
+    ///
+    /// `internal` rather than `private` so `CatalogReloadLeakTests` can
+    /// drive the real swap and assert the previous catalog is released
+    /// via `@testable import` (#330). No behaviour change.
     @MainActor
-    private func applyReloadedCatalog(
+    func applyReloadedCatalog(
         _ newCatalog: CatalogDatabase,
         previewStore: PreviewStore
     ) async {

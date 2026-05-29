@@ -4,17 +4,5 @@
     "caBlueScale": 1.003,
     "vignetteIntensity": -0.4,
     "vignetteRadius": 1.6
-  },
-  "_test_strong": {
-    "caRedScale": 0.985,
-    "caBlueScale": 1.015,
-    "vignetteIntensity": -0.8,
-    "vignetteRadius": 2.0
-  },
-  "_test_mild": {
-    "caRedScale": 0.999,
-    "caBlueScale": 1.001,
-    "vignetteIntensity": -0.1,
-    "vignetteRadius": 1.2
   }
 }

@@ -22,8 +22,19 @@ struct ParameterSlider: View {
                         .fill(trackTint.opacity(0.45))
                         .frame(height: 4)
                 }
+                // A double-click must reset the parameter to its identity.
+                // `Slider` consumes pointer events on its track/thumb before
+                // they reach the row-level `onTapGesture` below, so the reset
+                // gesture has to live on the `Slider` itself. It must be a
+                // `highPriorityGesture`, not a `simultaneousGesture`: with the
+                // latter the `Slider` *also* processes the double-click and
+                // jumps its value to the click location, overwriting the reset
+                // that fired alongside it (issue #265). `highPriorityGesture`
+                // lets the double-tap win so the reset value sticks; single
+                // clicks and drags don't match `TapGesture(count: 2)` and pass
+                // through to the `Slider` unchanged.
                 Slider(value: $value, in: range, step: step)
-                    .simultaneousGesture(
+                    .highPriorityGesture(
                         TapGesture(count: 2).onEnded { onReset() }
                     )
             }

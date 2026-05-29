@@ -1338,6 +1338,59 @@ final class CommandCodingTests: XCTestCase {
         XCTAssertEqual(command, .syncFromDrive)
     }
 
+    // MARK: - nudgeColorWheel (#305)
+
+    func testNudgeColorWheelRoundTrip() throws {
+        let id = UUID(uuidString: "12345678-1234-1234-1234-123456789012")!
+        for key in ["left", "right", "up", "down", "reset"] {
+            for shift in [true, false] {
+                let command = Command.nudgeColorWheel(
+                    assetId: id,
+                    hueParameter: "splitToneHighlightHue",
+                    saturationParameter: "splitToneHighlightSaturation",
+                    key: key,
+                    shift: shift
+                )
+                let data = try encoder.encode(command)
+                let decoded = try decoder.decode(Command.self, from: data)
+                XCTAssertEqual(command, decoded)
+            }
+        }
+    }
+
+    func testNudgeColorWheelJSON() throws {
+        let id = UUID(uuidString: "12345678-1234-1234-1234-123456789012")!
+        let command = Command.nudgeColorWheel(
+            assetId: id,
+            hueParameter: "splitToneShadowHue",
+            saturationParameter: "splitToneShadowSaturation",
+            key: "right",
+            shift: true
+        )
+        let data = try encoder.encode(command)
+        let json = String(data: data, encoding: .utf8)!
+        XCTAssertEqual(
+            json,
+            #"{"assetId":"12345678-1234-1234-1234-123456789012","hueParameter":"splitToneShadowHue","key":"right","saturationParameter":"splitToneShadowSaturation","shift":true,"type":"nudgeColorWheel"}"#
+        )
+    }
+
+    func testDecodeNudgeColorWheelDefaultsShiftToFalse() throws {
+        let json = #"{"type":"nudgeColorWheel","assetId":"12345678-1234-1234-1234-123456789012","hueParameter":"splitToneHighlightHue","saturationParameter":"splitToneHighlightSaturation","key":"left"}"#
+        let command = try decoder.decode(Command.self, from: Data(json.utf8))
+        let id = UUID(uuidString: "12345678-1234-1234-1234-123456789012")!
+        XCTAssertEqual(
+            command,
+            .nudgeColorWheel(
+                assetId: id,
+                hueParameter: "splitToneHighlightHue",
+                saturationParameter: "splitToneHighlightSaturation",
+                key: "left",
+                shift: false
+            )
+        )
+    }
+
     // MARK: - Route
 
     func testRouteAllCases() {

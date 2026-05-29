@@ -82,6 +82,16 @@ public struct EditState: Codable, Sendable, Equatable {
     public var cropRect: CGRect?
     public var cropAngle: Double?
 
+    /// Pixel size of the image `cropRect` was authored against (the
+    /// ~2048px master preview that drives the Develop pipeline). The
+    /// renderer rescales `cropRect` from this reference size to whatever
+    /// resolution it's actually rendering — so the same crop lands
+    /// correctly on the full-resolution original at export time, not as a
+    /// tiny corner ROI (#320). `nil` means "authored at the rendered
+    /// resolution" (legacy rows, or an identity crop) and yields a 1.0
+    /// scale factor — the pre-#320 behaviour.
+    public var cropReferenceSize: CGSize?
+
     public static let hslIdentity: [Double] = [0, 0, 0, 0, 0, 0, 0, 0]
     public static let identityCurve: [CGPoint] = [CGPoint(x: 0, y: 0), CGPoint(x: 1, y: 1)]
 
@@ -121,7 +131,8 @@ public struct EditState: Codable, Sendable, Equatable {
         chromaticAberration: Bool = false,
         lensVignette: Bool = false,
         cropRect: CGRect? = nil,
-        cropAngle: Double? = nil
+        cropAngle: Double? = nil,
+        cropReferenceSize: CGSize? = nil
     ) {
         self.exposure = exposure
         self.contrast = contrast
@@ -159,6 +170,7 @@ public struct EditState: Codable, Sendable, Equatable {
         self.lensVignette = lensVignette
         self.cropRect = cropRect
         self.cropAngle = cropAngle
+        self.cropReferenceSize = cropReferenceSize
     }
 
     // MARK: - Codable
@@ -178,7 +190,7 @@ public struct EditState: Codable, Sendable, Equatable {
         case toneCurvePoints, redCurvePoints, greenCurvePoints, blueCurvePoints
         case perspectiveVertical, perspectiveHorizontal, perspectiveRotation
         case chromaticAberration, lensVignette
-        case cropRect, cropAngle
+        case cropRect, cropAngle, cropReferenceSize
     }
 
     public init(from decoder: Decoder) throws {
@@ -219,7 +231,8 @@ public struct EditState: Codable, Sendable, Equatable {
             chromaticAberration: try c.decodeIfPresent(Bool.self, forKey: .chromaticAberration) ?? false,
             lensVignette: try c.decodeIfPresent(Bool.self, forKey: .lensVignette) ?? false,
             cropRect: try c.decodeIfPresent(CGRect.self, forKey: .cropRect),
-            cropAngle: try c.decodeIfPresent(Double.self, forKey: .cropAngle)
+            cropAngle: try c.decodeIfPresent(Double.self, forKey: .cropAngle),
+            cropReferenceSize: try c.decodeIfPresent(CGSize.self, forKey: .cropReferenceSize)
         )
     }
 

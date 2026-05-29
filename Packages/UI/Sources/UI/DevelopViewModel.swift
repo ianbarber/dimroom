@@ -415,6 +415,7 @@ public final class DevelopViewModel: ObservableObject {
         if isIdentity {
             editState.cropRect = nil
             editState.cropAngle = nil
+            editState.cropReferenceSize = nil
         } else {
             if let size = sourceImageSize, size.width > 0, size.height > 0 {
                 // SwiftUI overlays use a top-left origin; Core Image
@@ -425,11 +426,18 @@ public final class DevelopViewModel: ObservableObject {
                     rect: normalisedRect,
                     imageSize: size
                 )
+                // Record the resolution this pixel-space rect was authored
+                // against (the ~2048px master preview). The renderer
+                // rescales the rect from here to whatever it's actually
+                // rendering, so export of the full-res original frames the
+                // same region instead of a tiny corner ROI (#320).
+                editState.cropReferenceSize = size
             } else {
                 // No preview loaded yet — store the normalised rect
                 // directly. The renderer won't see this until a preview
                 // is attached and commitCrop fires again.
                 editState.cropRect = normalisedRect
+                editState.cropReferenceSize = nil
             }
             editState.cropAngle = clampedAngle == 0 ? nil : clampedAngle
         }

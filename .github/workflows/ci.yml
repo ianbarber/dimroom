@@ -313,6 +313,13 @@ jobs:
             exit 0
           fi
           bin/harness-develop-split-tone-flow.sh
+      - name: Run harness develop split tone keyboard flow
+        run: |
+          if [ ! -x bin/harness-develop-split-tone-keyboard-flow.sh ]; then
+            echo "No harness develop-split-tone-keyboard flow script yet — skipping."
+            exit 0
+          fi
+          bin/harness-develop-split-tone-keyboard-flow.sh
       - name: Run harness export empty flow
         run: |
           if [ ! -x bin/harness-export-empty-flow.sh ]; then

@@ -546,7 +546,7 @@ final class CommandCodingTests: XCTestCase {
         let json = String(data: data, encoding: .utf8)!
         XCTAssertEqual(
             json,
-            #"{"assetCount":3,"developIsDownloadingOriginal":false,"downloadProgressByAssetId":{},"downloadingAssetIds":[],"hasUndoToast":false,"isZoomed":false,"minRating":3,"route":"library","scopeKind":"all","selectedAssetId":"12345678-1234-1234-1234-123456789012","selectedAssetIds":[],"showHistogram":true}"#
+            #"{"assetCount":3,"developIsDownloadingOriginal":false,"downloadProgressByAssetId":{},"downloadingAssetIds":[],"hasUndoToast":false,"isZoomed":false,"magnifier":{"samplePointX":0.5,"samplePointY":0.5,"usingPreviewFallback":false,"visible":false,"zoom":2},"minRating":3,"route":"library","scopeKind":"all","selectedAssetId":"12345678-1234-1234-1234-123456789012","selectedAssetIds":[],"showHistogram":true}"#
         )
     }
 
@@ -564,7 +564,7 @@ final class CommandCodingTests: XCTestCase {
         let json = String(data: data, encoding: .utf8)!
         XCTAssertEqual(
             json,
-            #"{"assetCount":0,"developIsDownloadingOriginal":false,"downloadProgressByAssetId":{},"downloadingAssetIds":[],"hasUndoToast":false,"isZoomed":false,"minRating":0,"route":"library","scopeKind":"all","selectedAssetIds":[],"showHistogram":true}"#
+            #"{"assetCount":0,"developIsDownloadingOriginal":false,"downloadProgressByAssetId":{},"downloadingAssetIds":[],"hasUndoToast":false,"isZoomed":false,"magnifier":{"samplePointX":0.5,"samplePointY":0.5,"usingPreviewFallback":false,"visible":false,"zoom":2},"minRating":0,"route":"library","scopeKind":"all","selectedAssetIds":[],"showHistogram":true}"#
         )
     }
 
@@ -582,7 +582,7 @@ final class CommandCodingTests: XCTestCase {
         let json = String(data: data, encoding: .utf8)!
         XCTAssertEqual(
             json,
-            #"{"assetCount":0,"developIsDownloadingOriginal":false,"downloadProgressByAssetId":{},"downloadingAssetIds":[],"hasUndoToast":false,"isZoomed":true,"minRating":0,"route":"loupe","scopeKind":"all","selectedAssetIds":[],"showHistogram":true}"#
+            #"{"assetCount":0,"developIsDownloadingOriginal":false,"downloadProgressByAssetId":{},"downloadingAssetIds":[],"hasUndoToast":false,"isZoomed":true,"magnifier":{"samplePointX":0.5,"samplePointY":0.5,"usingPreviewFallback":false,"visible":false,"zoom":2},"minRating":0,"route":"loupe","scopeKind":"all","selectedAssetIds":[],"showHistogram":true}"#
         )
     }
 
@@ -613,7 +613,7 @@ final class CommandCodingTests: XCTestCase {
         let json = String(data: data, encoding: .utf8)!
         XCTAssertEqual(
             json,
-            #"{"assetCount":0,"developIsDownloadingOriginal":false,"downloadProgressByAssetId":{"12345678-1234-1234-1234-123456789012":0.5},"downloadingAssetIds":["12345678-1234-1234-1234-123456789012"],"hasUndoToast":false,"isZoomed":false,"minRating":0,"route":"loupe","scopeKind":"all","selectedAssetId":"12345678-1234-1234-1234-123456789012","selectedAssetIds":[],"showHistogram":true}"#
+            #"{"assetCount":0,"developIsDownloadingOriginal":false,"downloadProgressByAssetId":{"12345678-1234-1234-1234-123456789012":0.5},"downloadingAssetIds":["12345678-1234-1234-1234-123456789012"],"hasUndoToast":false,"isZoomed":false,"magnifier":{"samplePointX":0.5,"samplePointY":0.5,"usingPreviewFallback":false,"visible":false,"zoom":2},"minRating":0,"route":"loupe","scopeKind":"all","selectedAssetId":"12345678-1234-1234-1234-123456789012","selectedAssetIds":[],"showHistogram":true}"#
         )
     }
 
@@ -640,7 +640,7 @@ final class CommandCodingTests: XCTestCase {
         let json = String(data: data, encoding: .utf8)!
         XCTAssertEqual(
             json,
-            #"{"assetCount":0,"developDownloadProgress":0.25,"developIsDownloadingOriginal":true,"downloadProgressByAssetId":{},"downloadingAssetIds":[],"hasUndoToast":false,"isZoomed":false,"minRating":0,"route":"develop","scopeKind":"all","selectedAssetIds":[],"showHistogram":true}"#
+            #"{"assetCount":0,"developDownloadProgress":0.25,"developIsDownloadingOriginal":true,"downloadProgressByAssetId":{},"downloadingAssetIds":[],"hasUndoToast":false,"isZoomed":false,"magnifier":{"samplePointX":0.5,"samplePointY":0.5,"usingPreviewFallback":false,"visible":false,"zoom":2},"minRating":0,"route":"develop","scopeKind":"all","selectedAssetIds":[],"showHistogram":true}"#
         )
     }
 
@@ -1389,6 +1389,68 @@ final class CommandCodingTests: XCTestCase {
                 shift: false
             )
         )
+    }
+
+    // MARK: - setMagnifier (#324)
+
+    func testSetMagnifierRoundTrip() throws {
+        for visible in [true, false] {
+            for zoom: Int? in [1, 2, nil] {
+                let command = Command.setMagnifier(
+                    visible: visible,
+                    samplePointX: 0.25,
+                    samplePointY: 0.75,
+                    zoom: zoom
+                )
+                let data = try encoder.encode(command)
+                let decoded = try decoder.decode(Command.self, from: data)
+                XCTAssertEqual(command, decoded)
+            }
+        }
+    }
+
+    func testSetMagnifierJSON() throws {
+        let command = Command.setMagnifier(
+            visible: true,
+            samplePointX: 0.5,
+            samplePointY: 0.25,
+            zoom: 2
+        )
+        let data = try encoder.encode(command)
+        let json = String(data: data, encoding: .utf8)!
+        XCTAssertEqual(
+            json,
+            #"{"samplePointX":0.5,"samplePointY":0.25,"type":"setMagnifier","visible":true,"zoom":2}"#
+        )
+    }
+
+    func testDecodeSetMagnifierOmittingOptionalFields() throws {
+        // Visibility-only toggle: no sample point or zoom in the payload.
+        let json = #"{"type":"setMagnifier","visible":false}"#
+        let command = try decoder.decode(Command.self, from: Data(json.utf8))
+        XCTAssertEqual(
+            command,
+            .setMagnifier(visible: false, samplePointX: nil, samplePointY: nil, zoom: nil)
+        )
+    }
+
+    func testAppStateRoundTripWithMagnifier() throws {
+        let state = AppState(
+            route: .develop,
+            magnifier: AppState.MagnifierState(
+                visible: true,
+                samplePointX: 0.3,
+                samplePointY: 0.7,
+                zoom: 1,
+                usingPreviewFallback: true
+            )
+        )
+        let data = try encoder.encode(state)
+        let decoded = try decoder.decode(AppState.self, from: data)
+        XCTAssertEqual(state, decoded)
+        XCTAssertEqual(decoded.magnifier.visible, true)
+        XCTAssertEqual(decoded.magnifier.zoom, 1)
+        XCTAssertEqual(decoded.magnifier.usingPreviewFallback, true)
     }
 
     // MARK: - Route

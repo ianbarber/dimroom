@@ -66,6 +66,34 @@ public struct AppState: Codable, Sendable, Equatable {
     /// classified as `originalsChangedOnly` without scraping a
     /// screenshot.
     public let libraryRemoteAdditionsCount: Int?
+    /// Develop pixel-magnifier state (#324). Mirrors
+    /// `DevelopViewModel`'s magnifier fields so Layer C flows can assert
+    /// the `setMagnifier` command flipped visibility, moved the sample
+    /// point, and switched zoom without scraping a screenshot.
+    public let magnifier: MagnifierState
+
+    /// Snapshot of the Develop pixel magnifier for Layer C assertions.
+    public struct MagnifierState: Codable, Sendable, Equatable {
+        public let visible: Bool
+        public let samplePointX: Double
+        public let samplePointY: Double
+        public let zoom: Int
+        public let usingPreviewFallback: Bool
+
+        public init(
+            visible: Bool = false,
+            samplePointX: Double = 0.5,
+            samplePointY: Double = 0.5,
+            zoom: Int = 2,
+            usingPreviewFallback: Bool = false
+        ) {
+            self.visible = visible
+            self.samplePointX = samplePointX
+            self.samplePointY = samplePointY
+            self.zoom = zoom
+            self.usingPreviewFallback = usingPreviewFallback
+        }
+    }
 
     public init(
         route: Route,
@@ -83,7 +111,8 @@ public struct AppState: Codable, Sendable, Equatable {
         developIsDownloadingOriginal: Bool = false,
         developDownloadProgress: Double? = nil,
         developCurrentAssetId: UUID? = nil,
-        libraryRemoteAdditionsCount: Int? = nil
+        libraryRemoteAdditionsCount: Int? = nil,
+        magnifier: MagnifierState = MagnifierState()
     ) {
         self.route = route
         self.assetCount = assetCount
@@ -101,5 +130,6 @@ public struct AppState: Codable, Sendable, Equatable {
         self.developDownloadProgress = developDownloadProgress
         self.developCurrentAssetId = developCurrentAssetId
         self.libraryRemoteAdditionsCount = libraryRemoteAdditionsCount
+        self.magnifier = magnifier
     }
 }

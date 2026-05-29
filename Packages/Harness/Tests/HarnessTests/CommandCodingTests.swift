@@ -1338,6 +1338,28 @@ final class CommandCodingTests: XCTestCase {
         XCTAssertEqual(command, .syncFromDrive)
     }
 
+    // MARK: - backfillDriveMarkers (#328)
+
+    func testBackfillDriveMarkersRoundTrip() throws {
+        let command = Command.backfillDriveMarkers
+        let data = try encoder.encode(command)
+        let decoded = try decoder.decode(Command.self, from: data)
+        XCTAssertEqual(command, decoded)
+    }
+
+    func testBackfillDriveMarkersJSON() throws {
+        let command = Command.backfillDriveMarkers
+        let data = try encoder.encode(command)
+        let json = String(data: data, encoding: .utf8)!
+        XCTAssertEqual(json, #"{"type":"backfillDriveMarkers"}"#)
+    }
+
+    func testDecodeBackfillDriveMarkersFromJSON() throws {
+        let json = #"{"type":"backfillDriveMarkers"}"#
+        let command = try decoder.decode(Command.self, from: Data(json.utf8))
+        XCTAssertEqual(command, .backfillDriveMarkers)
+    }
+
     // MARK: - nudgeColorWheel (#305)
 
     func testNudgeColorWheelRoundTrip() throws {

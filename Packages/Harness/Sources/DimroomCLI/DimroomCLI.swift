@@ -68,6 +68,7 @@ struct DimroomCLI: ParsableCommand {
             ClearOriginalsCache.self,
             ClearPreviewCache.self,
             SyncFromDrive.self,
+            BackfillDriveMarkers.self,
             RestoreCatalogFromDrive.self,
             ReloadCatalogFromDrive.self,
             TriggerExportMenu.self,
@@ -1267,6 +1268,20 @@ extension DimroomCLI {
 
         func run() throws {
             try runCommand(.syncFromDrive, socket: socket)
+        }
+    }
+
+    struct BackfillDriveMarkers: ParsableCommand {
+        static let configuration = CommandConfiguration(
+            commandName: "backfill-drive-markers",
+            abstract: "Walk every file under the Drive /PhotoTool/ root and PATCH the dimroom appProperties marker onto any that lack it (#328). Idempotent. Returns {scanned, patched, skipped}."
+        )
+
+        @Option(name: .long, help: "Path to the harness socket.")
+        var socket: String = HarnessServer.defaultSocketPath
+
+        func run() throws {
+            try runCommand(.backfillDriveMarkers, socket: socket)
         }
     }
 

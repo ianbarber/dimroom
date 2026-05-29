@@ -157,6 +157,14 @@ public enum Command: Codable, Sendable, Equatable {
     /// is `left`/`right`/`up`/`down` (plain → hue, shift → saturation)
     /// or `reset` (→ identity). `shift` is ignored for `reset`.
     case nudgeColorWheel(assetId: UUID, hueParameter: String, saturationParameter: String, key: String, shift: Bool)
+    /// Drives the crop overlay's drag-to-rotate handles (#323) without
+    /// synthesising a pointer drag. The handler errors unless crop mode is
+    /// active, then adds `angleDelta` (degrees) to the live `cropAngle`
+    /// through the same `setCropAngleLive` path the on-screen handle drag
+    /// and the straighten slider use. `corner` is validated against the
+    /// four corner names for protocol fidelity; rotation is always about
+    /// the crop centre, so the corner does not change the result.
+    case dragRotateHandle(corner: String, angleDelta: Double)
 
     private enum CodingKeys: String, CodingKey {
         case type
@@ -196,6 +204,8 @@ public enum Command: Codable, Sendable, Equatable {
         case hueParameter
         case saturationParameter
         case shift
+        case corner
+        case angleDelta
     }
 
     private enum CommandType: String, Codable {
@@ -267,6 +277,7 @@ public enum Command: Codable, Sendable, Equatable {
         case triggerExportMenu
         case completeExportSheet
         case nudgeColorWheel
+        case dragRotateHandle
     }
 
     public init(from decoder: Decoder) throws {
@@ -500,6 +511,10 @@ public enum Command: Codable, Sendable, Equatable {
                 key: key,
                 shift: shift
             )
+        case .dragRotateHandle:
+            let corner = try container.decode(String.self, forKey: .corner)
+            let angleDelta = try container.decode(Double.self, forKey: .angleDelta)
+            self = .dragRotateHandle(corner: corner, angleDelta: angleDelta)
         }
     }
 
@@ -716,6 +731,10 @@ public enum Command: Codable, Sendable, Equatable {
             try container.encode(saturationParameter, forKey: .saturationParameter)
             try container.encode(key, forKey: .key)
             try container.encode(shift, forKey: .shift)
+        case .dragRotateHandle(let corner, let angleDelta):
+            try container.encode(CommandType.dragRotateHandle, forKey: .type)
+            try container.encode(corner, forKey: .corner)
+            try container.encode(angleDelta, forKey: .angleDelta)
         }
     }
 }

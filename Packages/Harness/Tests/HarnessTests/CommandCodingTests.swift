@@ -1391,6 +1391,35 @@ final class CommandCodingTests: XCTestCase {
         )
     }
 
+    // MARK: - dragRotateHandle (#323)
+
+    func testDragRotateHandleRoundTrip() throws {
+        for corner in ["topLeft", "topRight", "bottomLeft", "bottomRight"] {
+            for delta in [10.0, -2.5, 0.0] {
+                let command = Command.dragRotateHandle(corner: corner, angleDelta: delta)
+                let data = try encoder.encode(command)
+                let decoded = try decoder.decode(Command.self, from: data)
+                XCTAssertEqual(command, decoded)
+            }
+        }
+    }
+
+    func testDragRotateHandleJSON() throws {
+        let command = Command.dragRotateHandle(corner: "topLeft", angleDelta: 10)
+        let data = try encoder.encode(command)
+        let json = String(data: data, encoding: .utf8)!
+        XCTAssertEqual(
+            json,
+            #"{"angleDelta":10,"corner":"topLeft","type":"dragRotateHandle"}"#
+        )
+    }
+
+    func testDecodeDragRotateHandleFromJSON() throws {
+        let json = #"{"type":"dragRotateHandle","corner":"bottomRight","angleDelta":-3.5}"#
+        let command = try decoder.decode(Command.self, from: Data(json.utf8))
+        XCTAssertEqual(command, .dragRotateHandle(corner: "bottomRight", angleDelta: -3.5))
+    }
+
     // MARK: - Route
 
     func testRouteAllCases() {

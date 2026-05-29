@@ -45,6 +45,50 @@ public enum DriveFilesAPI {
         return request
     }
 
+    /// `GET /drive/v3/files` — list *all* immediate children of
+    /// `parentId` (files and subfolders), pulling `appProperties` and
+    /// `mimeType` so the marker backfill (#328) can decide skip-vs-patch
+    /// client-side and recurse into folders. Threads `pageToken` when the
+    /// caller is walking a multi-page listing.
+    public static func listChildrenRequest(
+        parentId: String,
+        pageToken: String? = nil
+    ) -> URLRequest {
+        var components = URLComponents(url: filesEndpoint, resolvingAgainstBaseURL: false)!
+        let query = #"'\#(escapeForDriveQuery(parentId))' in parents and trashed = false"#
+        var items = [
+            URLQueryItem(name: "q", value: query),
+            URLQueryItem(name: "fields", value: "nextPageToken,files(id,name,mimeType,appProperties)"),
+            URLQueryItem(name: "pageSize", value: "1000"),
+            URLQueryItem(name: "spaces", value: "drive"),
+        ]
+        if let pageToken {
+            items.append(URLQueryItem(name: "pageToken", value: pageToken))
+        }
+        components.queryItems = items
+        var request = URLRequest(url: components.url!)
+        request.httpMethod = "GET"
+        return request
+    }
+
+    /// `PATCH /drive/v3/files/{id}` — merge `appProperties` into the
+    /// file's existing metadata. Drive treats an `appProperties` body as
+    /// a per-key merge (not a replace), so sending only the dimroom
+    /// marker preserves any existing `contentHash` / `dimroomAssetId`
+    /// keys. Used by the legacy-marker backfill (#328).
+    public static func patchAppPropertiesRequest(
+        fileId: String,
+        appProperties: [String: String]
+    ) throws -> URLRequest {
+        let url = filesEndpoint.appendingPathComponent(fileId)
+        var request = URLRequest(url: url)
+        request.httpMethod = "PATCH"
+        request.setValue("application/json; charset=utf-8", forHTTPHeaderField: "Content-Type")
+        let body: [String: Any] = ["appProperties": appProperties]
+        request.httpBody = try JSONSerialization.data(withJSONObject: body, options: [.sortedKeys])
+        return request
+    }
+
     /// `GET /drive/v3/files` — look up an existing file inside `parentId`
     /// whose `appProperties.contentHash` equals the given hash. Kept as
     /// the per-folder fallback for `DriveUploader` when `DedupScope.folder`
@@ -90,20 +134,29 @@ public enum DriveFilesAPI {
     public struct DriveFile: Codable, Sendable, Equatable {
         public let id: String
         public let name: String?
+        public let mimeType: String?
         public let appProperties: [String: String]?
 
-        public init(id: String, name: String? = nil, appProperties: [String: String]? = nil) {
+        public init(
+            id: String,
+            name: String? = nil,
+            mimeType: String? = nil,
+            appProperties: [String: String]? = nil
+        ) {
             self.id = id
             self.name = name
+            self.mimeType = mimeType
             self.appProperties = appProperties
         }
     }
 
     public struct DriveFileList: Codable, Sendable, Equatable {
         public let files: [DriveFile]
+        public let nextPageToken: String?
 
-        public init(files: [DriveFile]) {
+        public init(files: [DriveFile], nextPageToken: String? = nil) {
             self.files = files
+            self.nextPageToken = nextPageToken
         }
     }
 

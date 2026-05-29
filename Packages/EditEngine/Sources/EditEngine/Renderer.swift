@@ -336,7 +336,17 @@ public enum Renderer {
         // photographic" rather than crushing corners to pure black or
         // white. The linear amount→strength mapping then gives a
         // visible, monotonic gradient across the full slider range.
-        let maxStrength = 0.75
+        //
+        // Calibration target (#316): the full slider travel should fill
+        // the range that's actually useful for photo editing, not the
+        // theoretical maximum of the tint. At ±100 the corners read as a
+        // clearly-darkened (or -lightened) photo, at ±50 the vignette is
+        // subtle but unmistakable, and 0 is a no-op. #264's 0.75 cap left
+        // the extremes looking like a soft no-op; 0.90 strengthens the
+        // corners (≈0.90 blend factor at the corner ⇒ a 128-grey corner
+        // lands near 13, deeply shaded but not crushed to black) while a
+        // positive ±100 tops out near 242, bright but not blown out.
+        let maxStrength = 0.90
         let strength = (Swift.abs(amount) / 100.0) * maxStrength
 
         let gradient = CIFilter(name: "CIRadialGradient")!

@@ -967,60 +967,113 @@ final class AppDelegate: NSObject, NSApplicationDelegate, ObservableObject {
         guard let catalogPath = resolvedCatalogPath else { return }
         guard let driveClient else { return }
 
-        // Read the live-asset count BEFORE the teardown below drops
-        // `catalog`; reading after would always see `nil → 0` and the
-        // guard would never fire. A non-empty placeholder means the user
-        // imported between a failed launch-time OAuth and this retry, so
-        // we skip the destructive restore rather than clobber their work
-        // (#293). The existing launch-path catalog wiring stays live.
-        let placeholderAssetCount = (try? catalog?.countAssets()) ?? 0
+        // Capture the placeholder catalog reference NOW (not lazily via
+        // `self.catalog`): the helper reads its live-asset count before
+        // running `teardown`, which nils `self.catalog`. Passing the
+        // reference here keeps the "count read before teardown" ordering
+        // the #293 guard depends on.
+        await Self.performSameSessionRestore(
+            placeholderCatalog: catalog,
+            catalogPath: catalogPath,
+            teardown: {
+                // Drop refs that pin the placeholder catalog before
+                // deleting the file. GRDB releases the underlying SQLite
+                // connection on deinit of `CatalogDatabase`, so clearing
+                // every retainer lets the file handle close before
+                // `removeItem` runs.
+                if let publisher = self.catalogPublisher {
+                    await publisher.stop()
+                }
+                self.catalogPublisher = nil
+                self.originalsCoordinator = nil
+                self.catalog?.onChange = nil
+                self.catalog = nil
+                self.changePollerEventsTask?.cancel()
+                self.changePollerEventsTask = nil
+                self.changePoller = nil
+            },
+            removeItem: { try FileManager.default.removeItem(atPath: $0) },
+            restore: {
+                let fileIdStore = self.driveFileIdStore ?? FileSystemDriveFileIdStore(
+                    path: FileSystemDriveFileIdStore.defaultPath()
+                )
+                let uploader: any CatalogUploading
+                if let stubCatalogUploader = self.stubCatalogUploader {
+                    uploader = stubCatalogUploader
+                } else {
+                    let httpClient = URLSessionHTTPClient()
+                    let session = AuthorizedSession(client: httpClient, provider: driveClient)
+                    let resolver = DriveFolderResolver(session: session)
+                    uploader = DriveCatalogUploader(session: session, folderResolver: resolver)
+                }
+                return try await CatalogPublisher.restoreIfNeeded(
+                    localPath: catalogPath,
+                    uploader: uploader,
+                    fileIdStore: fileIdStore,
+                    prompt: { _ in
+                        // The user already consented to Connect+restore
+                        // seconds ago via the launch-time alert (#256); a
+                        // second prompt here would be confusing.
+                        true
+                    }
+                )
+            },
+            reopenAndWire: {
+                // Re-open the catalog — restore wrote the file when it
+                // landed, otherwise `openCatalog` creates an empty one.
+                // Either way the view models below get a live SQLite
+                // handle to read from.
+                guard let restoredCatalog = self.openCatalog(at: catalogPath) else {
+                    print("[Dimroom] same-session restore: failed to re-open catalog at \(catalogPath)")
+                    return
+                }
+                self.wireCatalog(restoredCatalog, args: self.resolvedArgs)
+            },
+            onFailure: { error in
+                let reason = (error as? SyncEngineError).map(Self.describeRestoreError)
+                    ?? String(describing: error)
+                _ = Self.offerFreshStartAfterFailure(reason: reason)
+            }
+        )
+    }
+
+    /// Orchestration for `runSameSessionRestore()`, lifted off the
+    /// `AppDelegate` instance so the #293 guard can be exercised against
+    /// a real seeded `CatalogDatabase` without constructing an
+    /// `AppDelegate` (see `SameSessionRestoreTeardownTests`).
+    ///
+    /// The destructive effects are injected as closures so a test can
+    /// spy on them. The live-asset count is read from `placeholderCatalog`
+    /// *before* `teardown` runs; when `shouldRunSameSessionRestore` says
+    /// the placeholder still holds imports the function returns *before*
+    /// invoking `teardown` / `removeItem` / `restore`, leaving the user's
+    /// interim work and the launch-path wiring untouched (#293). This is
+    /// the integration the predicate test alone cannot pin: deleting the
+    /// guard makes the effects fire on a non-empty placeholder.
+    ///
+    /// On a `countAssets()` read failure the count collapses to `0` (the
+    /// `try?` / `?? 0`), so we lean toward running the restore rather
+    /// than letting a transient read error block it.
+    nonisolated static func performSameSessionRestore(
+        placeholderCatalog: CatalogDatabase?,
+        catalogPath: String,
+        teardown: @MainActor () async -> Void,
+        removeItem: @MainActor (String) throws -> Void,
+        restore: @MainActor () async throws -> RestoreOutcome,
+        reopenAndWire: @MainActor () -> Void,
+        onFailure: @MainActor (any Error) -> Void
+    ) async {
+        let placeholderAssetCount = (try? placeholderCatalog?.countAssets()) ?? 0
         guard Self.shouldRunSameSessionRestore(placeholderAssetCount: placeholderAssetCount) else {
             print("[Dimroom] same-session restore skipped: placeholder catalog has \(placeholderAssetCount) asset(s), keeping local work")
             return
         }
 
-        // Drop refs that pin the placeholder catalog before deleting
-        // the file. GRDB releases the underlying SQLite connection on
-        // deinit of `CatalogDatabase`, so clearing every retainer lets
-        // the file handle close before `removeItem` runs.
-        if let publisher = catalogPublisher {
-            await publisher.stop()
-        }
-        catalogPublisher = nil
-        originalsCoordinator = nil
-        catalog?.onChange = nil
-        catalog = nil
-        changePollerEventsTask?.cancel()
-        changePollerEventsTask = nil
-        changePoller = nil
-
-        try? FileManager.default.removeItem(atPath: catalogPath)
-
-        let fileIdStore = driveFileIdStore ?? FileSystemDriveFileIdStore(
-            path: FileSystemDriveFileIdStore.defaultPath()
-        )
-        let uploader: any CatalogUploading
-        if let stubCatalogUploader {
-            uploader = stubCatalogUploader
-        } else {
-            let httpClient = URLSessionHTTPClient()
-            let session = AuthorizedSession(client: httpClient, provider: driveClient)
-            let resolver = DriveFolderResolver(session: session)
-            uploader = DriveCatalogUploader(session: session, folderResolver: resolver)
-        }
+        await teardown()
+        try? await removeItem(catalogPath)
 
         do {
-            let outcome = try await CatalogPublisher.restoreIfNeeded(
-                localPath: catalogPath,
-                uploader: uploader,
-                fileIdStore: fileIdStore,
-                prompt: { _ in
-                    // The user already consented to Connect+restore
-                    // seconds ago via the launch-time alert (#256); a
-                    // second prompt here would be confusing.
-                    true
-                }
-            )
+            let outcome = try await restore()
             switch outcome {
             case .restored(_, let bytes):
                 print("[Dimroom] same-session catalog restore succeeded (\(bytes) bytes)")
@@ -1031,20 +1084,11 @@ final class AppDelegate: NSObject, NSApplicationDelegate, ObservableObject {
             }
         } catch {
             print("[Dimroom] same-session catalog restore failed: \(error)")
-            try? FileManager.default.removeItem(atPath: catalogPath)
-            let reason = (error as? SyncEngineError).map(Self.describeRestoreError)
-                ?? String(describing: error)
-            _ = Self.offerFreshStartAfterFailure(reason: reason)
+            try? await removeItem(catalogPath)
+            await onFailure(error)
         }
 
-        // Re-open the catalog — restore wrote the file when it landed,
-        // otherwise `openCatalog` creates an empty one. Either way the
-        // view models below get a live SQLite handle to read from.
-        guard let restoredCatalog = openCatalog(at: catalogPath) else {
-            print("[Dimroom] same-session restore: failed to re-open catalog at \(catalogPath)")
-            return
-        }
-        wireCatalog(restoredCatalog, args: resolvedArgs)
+        await reopenAndWire()
     }
 
     // MARK: - Export

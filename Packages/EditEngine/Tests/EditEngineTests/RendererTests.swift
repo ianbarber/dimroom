@@ -979,19 +979,13 @@ final class RendererTests: XCTestCase {
     }
 
     func testStrongLuminanceNoiseReductionDecreasesVariance() {
-        // Strong luminance NR must do two things at once: drop the per-pixel
-        // luma variance across a patch (smoothing actually happened) AND
-        // preserve the patch mean (overall brightness/detail not destroyed).
-        // The old single-pixel "did anything change" check passed for any
-        // perturbation; this pins the smoothing property the slider promises.
-        //
-        // Both sliders are pinned at 100 because the current renderer gates
-        // CINoiseReduction's smoothing on the chroma slider (it maps to
-        // inputNoiseLevel) — the luma slider on its own only sharpens via
-        // inputSharpness, which raises luma variance instead of dropping it.
-        // This test therefore proves that strong combined NR smooths luma,
-        // not that the luma slider does so in isolation. See #303 for the
-        // renderer fix that would let us test the sliders independently.
+        // Strong NR with both sliders up must do two things at once: drop the
+        // per-pixel luma variance across a patch (smoothing actually happened)
+        // AND preserve the patch mean (overall brightness/detail not
+        // destroyed). The old single-pixel "did anything change" check passed
+        // for any perturbation; this pins the smoothing property the sliders
+        // promise. The per-axis independence guarantees are covered separately
+        // by the testLuminanceNoiseReductionAlone* / testChrominance* tests.
         let source = makeNoisyImage(
             baseLuma: 128,
             lumaJitter: 20,
@@ -1078,6 +1072,153 @@ final class RendererTests: XCTestCase {
             editState: EditState(luminanceNoiseReduction: 80, chrominanceNoiseReduction: 80)
         )
         XCTAssertEqual(result.extent, source.extent)
+    }
+
+    func testLuminanceNoiseReductionAloneDecreasesLumaVariance() {
+        // The luma slider on its own must smooth luma. With chroma pinned at 0,
+        // luma variance over an interior patch must drop well below the source.
+        // Before #303 this raised variance (the luma slider only sharpened).
+        let source = makeNoisyImage(
+            baseLuma: 128,
+            lumaJitter: 20,
+            chromaJitter: 0,
+            seed: 0xC0FFEE
+        )
+        let patch = CGRect(x: 28, y: 28, width: 8, height: 8)
+
+        let srcLuma = samplePatch(image: source, rect: patch, context: ctx).map(luma)
+        let result = Renderer.render(
+            source: source,
+            editState: EditState(luminanceNoiseReduction: 100, chrominanceNoiseReduction: 0)
+        )
+        let resLuma = samplePatch(image: result, rect: patch, context: ctx).map(luma)
+
+        let srcVar = variance(srcLuma)
+        let resVar = variance(resLuma)
+        XCTAssertLessThan(
+            resVar,
+            srcVar * 0.5,
+            "Luma slider alone should drop patch luma variance by at least half (src=\(srcVar), res=\(resVar))"
+        )
+        XCTAssertEqual(
+            mean(resLuma),
+            mean(srcLuma),
+            accuracy: 2.0,
+            "Luma slider alone should preserve patch mean brightness"
+        )
+    }
+
+    func testLuminanceNoiseReductionAloneDoesNotRaiseLumaVariance() {
+        // Explicit regression guard for the #303 bug: with chroma at 0, the
+        // luma slider must never *increase* luma variance (the old mapping
+        // sharpened, pushing variance up to ~1.8× the source).
+        let source = makeNoisyImage(
+            baseLuma: 128,
+            lumaJitter: 20,
+            chromaJitter: 0,
+            seed: 0xC0FFEE
+        )
+        let patch = CGRect(x: 28, y: 28, width: 8, height: 8)
+
+        let srcVar = variance(samplePatch(image: source, rect: patch, context: ctx).map(luma))
+        let result = Renderer.render(
+            source: source,
+            editState: EditState(luminanceNoiseReduction: 100, chrominanceNoiseReduction: 0)
+        )
+        let resVar = variance(samplePatch(image: result, rect: patch, context: ctx).map(luma))
+
+        XCTAssertLessThanOrEqual(
+            resVar,
+            srcVar,
+            "Luma slider alone must not raise luma variance (src=\(srcVar), res=\(resVar))"
+        )
+    }
+
+    func testChrominanceNoiseReductionAloneDecreasesChromaVariance() {
+        // The chroma slider on its own must smooth chroma. With luma pinned at
+        // 0, the B−R chroma proxy's variance must drop well below the source.
+        let source = makeNoisyImage(
+            baseLuma: 128,
+            lumaJitter: 0,
+            chromaJitter: 20,
+            seed: 0xBADF00D
+        )
+        let patch = CGRect(x: 28, y: 28, width: 8, height: 8)
+
+        let srcChroma = samplePatch(image: source, rect: patch, context: ctx).map(chromaBR)
+        let result = Renderer.render(
+            source: source,
+            editState: EditState(luminanceNoiseReduction: 0, chrominanceNoiseReduction: 100)
+        )
+        let resChroma = samplePatch(image: result, rect: patch, context: ctx).map(chromaBR)
+
+        let srcVar = variance(srcChroma)
+        let resVar = variance(resChroma)
+        XCTAssertLessThan(
+            resVar,
+            srcVar * 0.5,
+            "Chroma slider alone should drop patch B−R variance by at least half (src=\(srcVar), res=\(resVar))"
+        )
+        XCTAssertEqual(
+            mean(resChroma),
+            mean(srcChroma),
+            accuracy: 3.0,
+            "Chroma slider alone should preserve patch chroma mean"
+        )
+    }
+
+    func testChrominanceNoiseReductionAloneLeavesLumaApproximatelyUnchanged() {
+        // The chroma slider must not smear luma. A naive whole-image blur would
+        // collapse luma variance here; the YCbCr recombination leaves luma
+        // bit-stable, so its patch variance must stay close to the source.
+        let source = makeNoisyImage(
+            baseLuma: 128,
+            lumaJitter: 20,
+            chromaJitter: 20,
+            seed: 0x5EED1
+        )
+        let patch = CGRect(x: 28, y: 28, width: 8, height: 8)
+
+        let srcVar = variance(samplePatch(image: source, rect: patch, context: ctx).map(luma))
+        let result = Renderer.render(
+            source: source,
+            editState: EditState(luminanceNoiseReduction: 0, chrominanceNoiseReduction: 100)
+        )
+        let resVar = variance(samplePatch(image: result, rect: patch, context: ctx).map(luma))
+
+        XCTAssertEqual(
+            resVar,
+            srcVar,
+            accuracy: srcVar * 0.3,
+            "Chroma slider alone should leave patch luma variance ≈ unchanged (src=\(srcVar), res=\(resVar))"
+        )
+    }
+
+    func testLuminanceNoiseReductionAloneLeavesChromaApproximatelyUnchanged() {
+        // Symmetric to the above: the luma slider must not smear chroma. The
+        // B−R proxy's patch variance must stay close to the source even though
+        // luma is being heavily smoothed.
+        let source = makeNoisyImage(
+            baseLuma: 128,
+            lumaJitter: 20,
+            chromaJitter: 20,
+            seed: 0x5EED1
+        )
+        let patch = CGRect(x: 28, y: 28, width: 8, height: 8)
+
+        let srcVar = variance(samplePatch(image: source, rect: patch, context: ctx).map(chromaBR))
+        let result = Renderer.render(
+            source: source,
+            editState: EditState(luminanceNoiseReduction: 100, chrominanceNoiseReduction: 0)
+        )
+        let resVar = variance(samplePatch(image: result, rect: patch, context: ctx).map(chromaBR))
+
+        XCTAssertEqual(
+            resVar,
+            srcVar,
+            accuracy: srcVar * 0.3,
+            "Luma slider alone should leave patch B−R variance ≈ unchanged (src=\(srcVar), res=\(resVar))"
+        )
     }
 
     // MARK: - Split Toning

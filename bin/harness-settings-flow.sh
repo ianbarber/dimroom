@@ -18,6 +18,8 @@
 set -euo pipefail
 
 REPO_ROOT="$(cd "$(dirname "$0")/.." && pwd)"
+# shellcheck source=lib/harness-launch.sh
+. "$REPO_ROOT/bin/lib/harness-launch.sh"
 SCREENSHOT_DIR="${SCREENSHOT_DIR:-$REPO_ROOT/.artifacts/settings}"
 SEED_SRC="$REPO_ROOT/fixtures/library-seed"
 WORK_DIR="$REPO_ROOT/.artifacts/harness-settings"
@@ -57,31 +59,15 @@ for bin in "$APP_BIN" "$CLI_BIN" "$FIXTURE_BIN"; do
 done
 
 launch_app() {
-    # `--originals-cache` pins the LRU cache to $WORK_DIR so the eviction
-    # assertion below inspects our pre-seeded index, not the user's real
-    # cache; DIMROOM_ORIGINALS_DIR keeps import-staging out of Application
-    # Support too (the scoping itself comes from issue #289).
-    DIMROOM_HARNESS_SOCKET="$SOCKET" \
-        DIMROOM_ORIGINALS_DIR="$ORIGINALS_CACHE" \
-        "$APP_BIN" --harness \
-        --fixture-catalog "$CATALOG_PATH" \
-        --preview-cache "$PREVIEW_CACHE" \
-        --originals-cache "$ORIGINALS_CACHE" \
-        --settings-suite "$DEFAULTS_DOMAIN" &
-    APP_PID=$!
-
-    for i in $(seq 1 30); do
-        if [ -e "$SOCKET" ]; then
-            return
-        fi
-        if ! kill -0 "$APP_PID" 2>/dev/null; then
-            echo "ERROR: App exited before socket was ready"
-            exit 1
-        fi
-        sleep 1
-    done
-    echo "ERROR: Socket not ready after 30s"
-    exit 1
+    # The helper scopes both --originals-cache and DIMROOM_ORIGINALS_DIR to
+    # $WORK_DIR/originals (== $ORIGINALS_CACHE), so the eviction assertion below
+    # inspects our pre-seeded index, not the user's real cache, and import
+    # staging stays out of Application Support too (scoping from issue #289).
+    # --settings-suite + --preview-cache come from the convention globals.
+    FIXTURE_CATALOG="$CATALOG_PATH"
+    HARNESS_WORK_DIR="$WORK_DIR"
+    SETTINGS_SUITE="$DEFAULTS_DOMAIN"
+    harness_launch_app
 }
 
 quit_app() {

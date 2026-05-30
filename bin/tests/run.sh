@@ -1,6 +1,8 @@
 #!/usr/bin/env bash
-# Layer A tests for bin/agent-loop.sh helpers.
-# Drives extract_approval_timestamp with fixture JSON payloads — no network.
+# Layer A bash tests dispatched by CI (.github/workflows/ci.yml bash-tests job).
+# Drives bin/agent-loop.sh's extract_approval_timestamp with fixture JSON
+# payloads, then dispatches the bin/lib/harness-launch.sh helper suite. No
+# network.
 
 set -euo pipefail
 
@@ -54,4 +56,15 @@ assert_extract \
   ""
 
 printf '\n%d passed, %d failed\n' "$PASS" "$FAIL"
-[ "$FAIL" -eq 0 ]
+agent_loop_ok=0
+[ "$FAIL" -eq 0 ] || agent_loop_ok=1
+
+# Dispatch the harness-launch helper suite (it self-reports and exits
+# non-zero on any failure). Combine its result with the agent-loop result so
+# this one entrypoint covers both.
+echo
+echo "=== bin/tests/test-harness-launch.sh ==="
+harness_launch_ok=0
+"$REPO_ROOT/bin/tests/test-harness-launch.sh" || harness_launch_ok=1
+
+[ "$agent_loop_ok" -eq 0 ] && [ "$harness_launch_ok" -eq 0 ]

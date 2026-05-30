@@ -12,6 +12,8 @@
 set -euo pipefail
 
 REPO_ROOT="$(cd "$(dirname "$0")/.." && pwd)"
+# shellcheck source=lib/harness-launch.sh
+. "$REPO_ROOT/bin/lib/harness-launch.sh"
 SCREENSHOT_DIR="${SCREENSHOT_DIR:-$REPO_ROOT/.artifacts/download}"
 SEED_SRC="$REPO_ROOT/fixtures/library-seed"
 WORK_DIR="$REPO_ROOT/.artifacts/harness-download"
@@ -56,33 +58,18 @@ if [ ! -f "$CATALOG_PATH" ]; then
 fi
 
 echo "=== Launching app in harness mode (slow-chunks stub downloader) ==="
-DIMROOM_HARNESS_SOCKET="$SOCKET" \
-DIMROOM_HARNESS_DISABLE_DRIVE=1 \
-DIMROOM_HARNESS_AUTO_CONFIRM_RESTORE=0 \
-DIMROOM_HARNESS_STUB_DOWNLOADER="slow-chunks" \
-DIMROOM_ORIGINALS_CACHE_BYTES="1048576" \
-    "$APP_BIN" --harness \
-    --fixture-catalog "$CATALOG_PATH" \
-    --preview-cache "$PREVIEW_CACHE" \
-    --originals-cache "$ORIGINALS_CACHE" &
-APP_PID=$!
-
-echo "=== Waiting for socket ==="
-for i in $(seq 1 30); do
-    if [ -e "$SOCKET" ]; then
-        echo "Socket ready after ${i}s"
-        break
-    fi
-    if ! kill -0 "$APP_PID" 2>/dev/null; then
-        echo "ERROR: App exited before socket was ready"
-        exit 1
-    fi
-    sleep 1
-done
-if [ ! -e "$SOCKET" ]; then
-    echo "ERROR: Socket not ready after 30s"
-    exit 1
-fi
+# HARNESS_WORK_DIR scopes both DIMROOM_ORIGINALS_DIR and --originals-cache to
+# $WORK_DIR/originals (== $ORIGINALS_CACHE); the stub downloader + cache budget
+# ride along in HARNESS_ENV.
+FIXTURE_CATALOG="$CATALOG_PATH"
+HARNESS_WORK_DIR="$WORK_DIR"
+HARNESS_ENV=(
+    DIMROOM_HARNESS_DISABLE_DRIVE=1
+    DIMROOM_HARNESS_AUTO_CONFIRM_RESTORE=0
+    DIMROOM_HARNESS_STUB_DOWNLOADER=slow-chunks
+    DIMROOM_ORIGINALS_CACHE_BYTES=1048576
+)
+harness_launch_app
 
 echo "=== navigate library ==="
 NAV_OUT=$("$CLI_BIN" navigate library --socket "$SOCKET")

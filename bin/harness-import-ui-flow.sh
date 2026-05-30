@@ -12,6 +12,8 @@
 set -euo pipefail
 
 REPO_ROOT="$(cd "$(dirname "$0")/.." && pwd)"
+# shellcheck source=lib/harness-launch.sh
+. "$REPO_ROOT/bin/lib/harness-launch.sh"
 SCREENSHOT_DIR="${SCREENSHOT_DIR:-$REPO_ROOT/.artifacts/import-ui}"
 WORK_DIR="$REPO_ROOT/.artifacts/harness-import-ui"
 CATALOG_PATH="$WORK_DIR/catalog.sqlite"
@@ -79,29 +81,11 @@ mkdir -p "$WORK_DIR" "$ORIGINALS_DIR" "$PREVIEW_CACHE" "$SCREENSHOT_DIR"
 rm -f "$CATALOG_PATH"
 
 echo "=== Launching app in harness mode ==="
-DIMROOM_HARNESS_SOCKET="$SOCKET" \
-DIMROOM_HARNESS_DISABLE_DRIVE=1 \
-DIMROOM_HARNESS_AUTO_CONFIRM_RESTORE=0 \
-DIMROOM_ORIGINALS_DIR="$ORIGINALS_DIR" \
-"$APP_BIN" --harness --fixture-catalog "$CATALOG_PATH" --preview-cache "$PREVIEW_CACHE" &
-APP_PID=$!
-
-echo "=== Waiting for socket ==="
-for i in $(seq 1 30); do
-    if [ -e "$SOCKET" ]; then
-        echo "Socket ready after ${i}s"
-        break
-    fi
-    if ! kill -0 "$APP_PID" 2>/dev/null; then
-        echo "ERROR: App exited before socket was ready"
-        exit 1
-    fi
-    sleep 1
-done
-if [ ! -e "$SOCKET" ]; then
-    echo "ERROR: Socket not ready after 30s"
-    exit 1
-fi
+# PREVIEW_CACHE is already set above, so the helper adds --preview-cache.
+FIXTURE_CATALOG="$CATALOG_PATH"
+HARNESS_WORK_DIR="$WORK_DIR"
+HARNESS_ENV=(DIMROOM_HARNESS_DISABLE_DRIVE=1 DIMROOM_HARNESS_AUTO_CONFIRM_RESTORE=0)
+harness_launch_app
 
 echo "=== importFolder (expect 3 imported, 0 skipped) ==="
 IMPORT_OUT=$("$CLI_BIN" import-folder "$IMPORT_SOURCE" --socket "$SOCKET")

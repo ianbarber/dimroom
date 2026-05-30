@@ -148,10 +148,19 @@ public struct DevelopView: View {
                 viewModel.enterCropMode()
             }
         } label: {
+            // Why: `.foregroundStyle(.white)` must sit on each child here —
+            // not on the enclosing HStack — because a `.bordered` Button on a
+            // dark `.tint` renders its label in the (dark) tint colour, which
+            // is the black-on-dark-gray bug. `ImageRenderer` propagates a
+            // container-level foreground into the label subtree, so an offline
+            // snapshot can't catch a regression; CropControlsStructureTests is
+            // the structural guard. Same class as #74 (scope picker) / #241.
             HStack(spacing: 6) {
                 Image(systemName: "crop.rotate")
+                    .foregroundStyle(.white)
                 Text(cropViewModel.isActive ? "Done" : "Crop")
                     .font(.system(size: 12, weight: .medium))
+                    .foregroundStyle(.white)
             }
             .frame(maxWidth: .infinity)
             .padding(.vertical, 6)
@@ -180,6 +189,13 @@ public struct DevelopView: View {
             }
             .pickerStyle(.menu)
             .labelsHidden()
+            // `.tint(.white)` lights the popup's chevron / selection indicator
+            // and `.foregroundStyle(.white)` the selected-value label, both of
+            // which otherwise inherit a near-black colour against the dark
+            // sidebar (#319). Same residual-AppKit-control class as #74 / #241.
+            .tint(.white)
+            .foregroundStyle(.white)
+            .accessibilityIdentifier("crop-aspect-picker")
 
             VStack(alignment: .leading, spacing: 4) {
                 HStack {

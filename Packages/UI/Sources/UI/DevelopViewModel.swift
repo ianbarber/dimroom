@@ -308,6 +308,15 @@ public final class DevelopViewModel: ObservableObject {
         }
     }
 
+    /// Wire-name of a slider the harness wants brought on-screen before
+    /// it posts a synthetic double-click (#348). `DevelopView` observes
+    /// this inside its `ScrollViewReader`, calls `proxy.scrollTo(...)`,
+    /// and clears it — mirroring `LibraryViewModel.pendingScrollToAssetId`.
+    /// Needed because off-fold controls (e.g. Vignette) are clipped in the
+    /// 1024×768 harness window, so their recorded hit region would be
+    /// outside the visible content until scrolled into view.
+    @Published public var pendingScrollToParameter: String?
+
     /// Currently-selected curve channel (Luminance / R / G / B). The
     /// curve editor binds to this so the channel tabs and the canvas
     /// stay in sync, and the harness can drive it through

@@ -157,6 +157,20 @@ public enum Command: Codable, Sendable, Equatable {
     /// is `left`/`right`/`up`/`down` (plain → hue, shift → saturation)
     /// or `reset` (→ identity). `shift` is ignored for `reset`.
     case nudgeColorWheel(assetId: UUID, hueParameter: String, saturationParameter: String, key: String, shift: Bool)
+    /// Synthesize a genuine double-click NSEvent at a Develop slider's
+    /// track and let SwiftUI's gesture chain handle it, instead of
+    /// calling `resetParameter` directly. This is the gesture-level path
+    /// other edit commands deliberately bypass — it proves the
+    /// arbitration fix (#265/#347) end-to-end. A flow drives the slider
+    /// off identity, double-clicks at a non-identity track fraction, and
+    /// asserts via `getEdit` that the value snapped back to identity;
+    /// because the click position differs from identity, only the reset
+    /// gesture firing can explain the result. `parameter` is the slider's
+    /// wire-name (e.g. `vignetteAmount`); `atFraction` is the horizontal
+    /// hit position along the track (0…1, default 0.5 / centre). The
+    /// handler scrolls the slider on-screen before clicking so off-fold
+    /// controls (Vignette) are reachable in the 1024×768 harness window.
+    case doubleClickSlider(parameter: String, atFraction: Double?)
 
     private enum CodingKeys: String, CodingKey {
         case type
@@ -196,6 +210,7 @@ public enum Command: Codable, Sendable, Equatable {
         case hueParameter
         case saturationParameter
         case shift
+        case fraction
     }
 
     private enum CommandType: String, Codable {
@@ -267,6 +282,7 @@ public enum Command: Codable, Sendable, Equatable {
         case triggerExportMenu
         case completeExportSheet
         case nudgeColorWheel
+        case doubleClickSlider
     }
 
     public init(from decoder: Decoder) throws {
@@ -500,6 +516,10 @@ public enum Command: Codable, Sendable, Equatable {
                 key: key,
                 shift: shift
             )
+        case .doubleClickSlider:
+            let parameter = try container.decode(String.self, forKey: .parameter)
+            let atFraction = try container.decodeIfPresent(Double.self, forKey: .fraction)
+            self = .doubleClickSlider(parameter: parameter, atFraction: atFraction)
         }
     }
 
@@ -716,6 +736,10 @@ public enum Command: Codable, Sendable, Equatable {
             try container.encode(saturationParameter, forKey: .saturationParameter)
             try container.encode(key, forKey: .key)
             try container.encode(shift, forKey: .shift)
+        case .doubleClickSlider(let parameter, let atFraction):
+            try container.encode(CommandType.doubleClickSlider, forKey: .type)
+            try container.encode(parameter, forKey: .parameter)
+            try container.encodeIfPresent(atFraction, forKey: .fraction)
         }
     }
 }

@@ -36,6 +36,7 @@ struct DimroomCLI: ParsableCommand {
             Export.self,
             SetEditParameter.self,
             ResetEditParameter.self,
+            DoubleClickSlider.self,
             SetEditFlag.self,
             ResetEditFlag.self,
             SetEditArrayParameter.self,
@@ -583,6 +584,29 @@ extension DimroomCLI {
                 throw ValidationError("Invalid UUID '\(id)'.")
             }
             try runCommand(.resetEditParameter(assetId: uuid, parameter: parameter), socket: socket)
+        }
+    }
+
+    struct DoubleClickSlider: ParsableCommand {
+        static let configuration = CommandConfiguration(
+            commandName: "double-click-slider",
+            abstract: "Post a real double-click NSEvent at a Develop slider's track (gesture-level reset, not the view-model reset). Asserts the arbitration fix in #265/#347 — pair with set-edit-parameter to drive the slider off identity first, then get-edit to confirm it snapped back."
+        )
+
+        @Argument(help: "Slider parameter wire-name (e.g. vignetteAmount, exposure).")
+        var parameter: String
+
+        @Option(name: .long, help: "Horizontal hit position along the track, 0…1 (default 0.5 / centre). Use a non-identity fraction so a missed reset is detectable.")
+        var atFraction: Double?
+
+        @Option(name: .long, help: "Path to the harness socket.")
+        var socket: String = HarnessServer.defaultSocketPath
+
+        func run() throws {
+            if let atFraction, !(0...1).contains(atFraction) {
+                throw ValidationError("--at-fraction must be in 0...1, got \(atFraction).")
+            }
+            try runCommand(.doubleClickSlider(parameter: parameter, atFraction: atFraction), socket: socket)
         }
     }
 

@@ -1391,6 +1391,31 @@ final class CommandCodingTests: XCTestCase {
         )
     }
 
+    func testDoubleClickSliderRoundTrip() throws {
+        for fraction: Double? in [nil, 0.0, 0.25, 0.5, 1.0] {
+            let command = Command.doubleClickSlider(parameter: "vignetteAmount", atFraction: fraction)
+            let data = try encoder.encode(command)
+            let decoded = try decoder.decode(Command.self, from: data)
+            XCTAssertEqual(command, decoded)
+        }
+    }
+
+    func testDoubleClickSliderJSON() throws {
+        let command = Command.doubleClickSlider(parameter: "vignetteAmount", atFraction: 0.25)
+        let data = try encoder.encode(command)
+        let json = String(data: data, encoding: .utf8)!
+        XCTAssertEqual(
+            json,
+            #"{"fraction":0.25,"parameter":"vignetteAmount","type":"doubleClickSlider"}"#
+        )
+    }
+
+    func testDecodeDoubleClickSliderOmittedFractionIsNil() throws {
+        let json = #"{"type":"doubleClickSlider","parameter":"exposure"}"#
+        let command = try decoder.decode(Command.self, from: Data(json.utf8))
+        XCTAssertEqual(command, .doubleClickSlider(parameter: "exposure", atFraction: nil))
+    }
+
     // MARK: - Route
 
     func testRouteAllCases() {

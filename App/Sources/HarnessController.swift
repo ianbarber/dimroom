@@ -292,6 +292,9 @@ final class HarnessController: @unchecked Sendable {
         case .resetEditParameter(let assetId, let parameter):
             return await handleResetEditParameter(assetId: assetId, parameter: parameter)
 
+        case .doubleClickSlider(let parameter, let atFraction):
+            return await handleDoubleClickSlider(parameter: parameter, atFraction: atFraction)
+
         case .setEditFlag(let assetId, let parameter, let value):
             return await handleSetEditFlag(assetId: assetId, parameter: parameter, value: value)
 
@@ -1422,6 +1425,70 @@ final class HarnessController: @unchecked Sendable {
             developViewModel.resetParameter(keyPath)
         }
         return .ok()
+    }
+
+    /// Gesture-level slider reset (#348). Unlike `resetEditParameter`,
+    /// this does NOT call `DevelopViewModel.resetParameter`. It scrolls the
+    /// slider on-screen, reads its recorded track frame from
+    /// `GestureTargetRegistry`, converts to window coordinates, and posts a
+    /// genuine double-click NSEvent so SwiftUI's gesture arbitration
+    /// (`highPriorityGesture(TapGesture(count: 2))` vs the `Slider`'s own
+    /// click handling — the #265/#347 fix) runs for real. A pass therefore
+    /// proves the gesture fired, not merely that some code reset the value.
+    /// Operates on whichever asset is live in Develop; callers select it
+    /// first via `select-asset`/`set-edit-parameter`.
+    private func handleDoubleClickSlider(parameter: String, atFraction: Double?) async -> Response {
+        guard DevelopViewModel.keyPath(forParameter: parameter) != nil else {
+            return .error("unknown parameter: \(parameter)")
+        }
+        let hasAsset: Bool = await MainActor.run {
+            if router.route != .develop { router.route = .develop }
+            return developViewModel.currentAssetId != nil
+        }
+        guard hasAsset else {
+            return .error("no asset active in Develop; run select-asset + navigate develop (or set-edit-parameter) first")
+        }
+        // Bring the slider on-screen — Vignette and Geometry sit below the
+        // fold in the 1024×768 harness window — and let layout settle so
+        // the registry holds the slider's scrolled-in frame before we read it.
+        await MainActor.run { developViewModel.pendingScrollToParameter = parameter }
+        try? await Task.sleep(for: .milliseconds(400))
+
+        let outcome: (point: CGPoint?, error: String?) = await MainActor.run {
+            guard let window = NSApplication.shared.windows.first(where: { $0.contentView != nil }),
+                  let contentView = window.contentView else {
+                return (nil, "no window available for pointer synthesis")
+            }
+            guard let frame = GestureTargetRegistry.shared.frame(for: parameter) else {
+                return (nil, "slider '\(parameter)' has no recorded hit region (not mounted?)")
+            }
+            let contentHeight = contentView.bounds.height
+            // A frame whose vertical midpoint falls outside the content
+            // bounds means scroll-into-view didn't land it on screen;
+            // clicking there would miss. Fail loudly rather than post a
+            // click into the void.
+            guard frame.midY >= 0, frame.midY <= contentHeight else {
+                return (nil, "slider '\(parameter)' frame \(frame) is outside visible content (height \(contentHeight)); scroll-into-view failed")
+            }
+            let point = PointerEventGeometry.windowPoint(
+                globalFrame: frame,
+                contentHeight: contentHeight,
+                fraction: atFraction ?? 0.5
+            )
+            PointerEventSynthesizer.doubleClick(at: point, in: window)
+            return (point, nil)
+        }
+        // Let the gesture's onReset → setParameter run before the flow
+        // reads back state via get-edit.
+        try? await Task.sleep(for: .milliseconds(200))
+        if let point = outcome.point {
+            return .ok(data: .dictionary([
+                "parameter": .string(parameter),
+                "windowX": .double(Double(point.x)),
+                "windowY": .double(Double(point.y)),
+            ]))
+        }
+        return .error(outcome.error ?? "double-click failed")
     }
 
     private func handleSetEditFlag(assetId: UUID, parameter: String, value: Bool) async -> Response {

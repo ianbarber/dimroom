@@ -6,6 +6,12 @@ struct ParameterSlider: View {
     let step: Double
     let identity: Double
     var trackTint: Color? = nil
+    /// Harness wire-name for this parameter (e.g. `vignetteAmount`). When
+    /// set, the inner `Slider`'s track frame is recorded into
+    /// `GestureTargetRegistry` so a Layer C flow can post a real
+    /// double-click at it and exercise the reset gesture (#348). `nil`
+    /// for sliders the harness doesn't drive by pointer.
+    var parameter: String? = nil
     @Binding var value: Double
     var onReset: () -> Void
 
@@ -37,6 +43,10 @@ struct ParameterSlider: View {
                     .highPriorityGesture(
                         TapGesture(count: 2).onEnded { onReset() }
                     )
+                    // Record the track frame so the harness can target a
+                    // genuine double-click here (#348). Inert when
+                    // `parameter` is nil.
+                    .gestureTarget(key: parameter)
             }
 
             Text(formattedValue)

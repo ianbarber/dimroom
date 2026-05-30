@@ -44,17 +44,27 @@ public struct DevelopView: View {
     // MARK: - Sidebar
 
     private var sliderSidebar: some View {
-        ScrollView {
-            VStack(alignment: .leading, spacing: 12) {
-                cropToggle
+        ScrollViewReader { proxy in
+            ScrollView {
+                VStack(alignment: .leading, spacing: 12) {
+                    cropToggle
 
-                if cropViewModel.isActive {
-                    cropSection
+                    if cropViewModel.isActive {
+                        cropSection
+                    }
+
+                    sliderColumn
                 }
-
-                sliderColumn
+                .padding(12)
             }
-            .padding(12)
+            // Bring a harness-targeted slider on-screen before a
+            // synthetic double-click lands on it (#348). Mirrors
+            // `LibraryView`'s `pendingScrollToAssetId` handling.
+            .onChange(of: viewModel.pendingScrollToParameter) { _, target in
+                guard let target else { return }
+                proxy.scrollTo(target, anchor: .center)
+                viewModel.pendingScrollToParameter = nil
+            }
         }
         .frame(width: 280)
         .background(Color(white: 0.1))
@@ -68,37 +78,37 @@ public struct DevelopView: View {
     private var sliderColumn: some View {
         VStack(alignment: .leading, spacing: 12) {
             sliderSection("Tone") {
-                slider("Exposure", keyPath: \.exposure, range: -5.0...5.0, step: 0.01, identity: 0)
-                slider("Contrast", keyPath: \.contrast, range: -100...100, step: 1, identity: 0)
-                slider("Highlights", keyPath: \.highlights, range: -100...100, step: 1, identity: 0)
-                slider("Shadows", keyPath: \.shadows, range: -100...100, step: 1, identity: 0)
-                slider("Whites", keyPath: \.whites, range: -100...100, step: 1, identity: 0)
-                slider("Blacks", keyPath: \.blacks, range: -100...100, step: 1, identity: 0)
+                slider("Exposure", parameter: "exposure", keyPath: \.exposure, range: -5.0...5.0, step: 0.01, identity: 0)
+                slider("Contrast", parameter: "contrast", keyPath: \.contrast, range: -100...100, step: 1, identity: 0)
+                slider("Highlights", parameter: "highlights", keyPath: \.highlights, range: -100...100, step: 1, identity: 0)
+                slider("Shadows", parameter: "shadows", keyPath: \.shadows, range: -100...100, step: 1, identity: 0)
+                slider("Whites", parameter: "whites", keyPath: \.whites, range: -100...100, step: 1, identity: 0)
+                slider("Blacks", parameter: "blacks", keyPath: \.blacks, range: -100...100, step: 1, identity: 0)
             }
 
             sliderSection("White Balance") {
-                slider("Temperature", keyPath: \.temperature, range: 2000...12000, step: 50, identity: 6500)
-                slider("Tint", keyPath: \.tint, range: -150...150, step: 1, identity: 0)
+                slider("Temperature", parameter: "temperature", keyPath: \.temperature, range: 2000...12000, step: 50, identity: 6500)
+                slider("Tint", parameter: "tint", keyPath: \.tint, range: -150...150, step: 1, identity: 0)
             }
 
             sliderSection("Presence") {
-                slider("Clarity", keyPath: \.clarity, range: -100...100, step: 1, identity: 0)
-                slider("Sharpening", keyPath: \.sharpening, range: 0...100, step: 1, identity: 0)
-                slider("Vibrance", keyPath: \.vibrance, range: -100...100, step: 1, identity: 0)
-                slider("Saturation", keyPath: \.saturation, range: -100...100, step: 1, identity: 0)
+                slider("Clarity", parameter: "clarity", keyPath: \.clarity, range: -100...100, step: 1, identity: 0)
+                slider("Sharpening", parameter: "sharpening", keyPath: \.sharpening, range: 0...100, step: 1, identity: 0)
+                slider("Vibrance", parameter: "vibrance", keyPath: \.vibrance, range: -100...100, step: 1, identity: 0)
+                slider("Saturation", parameter: "saturation", keyPath: \.saturation, range: -100...100, step: 1, identity: 0)
             }
 
             curvesSection
 
             sliderSection("Noise Reduction") {
-                slider("Luminance", keyPath: \.luminanceNoiseReduction, range: 0...100, step: 1, identity: 0)
-                slider("Chrominance", keyPath: \.chrominanceNoiseReduction, range: 0...100, step: 1, identity: 0)
+                slider("Luminance", parameter: "luminanceNoiseReduction", keyPath: \.luminanceNoiseReduction, range: 0...100, step: 1, identity: 0)
+                slider("Chrominance", parameter: "chrominanceNoiseReduction", keyPath: \.chrominanceNoiseReduction, range: 0...100, step: 1, identity: 0)
             }
 
             hslSection
 
             sliderSection("Split Toning") {
-                slider("Balance", keyPath: \.splitToneBalance, range: -100...100, step: 1, identity: 0)
+                slider("Balance", parameter: "splitToneBalance", keyPath: \.splitToneBalance, range: -100...100, step: 1, identity: 0)
                 splitToneWheel(
                     label: "Highlights",
                     hueKey: \.splitToneHighlightHue,
@@ -112,15 +122,15 @@ public struct DevelopView: View {
             }
 
             sliderSection("Vignette") {
-                slider("Amount", keyPath: \.vignetteAmount, range: -100...100, step: 1, identity: 0)
-                slider("Roundness", keyPath: \.vignetteRoundness, range: 0...100, step: 1, identity: 50)
-                slider("Softness", keyPath: \.vignetteSoftness, range: 0...100, step: 1, identity: 50)
+                slider("Amount", parameter: "vignetteAmount", keyPath: \.vignetteAmount, range: -100...100, step: 1, identity: 0)
+                slider("Roundness", parameter: "vignetteRoundness", keyPath: \.vignetteRoundness, range: 0...100, step: 1, identity: 50)
+                slider("Softness", parameter: "vignetteSoftness", keyPath: \.vignetteSoftness, range: 0...100, step: 1, identity: 50)
             }
 
             sliderSection("Geometry") {
-                slider("Vertical", keyPath: \.perspectiveVertical, range: -100...100, step: 1, identity: 0)
-                slider("Horizontal", keyPath: \.perspectiveHorizontal, range: -100...100, step: 1, identity: 0)
-                slider("Rotation", keyPath: \.perspectiveRotation, range: -180...180, step: 0.1, identity: 0)
+                slider("Vertical", parameter: "perspectiveVertical", keyPath: \.perspectiveVertical, range: -100...100, step: 1, identity: 0)
+                slider("Horizontal", parameter: "perspectiveHorizontal", keyPath: \.perspectiveHorizontal, range: -100...100, step: 1, identity: 0)
+                slider("Rotation", parameter: "perspectiveRotation", keyPath: \.perspectiveRotation, range: -180...180, step: 0.1, identity: 0)
                 flagToggle("Chromatic Aberration", keyPath: \.chromaticAberration)
                 flagToggle("Lens Vignette", keyPath: \.lensVignette)
             }
@@ -256,8 +266,14 @@ public struct DevelopView: View {
         }
     }
 
+    /// `parameter` is the harness wire-name (matching
+    /// `DevelopViewModel.keyPath(forParameter:)`). It both keys the
+    /// `GestureTargetRegistry` recording inside `ParameterSlider` and tags
+    /// the row with `.id(...)` so the harness can scroll the slider into
+    /// view before posting a synthetic double-click at it (#348).
     private func slider(
         _ label: String,
+        parameter: String,
         keyPath: WritableKeyPath<EditState, Double>,
         range: ClosedRange<Double>,
         step: Double,
@@ -268,12 +284,14 @@ public struct DevelopView: View {
             range: range,
             step: step,
             identity: identity,
+            parameter: parameter,
             value: Binding(
                 get: { viewModel.editState[keyPath: keyPath] },
                 set: { viewModel.setParameter(keyPath, value: $0) }
             ),
             onReset: { viewModel.resetParameter(keyPath) }
         )
+        .id(parameter)
     }
 
     private func splitToneWheel(

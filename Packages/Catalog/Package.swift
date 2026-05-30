@@ -20,7 +20,12 @@ let package = Package(
         ),
         .testTarget(
             name: "CatalogTests",
-            dependencies: ["Catalog"]
+            dependencies: [
+                "Catalog",
+                // The crop-reference backfill test drives a DatabaseQueue
+                // directly to exercise the `006` migration end to end.
+                .product(name: "GRDB", package: "GRDB.swift"),
+            ]
         ),
     ]
 )

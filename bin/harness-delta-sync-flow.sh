@@ -387,13 +387,49 @@ echo "  OK: assetCount went $PRE_RELOAD_COUNT -> $POST_RELOAD_COUNT, PID $APP_PI
 
 take_screenshot "delta-sync-after-reload"
 
-echo "=== sync-from-drive after reload — rebuilt poller responds against new catalog ==="
-# Confirms the poller rebuilt during the swap is wired up and doesn't
-# crash on the dropped queue. The rebuilt fixture fetcher resets its page
-# cursor, so this poll replays the empty first page (noChanges); #322
-# tracks turning this into an explicit noChanges assertion.
-DRAINED_OUT=$("$CLI_BIN" sync-from-drive --socket "$SOCKET" 2>&1 || true)
-echo "$DRAINED_OUT"
+echo "=== sync-from-drive after reload — rebuilt poller drains empty page, expect noChanges (#322) ==="
+# The reload rebuilt the poller against the swapped catalog with a fresh
+# HarnessStubChangesFetcher, whose page cursor reset to 0 — so this first
+# post-reload poll replays the empty page 0 (noChanges, stub-token-after-empty).
+# Asserting it (no `|| true`, no swallowed exit) confirms the rebuilt poller
+# is wired up and responds without crashing on the new catalog.
+POSTRELOAD_EMPTY_OUT=$("$CLI_BIN" sync-from-drive --socket "$SOCKET")
+echo "$POSTRELOAD_EMPTY_OUT"
+POSTRELOAD_EMPTY_STATUS=$(printf '%s' "$POSTRELOAD_EMPTY_OUT" | "$REPO_ROOT/bin/harness-json-extract" 'data.status')
+POSTRELOAD_EMPTY_TOKEN=$(printf '%s' "$POSTRELOAD_EMPTY_OUT" | "$REPO_ROOT/bin/harness-json-extract" 'data.pageToken')
+if [ "$POSTRELOAD_EMPTY_STATUS" != "noChanges" ]; then
+    echo "ERROR: expected post-reload status 'noChanges', got '$POSTRELOAD_EMPTY_STATUS'"
+    exit 1
+fi
+if [ "$POSTRELOAD_EMPTY_TOKEN" != "stub-token-after-empty" ]; then
+    echo "ERROR: expected post-reload pageToken 'stub-token-after-empty', got '$POSTRELOAD_EMPTY_TOKEN'"
+    exit 1
+fi
+echo "  OK: noChanges at stub-token-after-empty (rebuilt poller responds)"
+
+echo "=== sync-from-drive after reload — replayed catalog change matches stamp, expect noChanges (#322) ==="
+# The second post-reload poll replays page 1 — the catalog-change row for
+# stub-catalog-id carrying modifiedTime 2026-05-17T08:00:00.000Z, the exact
+# value CatalogHotReloader stamped into last_published_catalog_modified_time
+# during the swap. Because the stamp matches, the rebuilt poller MUST classify
+# this replayed change as noChanges (not catalogChanged, not an error) — the
+# end-to-end "don't re-prompt for state we already have" guarantee from #259,
+# pinned here so a regression in how the stamp is carried onto the reloaded
+# catalog can't drift undetected. Asserting pageToken proves the catalog-change
+# page was the one processed, not a second empty page.
+POSTRELOAD_REPLAY_OUT=$("$CLI_BIN" sync-from-drive --socket "$SOCKET")
+echo "$POSTRELOAD_REPLAY_OUT"
+POSTRELOAD_REPLAY_STATUS=$(printf '%s' "$POSTRELOAD_REPLAY_OUT" | "$REPO_ROOT/bin/harness-json-extract" 'data.status')
+POSTRELOAD_REPLAY_TOKEN=$(printf '%s' "$POSTRELOAD_REPLAY_OUT" | "$REPO_ROOT/bin/harness-json-extract" 'data.pageToken')
+if [ "$POSTRELOAD_REPLAY_STATUS" != "noChanges" ]; then
+    echo "ERROR: expected replayed catalog-change status 'noChanges' (stamp match), got '$POSTRELOAD_REPLAY_STATUS'"
+    exit 1
+fi
+if [ "$POSTRELOAD_REPLAY_TOKEN" != "stub-token-after-catalog-change" ]; then
+    echo "ERROR: expected replayed catalog-change pageToken 'stub-token-after-catalog-change', got '$POSTRELOAD_REPLAY_TOKEN'"
+    exit 1
+fi
+echo "  OK: replayed catalog change classified noChanges at stub-token-after-catalog-change (stamp pinned end-to-end)"
 
 echo "=== quit ==="
 "$CLI_BIN" quit --socket "$SOCKET" 2>&1 || true

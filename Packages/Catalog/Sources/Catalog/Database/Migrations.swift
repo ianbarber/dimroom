@@ -79,5 +79,13 @@ enum CatalogMigrations {
                 t.add(column: "lensModel", .text)
             }
         }
+
+        migrator.registerMigration("006-backfillCropReferenceSize") { db in
+            // Stamp the authoring preview size onto already-cropped rows
+            // written before #351 so they export at full-resolution
+            // framing instead of corner-cropping (#352). In-place update,
+            // so no new edit-history versions are created.
+            try backfillCropReferenceSizes(in: db)
+        }
     }
 }

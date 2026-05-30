@@ -107,6 +107,26 @@ echo "=== navigate develop ==="
 "$CLI_BIN" navigate develop --socket "$SOCKET" >/dev/null
 sleep 1
 
+# assert_array <parameter> <index> <expected> — read the array slot via
+# get-edit and fail unless it equals expected. parameter is one of
+# hueShift, hslSaturation, hslLuminance.
+assert_array() {
+    local param="$1"
+    local index="$2"
+    local expected="$3"
+    local get_out actual
+    get_out=$("$CLI_BIN" get-edit "$ASSET_ID" --socket "$SOCKET")
+    actual=$(printf '%s' "$get_out" | "$REPO_ROOT/bin/harness-json-extract" "data.$param[$index]")
+    local actual_f expected_f
+    actual_f=$(/usr/bin/python3 -c "import sys; print(float(sys.argv[1]))" "$actual")
+    expected_f=$(/usr/bin/python3 -c "import sys; print(float(sys.argv[1]))" "$expected")
+    if [ "$actual_f" != "$expected_f" ]; then
+        echo "ERROR: expected $param[$index] == $expected_f, got '$actual_f'"
+        exit 1
+    fi
+    echo "  OK: $param[$index] == $actual_f"
+}
+
 # drive_array <parameter> <index> <value> — set the array slot, wait for
 # debounced render, then assert get-edit reports the value at that
 # index. parameter is one of hueShift, hslSaturation, hslLuminance.
@@ -124,17 +144,7 @@ drive_array() {
         exit 1
     fi
     sleep 1
-    local get_out actual
-    get_out=$("$CLI_BIN" get-edit "$ASSET_ID" --socket "$SOCKET")
-    actual=$(printf '%s' "$get_out" | "$REPO_ROOT/bin/harness-json-extract" "data.$param[$index]")
-    local actual_f expected_f
-    actual_f=$(/usr/bin/python3 -c "import sys; print(float(sys.argv[1]))" "$actual")
-    expected_f=$(/usr/bin/python3 -c "import sys; print(float(sys.argv[1]))" "$value")
-    if [ "$actual_f" != "$expected_f" ]; then
-        echo "ERROR: expected $param[$index] == $expected_f, got '$actual_f'"
-        exit 1
-    fi
-    echo "  OK: $param[$index] == $actual_f"
+    assert_array "$param" "$index" "$value"
 }
 
 # Each axis × each band: drive to +100, screenshot, reset, drive to -100,
@@ -156,6 +166,7 @@ for axis in hueShift hslSaturation hslLuminance; do
         echo "=== $axis[$index]=$band : 0 ==="
         "$CLI_BIN" reset-edit-array-parameter "$ASSET_ID" "$axis" "$index" --socket "$SOCKET" >/dev/null
         sleep 1
+        assert_array "$axis" "$index" 0
 
         echo "=== $axis[$index]=$band : -100 ==="
         drive_array "$axis" "$index" -100
@@ -168,6 +179,7 @@ for axis in hueShift hslSaturation hslLuminance; do
         echo "=== $axis[$index]=$band : 0 (reset) ==="
         "$CLI_BIN" reset-edit-array-parameter "$ASSET_ID" "$axis" "$index" --socket "$SOCKET" >/dev/null
         sleep 1
+        assert_array "$axis" "$index" 0
     done
 done
 

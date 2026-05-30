@@ -1,5 +1,6 @@
 import Catalog
 import CryptoKit
+import EditEngine
 import Foundation
 import Previews
 @testable import UI
@@ -132,6 +133,45 @@ final class DevelopViewModelTests: XCTestCase {
                 identity,
                 "resetParameter did not restore identity for '\(name)'"
             )
+        }
+    }
+
+    /// Issue #318: the double-click reset on every HSL slider must drive
+    /// the corresponding per-band slot back to its identity (0). The
+    /// scalar-only `testResetParameterRestoresIdentityForAllSliders` above
+    /// never exercises `resetHSLParameter`, so the 24 HSL slots (3 axes ×
+    /// 8 colour bands) had no model-level coverage — a regression in the
+    /// HSL reset path would have passed CI silently. This pins the
+    /// invariant the `ParameterSlider` double-click gesture relies on.
+    @MainActor
+    func testResetHSLParameterRestoresZeroForAllAxesAndBands() async throws {
+        let (vm, asset, _) = try await makeViewModelWithAsset(hash: "reset-hsl-all")
+        await vm.activate(assetId: asset.id)
+
+        func slot(_ axis: HSLAxis, _ index: Int) -> Double {
+            switch axis {
+            case .hue: return vm.editState.hueShift[index]
+            case .saturation: return vm.editState.hslSaturation[index]
+            case .luminance: return vm.editState.hslLuminance[index]
+            }
+        }
+
+        for axis in HSLAxis.allCases {
+            for index in 0..<8 {
+                vm.setHSLParameter(axis: axis, rangeIndex: index, value: 75)
+                XCTAssertEqual(
+                    slot(axis, index),
+                    75,
+                    "Setter failed for HSL \(axis) band \(index)"
+                )
+
+                vm.resetHSLParameter(axis: axis, rangeIndex: index)
+                XCTAssertEqual(
+                    slot(axis, index),
+                    0,
+                    "resetHSLParameter did not restore 0 for HSL \(axis) band \(index)"
+                )
+            }
         }
     }
 

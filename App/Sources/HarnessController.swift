@@ -159,7 +159,14 @@ final class HarnessController: @unchecked Sendable {
                     developIsDownloadingOriginal: developViewModel.isDownloadingOriginal,
                     developDownloadProgress: developViewModel.downloadProgress,
                     developCurrentAssetId: developViewModel.currentAssetId,
-                    libraryRemoteAdditionsCount: libraryViewModel.remoteAdditionsBadge?.addedCount
+                    libraryRemoteAdditionsCount: libraryViewModel.remoteAdditionsBadge?.addedCount,
+                    magnifier: AppState.MagnifierState(
+                        visible: developViewModel.magnifierVisible,
+                        samplePointX: developViewModel.magnifierSamplePoint.x,
+                        samplePointY: developViewModel.magnifierSamplePoint.y,
+                        zoom: developViewModel.magnifierZoom,
+                        usingPreviewFallback: developViewModel.magnifierUsingPreviewFallback
+                    )
                 )
             }
             let encoder = JSONEncoder()
@@ -287,6 +294,14 @@ final class HarnessController: @unchecked Sendable {
                 saturationParameter: saturationParameter,
                 key: key,
                 shift: shift
+            )
+
+        case .setMagnifier(let visible, let samplePointX, let samplePointY, let zoom):
+            return await handleSetMagnifier(
+                visible: visible,
+                samplePointX: samplePointX,
+                samplePointY: samplePointY,
+                zoom: zoom
             )
 
         case .setEditParameter(let assetId, let parameter, let value):
@@ -1359,6 +1374,38 @@ final class HarnessController: @unchecked Sendable {
             } else {
                 developViewModel.setParameter(hueKeyPath, value: newHue)
             }
+        }
+        return .ok()
+    }
+
+    /// Drive the Develop pixel magnifier (#324). Routes to Develop —
+    /// activating the library's selected asset if Develop has none — then
+    /// applies visibility, the (optional) sample point, and the (optional)
+    /// zoom through the same `DevelopViewModel` path the L key / sidebar use.
+    private func handleSetMagnifier(
+        visible: Bool,
+        samplePointX: Double?,
+        samplePointY: Double?,
+        zoom: Int?
+    ) async -> Response {
+        await MainActor.run {
+            if router.route != .develop {
+                router.route = .develop
+            }
+        }
+        let needsActivate = await MainActor.run { developViewModel.currentAssetId == nil }
+        if needsActivate {
+            let selected = await MainActor.run { libraryViewModel.selectedAssetId }
+            await developViewModel.activate(assetId: selected)
+        }
+        await MainActor.run {
+            let point: CGPoint?
+            if let samplePointX, let samplePointY {
+                point = CGPoint(x: samplePointX, y: samplePointY)
+            } else {
+                point = nil
+            }
+            developViewModel.setMagnifier(visible: visible, samplePoint: point, zoom: zoom)
         }
         return .ok()
     }

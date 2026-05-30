@@ -74,8 +74,10 @@ final class CropControlsStructureTests: XCTestCase {
 
     /// The slider-sidebar VStack: body Group → HStack[sidebar, preview] →
     /// ScrollView → VStack. With crop mode active its children are, in
-    /// order: cropToggle (Button, 0), cropSection (VStack, 1), sliderColumn
-    /// (VStack, 2).
+    /// order: a toolbar HStack[cropToggle (Button, 0), magnifierToggle
+    /// (Button, 1)] (0), cropSection (VStack, 1), sliderColumn (VStack, 2).
+    /// The magnifier toggle (#324) shares the toolbar row with the crop
+    /// toggle, so the crop button is reached via `hStack(0).button(0)`.
     private func sidebarVStack(
         _ view: DevelopView
     ) throws -> InspectableView<ViewType.VStack> {
@@ -85,7 +87,7 @@ final class CropControlsStructureTests: XCTestCase {
     func test_crop_toggle_label_children_are_white() async throws {
         let view = try await makeCropActiveView()
 
-        let hstack = try sidebarVStack(view).button(0).labelView().hStack()
+        let hstack = try sidebarVStack(view).hStack(0).button(0).labelView().hStack()
 
         // The icon's `.foregroundStyle(.white)` is a view modifier
         // (`_ForegroundStyleModifier`); the text's folds into the Text's run

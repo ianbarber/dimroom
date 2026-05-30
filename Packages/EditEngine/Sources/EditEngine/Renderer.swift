@@ -95,6 +95,63 @@ public enum Renderer {
         return image
     }
 
+    /// Result of `renderRegion`: the cropped pixel patch plus the geometry
+    /// used to extract it, so callers (the Develop magnifier) can draw a
+    /// reticle that exactly matches what was sampled.
+    public struct RegionRender {
+        /// The rendered, cropped patch. `nil` only if `CIContext` failed to
+        /// realise the region (effectively never for a valid context).
+        public let image: CGImage?
+        /// Extent of the fully-rendered output the region was cut from, in
+        /// Core Image pixel coordinates.
+        public let outputExtent: CGRect
+        /// The region actually sampled, in the same coordinate space as
+        /// `outputExtent` (clamped to never exceed the output bounds).
+        public let regionRect: CGRect
+    }
+
+    /// Render `editState` over `source` and extract only a small clamped
+    /// region around a normalised sample point — the core of the Develop
+    /// pixel magnifier (#324).
+    ///
+    /// The whole filter graph is built over the full `source`, but Core
+    /// Image evaluates lazily: `createCGImage(_:from:)` realises only the
+    /// requested `regionRect` (pulling in whatever neighbouring samples the
+    /// NR / blur kernels need for correct edges), so sampling a 100×100
+    /// patch of a full-resolution original is cheap.
+    ///
+    /// `sampleCenter` is normalised `0…1` with a **top-left origin** to
+    /// match the on-screen reticle. `regionPixelSize` is the patch size in
+    /// **output pixels** (e.g. 100×100 for a 2:1 view of a 200pt window).
+    public static func renderRegion(
+        source: CIImage,
+        editState: EditState,
+        context: CIContext,
+        sampleCenter: CGPoint,
+        regionPixelSize: CGSize,
+        lensProfile: LensProfile? = nil
+    ) -> RegionRender {
+        let output = render(source: source, editState: editState, lensProfile: lensProfile)
+        let extent = output.extent
+
+        // Degenerate / infinite extents (e.g. a `CIImage(color:)` source)
+        // have no meaningful region to sample.
+        guard extent.isInfinite == false, extent.width > 0, extent.height > 0 else {
+            return RegionRender(image: nil, outputExtent: extent, regionRect: .zero)
+        }
+
+        let localRect = MagnifierRegion.clampedSourceRect(
+            imageSize: extent.size,
+            sampleCenter: sampleCenter,
+            regionSize: regionPixelSize
+        )
+        // `clampedSourceRect` works in a 0-origin space; offset back into
+        // the output's own coordinate space before cropping.
+        let regionRect = localRect.offsetBy(dx: extent.minX, dy: extent.minY)
+        let cgImage = context.createCGImage(output, from: regionRect)
+        return RegionRender(image: cgImage, outputExtent: extent, regionRect: regionRect)
+    }
+
     // MARK: - Filter stages
 
     private static func applyExposure(_ image: CIImage, ev: Double) -> CIImage {

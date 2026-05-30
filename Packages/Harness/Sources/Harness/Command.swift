@@ -170,6 +170,12 @@ public enum Command: Codable, Sendable, Equatable {
     /// is `left`/`right`/`up`/`down` (plain → hue, shift → saturation)
     /// or `reset` (→ identity). `shift` is ignored for `reset`.
     case nudgeColorWheel(assetId: UUID, hueParameter: String, saturationParameter: String, key: String, shift: Bool)
+    /// Drive the Develop pixel magnifier (#324). Routes to Develop
+    /// (activating the selected asset if needed) and sets visibility,
+    /// the normalised sample point, and the zoom factor. `samplePointX`,
+    /// `samplePointY`, and `zoom` are optional — omit them to toggle
+    /// visibility without moving the sample point or changing zoom.
+    case setMagnifier(visible: Bool, samplePointX: Double?, samplePointY: Double?, zoom: Int?)
     /// Drives the crop overlay's drag-to-rotate handles (#323) without
     /// synthesising a pointer drag. The handler errors unless crop mode is
     /// active, then adds `angleDelta` (degrees) to the live `cropAngle`
@@ -217,6 +223,10 @@ public enum Command: Codable, Sendable, Equatable {
         case hueParameter
         case saturationParameter
         case shift
+        case visible
+        case samplePointX
+        case samplePointY
+        case zoom
         case corner
         case angleDelta
     }
@@ -292,6 +302,7 @@ public enum Command: Codable, Sendable, Equatable {
         case completeExportSheet
         case dismissRemoteAdditionsBadge
         case nudgeColorWheel
+        case setMagnifier
         case dragRotateHandle
     }
 
@@ -530,6 +541,17 @@ public enum Command: Codable, Sendable, Equatable {
                 key: key,
                 shift: shift
             )
+        case .setMagnifier:
+            let visible = try container.decode(Bool.self, forKey: .visible)
+            let samplePointX = try container.decodeIfPresent(Double.self, forKey: .samplePointX)
+            let samplePointY = try container.decodeIfPresent(Double.self, forKey: .samplePointY)
+            let zoom = try container.decodeIfPresent(Int.self, forKey: .zoom)
+            self = .setMagnifier(
+                visible: visible,
+                samplePointX: samplePointX,
+                samplePointY: samplePointY,
+                zoom: zoom
+            )
         case .dragRotateHandle:
             let corner = try container.decode(String.self, forKey: .corner)
             let angleDelta = try container.decode(Double.self, forKey: .angleDelta)
@@ -754,6 +776,12 @@ public enum Command: Codable, Sendable, Equatable {
             try container.encode(saturationParameter, forKey: .saturationParameter)
             try container.encode(key, forKey: .key)
             try container.encode(shift, forKey: .shift)
+        case .setMagnifier(let visible, let samplePointX, let samplePointY, let zoom):
+            try container.encode(CommandType.setMagnifier, forKey: .type)
+            try container.encode(visible, forKey: .visible)
+            try container.encodeIfPresent(samplePointX, forKey: .samplePointX)
+            try container.encodeIfPresent(samplePointY, forKey: .samplePointY)
+            try container.encodeIfPresent(zoom, forKey: .zoom)
         case .dragRotateHandle(let corner, let angleDelta):
             try container.encode(CommandType.dragRotateHandle, forKey: .type)
             try container.encode(corner, forKey: .corner)

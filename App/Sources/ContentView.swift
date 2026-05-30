@@ -252,6 +252,10 @@ struct ContentView: View {
             guard router.route == .develop else { return }
             developViewModel.showHistogram.toggle()
         }
+        .onReceive(menuActionPublisher(.toggleMagnifier)) { _ in
+            guard router.route == .develop else { return }
+            developViewModel.toggleMagnifier()
+        }
         .onReceive(menuActionPublisher(.selectPrevious)) { _ in
             guard router.route == .library || router.route == .loupe else { return }
             libraryViewModel.selectPrevious()

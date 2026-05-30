@@ -76,6 +76,7 @@ struct DimroomCLI: ParsableCommand {
             CompleteExportSheet.self,
             DismissRemoteAdditionsBadge.self,
             NudgeColorWheel.self,
+            SetMagnifier.self,
         ]
     )
 }
@@ -1391,6 +1392,35 @@ extension DimroomCLI {
 
         func run() throws {
             try runCommand(.postMenuAction(name: name), socket: socket)
+        }
+    }
+
+    struct SetMagnifier: ParsableCommand {
+        static let configuration = CommandConfiguration(
+            commandName: "set-magnifier",
+            abstract: "Show/hide the Develop pixel magnifier and optionally move its sample point (normalised 0…1, top-left origin) or switch zoom (1 or 2)."
+        )
+
+        @Option(name: .long, help: "Show (true) or hide (false) the magnifier.")
+        var visible: Bool
+
+        @Option(name: .long, help: "Sample point X in 0…1 (top-left origin). Omit to leave unchanged.")
+        var x: Double?
+
+        @Option(name: .long, help: "Sample point Y in 0…1 (top-left origin). Omit to leave unchanged.")
+        var y: Double?
+
+        @Option(name: .long, help: "Zoom factor: 1 (1:1) or 2 (2:1). Omit to leave unchanged.")
+        var zoom: Int?
+
+        @Option(name: .long, help: "Path to the harness socket.")
+        var socket: String = HarnessServer.defaultSocketPath
+
+        func run() throws {
+            try runCommand(
+                .setMagnifier(visible: visible, samplePointX: x, samplePointY: y, zoom: zoom),
+                socket: socket
+            )
         }
     }
 }

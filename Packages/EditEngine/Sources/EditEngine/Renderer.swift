@@ -80,7 +80,12 @@ public enum Renderer {
             enabled: editState.lensVignette,
             profile: lensProfile
         )
-        image = applyCrop(image, rect: editState.cropRect, angle: editState.cropAngle)
+        image = applyCrop(
+            image,
+            rect: editState.cropRect,
+            angle: editState.cropAngle,
+            referenceSize: editState.cropReferenceSize
+        )
         image = applyVignette(
             image,
             amount: editState.vignetteAmount,
@@ -611,7 +616,12 @@ public enum Renderer {
         return v
     }
 
-    private static func applyCrop(_ image: CIImage, rect: CGRect?, angle: Double?) -> CIImage {
+    private static func applyCrop(
+        _ image: CIImage,
+        rect: CGRect?,
+        angle: Double?,
+        referenceSize: CGSize?
+    ) -> CIImage {
         var result = image
 
         if let angle, angle != 0 {
@@ -625,12 +635,54 @@ public enum Renderer {
         }
 
         if let cropRect = rect {
-            result = result.cropped(to: cropRect)
+            // Rescale the stored pixel-space rect from the resolution it
+            // was authored against to this source's own resolution. The
+            // rotation above is centred and the rescale is about the
+            // origin, so scaling the rect by the same factor lands the
+            // crop on exactly the proportional region at any resolution
+            // (`R_full(k·p) = k·R_preview(p)`). See `scaledCropRect`.
+            let scaled = scaledCropRect(
+                cropRect,
+                sourceExtent: image.extent,
+                referenceSize: referenceSize
+            )
+            result = result.cropped(to: scaled)
             result = result.transformed(by: CGAffineTransform(
-                translationX: -cropRect.origin.x,
-                y: -cropRect.origin.y
+                translationX: -scaled.origin.x,
+                y: -scaled.origin.y
             ))
         }
         return result
+    }
+
+    /// Scale a stored pixel-space crop rect from the resolution it was
+    /// authored against (`referenceSize`) to the resolution of the image
+    /// actually being rendered.
+    ///
+    /// The live Develop preview authors `cropRect` against the ~2048px
+    /// master preview; export renders the full-resolution original. Without
+    /// this rescale the preview-pixel rect is fed straight into
+    /// `cropped(to:)` on the much larger original, extracting a tiny corner
+    /// ROI — the corrupt corner-crop export of #320. A `nil` or non-positive
+    /// reference (legacy rows, or rendering at the authoring resolution)
+    /// yields a 1.0 scale factor, i.e. the pre-#320 behaviour.
+    private static func scaledCropRect(
+        _ rect: CGRect,
+        sourceExtent: CGRect,
+        referenceSize: CGSize?
+    ) -> CGRect {
+        guard let referenceSize,
+              referenceSize.width > 0,
+              referenceSize.height > 0 else {
+            return rect
+        }
+        let scaleX = sourceExtent.width / referenceSize.width
+        let scaleY = sourceExtent.height / referenceSize.height
+        return CGRect(
+            x: rect.origin.x * scaleX,
+            y: rect.origin.y * scaleY,
+            width: rect.size.width * scaleX,
+            height: rect.size.height * scaleY
+        )
     }
 }

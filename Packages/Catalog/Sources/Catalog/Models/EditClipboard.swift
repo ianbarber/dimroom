@@ -18,12 +18,13 @@ public final class EditClipboard: ObservableObject {
         sourceAssetId = assetId
     }
 
-    /// Returns the copied state with `cropRect` and `cropAngle` stripped.
+    /// Returns the copied state with the crop fields stripped.
     /// Returns `nil` if the clipboard is empty.
     public func pasteExcludingCrop() -> EditState? {
         guard var state = copiedState else { return nil }
         state.cropRect = nil
         state.cropAngle = nil
+        state.cropReferenceSize = nil
         return state
     }
 

@@ -1,4 +1,5 @@
 import Catalog
+import CoreGraphics
 import CoreImage
 import Foundation
 import ImageIO
@@ -37,6 +38,31 @@ final class ExporterTests: XCTestCase {
         CGImageDestinationAddImage(dest, cgImage, nil)
         CGImageDestinationFinalize(dest)
         return sourceURL
+    }
+
+    /// Write a lossless TIFF of the given pixel dimensions and return its
+    /// URL. Used by the crop-resolution tests where the exported pixel
+    /// dimensions are asserted exactly.
+    private func makeSourceTIFF(width: Int, height: Int, name: String = "source.tiff") -> URL {
+        let image = makeGradientImage(width: width, height: height)
+        let sourceURL = tempDir.appendingPathComponent(name)
+        let cgImage = context.createCGImage(image, from: image.extent)!
+        let dest = CGImageDestinationCreateWithURL(
+            sourceURL as CFURL,
+            UTType.tiff.identifier as CFString,
+            1, nil
+        )!
+        CGImageDestinationAddImage(dest, cgImage, nil)
+        CGImageDestinationFinalize(dest)
+        return sourceURL
+    }
+
+    /// Pixel dimensions of an image file on disk.
+    private func pixelSize(of url: URL) throws -> CGSize {
+        guard let image = CIImage(contentsOf: url) else {
+            throw ExportError.unreadableSource(url)
+        }
+        return image.extent.size
     }
 
     // MARK: - JPEG export
@@ -172,6 +198,70 @@ final class ExporterTests: XCTestCase {
         let withToggleData = try Data(contentsOf: withToggleURL)
         let withoutToggleData = try Data(contentsOf: withoutToggleURL)
         XCTAssertEqual(withToggleData, withoutToggleData)
+    }
+
+    // MARK: - Crop resolution (#320)
+
+    /// A crop authored against the ~2048px preview must export at the
+    /// full-resolution original's framing, not a tiny corner ROI. Here a
+    /// left-half crop authored against a 64² reference is exported from a
+    /// 256² original — the output must be 128×256 (½ width, full height of
+    /// 256), not 32×64 (the corrupt corner crop that the pre-#320 factor-1.0
+    /// path would produce).
+    func testCroppedExportScalesToFullResolution() throws {
+        let sourceURL = makeSourceTIFF(width: 256, height: 256)
+        let destURL = tempDir.appendingPathComponent("cropped.tiff")
+
+        // Display-space left half → CI pixel against the 64² reference =
+        // (x: 0, y: 0, w: 32, h: 64).
+        let reference = CGSize(width: 64, height: 64)
+        let display = CGRect(x: 0.0, y: 0.0, width: 0.5, height: 1.0)
+        let cropRect = CropGeometry.normalizedTopLeftToCIPixel(
+            rect: display,
+            imageSize: reference
+        )
+        let editState = EditState(cropRect: cropRect, cropReferenceSize: reference)
+
+        try Exporter.export(
+            sourceURL: sourceURL,
+            editState: editState,
+            config: ExportConfiguration(
+                format: .tiff, applyEdits: true, destinationURL: destURL
+            ),
+            context: context
+        )
+
+        let size = try pixelSize(of: destURL)
+        XCTAssertEqual(size.width, 128, accuracy: 1.0,
+                       "expected ½ of the 256px original, got \(size.width)")
+        XCTAssertEqual(size.height, 256, accuracy: 1.0,
+                       "expected the full 256px height, got \(size.height)")
+        // Explicitly assert we did not regress to the corner-crop bug,
+        // which would size the export against the 64px reference.
+        XCTAssertGreaterThan(size.width, 64,
+                             "export collapsed to the preview-pixel corner crop (#320)")
+    }
+
+    /// An uncropped export must cover the full original frame (acceptance
+    /// criterion 2). A non-crop edit is applied so `applyEdits` actually
+    /// routes through the renderer.
+    func testUncroppedExportCoversFullFrame() throws {
+        let sourceURL = makeSourceTIFF(width: 256, height: 256)
+        let destURL = tempDir.appendingPathComponent("uncropped.tiff")
+        let editState = EditState(exposure: 0.5)
+
+        try Exporter.export(
+            sourceURL: sourceURL,
+            editState: editState,
+            config: ExportConfiguration(
+                format: .tiff, applyEdits: true, destinationURL: destURL
+            ),
+            context: context
+        )
+
+        let size = try pixelSize(of: destURL)
+        XCTAssertEqual(size.width, 256, accuracy: 1.0)
+        XCTAssertEqual(size.height, 256, accuracy: 1.0)
     }
 
     // MARK: - Error handling

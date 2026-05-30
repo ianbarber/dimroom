@@ -365,6 +365,9 @@ final class HarnessController: @unchecked Sendable {
         case .resetCrop:
             return await handleResetCrop()
 
+        case .dragRotateHandle(let corner, let angleDelta):
+            return await handleDragRotateHandle(corner: corner, angleDelta: angleDelta)
+
         case .inspectMenu(let title):
             return await handleInspectMenu(title: title)
 
@@ -741,6 +744,25 @@ final class HarnessController: @unchecked Sendable {
     private func handleResetCrop() async -> Response {
         await MainActor.run {
             developViewModel.resetCrop()
+        }
+        return .ok()
+    }
+
+    private func handleDragRotateHandle(corner: String, angleDelta: Double) async -> Response {
+        let validCorners = ["topLeft", "topRight", "bottomLeft", "bottomRight"]
+        guard validCorners.contains(corner) else {
+            return .error("unknown corner '\(corner)'; expected one of: \(validCorners.joined(separator: ", "))")
+        }
+        let active = await MainActor.run { developViewModel.cropViewModel.isActive }
+        guard active else {
+            return .error("crop mode is not active; call enter-crop first")
+        }
+        // Same write path as the on-screen handle drag: accumulate the
+        // delta onto the live cropAngle and re-render. Pivot is always the
+        // crop centre, so `corner` only validates the protocol shape.
+        await MainActor.run {
+            let current = developViewModel.cropViewModel.cropAngle
+            developViewModel.setCropAngleLive(current + angleDelta)
         }
         return .ok()
     }

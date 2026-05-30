@@ -56,6 +56,7 @@ struct DimroomCLI: ParsableCommand {
             CancelCrop.self,
             SetCropPreset.self,
             ResetCrop.self,
+            DragRotateHandle.self,
             InspectMenu.self,
             ConnectDrive.self,
             DisconnectDrive.self,
@@ -1102,6 +1103,26 @@ extension DimroomCLI {
 
         func run() throws {
             try runCommand(.resetCrop, socket: socket)
+        }
+    }
+
+    struct DragRotateHandle: ParsableCommand {
+        static let configuration = CommandConfiguration(
+            commandName: "drag-rotate-handle",
+            abstract: "Rotate the active crop by an angle delta via a corner rotate handle (about the crop centre)."
+        )
+
+        @Option(name: .long, help: "Corner: topLeft, topRight, bottomLeft, bottomRight.")
+        var corner: String
+
+        @Option(name: .long, help: "Degrees to add to the current crop angle (may be negative).")
+        var angleDelta: Double
+
+        @Option(name: .long, help: "Path to the harness socket.")
+        var socket: String = HarnessServer.defaultSocketPath
+
+        func run() throws {
+            try runCommand(.dragRotateHandle(corner: corner, angleDelta: angleDelta), socket: socket)
         }
     }
 

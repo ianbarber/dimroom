@@ -119,6 +119,47 @@ public enum CropGeometry {
         min(45.0, max(-45.0, degrees))
     }
 
+    /// Signed angle in degrees swept from `from` to `to` about `center`,
+    /// used by the drag-to-rotate crop handles. Both points are in the
+    /// same (SwiftUI overlay, top-left origin, y-down) coordinate space.
+    ///
+    /// The sweep is `atan2(to) − atan2(from)`. In SwiftUI's y-down space
+    /// `atan2` increases for clockwise motion, so a clockwise drag returns
+    /// a positive value — the same sign convention as a positive straighten
+    /// slider, which is what lets the handle and the slider write
+    /// `cropAngle` interchangeably. The result is normalised to (−180, 180]
+    /// so a single drag past the ±180 seam returns the short way round; the
+    /// caller still clamps the accumulated angle via `clampAngle`.
+    ///
+    /// A zero-length move (either endpoint coincident with `center`, or the
+    /// two endpoints equal) returns 0.
+    public static func rotationAngle(center: CGPoint, from: CGPoint, to: CGPoint) -> Double {
+        let fromDX = from.x - center.x
+        let fromDY = from.y - center.y
+        let toDX = to.x - center.x
+        let toDY = to.y - center.y
+        // A point sitting exactly on the centre has no defined bearing;
+        // treat that drag as no rotation rather than producing a jump.
+        if (fromDX == 0 && fromDY == 0) || (toDX == 0 && toDY == 0) {
+            return 0
+        }
+        let fromAngle = Foundation.atan2(fromDY, fromDX)
+        let toAngle = Foundation.atan2(toDY, toDX)
+        var delta = (toAngle - fromAngle) * 180.0 / .pi
+        // Normalise to (−180, 180].
+        while delta > 180 { delta -= 360 }
+        while delta <= -180 { delta += 360 }
+        return delta
+    }
+
+    /// Round `degrees` to the nearest multiple of `increment`, used by the
+    /// Shift-constrained rotate drag (15° steps, Lightroom convention).
+    /// A non-positive `increment` returns the input unchanged.
+    public static func snapAngle(_ degrees: Double, toIncrement increment: Double) -> Double {
+        guard increment > 0 else { return degrees }
+        return (degrees / increment).rounded() * increment
+    }
+
     // MARK: - Rotated bounds
 
     /// Shrink `cropRect` (normalised 0…1) so that, when the underlying

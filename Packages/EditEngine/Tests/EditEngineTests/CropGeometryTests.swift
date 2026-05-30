@@ -191,4 +191,79 @@ final class CropGeometryTests: XCTestCase {
         let fitted = CropGeometry.fitCropToRotatedBounds(cropRect: rect, angle: 15)
         XCTAssertEqual(fitted, rect)
     }
+
+    // MARK: - rotationAngle
+
+    /// A quarter-turn about the centre returns ±90. In SwiftUI's y-down
+    /// space a move from the 3-o'clock point (+x) to the 6-o'clock point
+    /// (+y, visually *below* centre) is a clockwise sweep, so it returns
+    /// +90 — the same sign a positive straighten slider produces.
+    func testRotationAngleQuarterTurnClockwiseIsPositive() {
+        let centre = CGPoint(x: 100, y: 100)
+        let from = CGPoint(x: 200, y: 100) // 3 o'clock
+        let to = CGPoint(x: 100, y: 200)   // 6 o'clock (y-down → below)
+        let angle = CropGeometry.rotationAngle(center: centre, from: from, to: to)
+        XCTAssertEqual(angle, 90, accuracy: 1e-9)
+    }
+
+    /// The opposite sweep (3 o'clock → 12 o'clock, counter-clockwise in
+    /// y-down space) returns −90.
+    func testRotationAngleQuarterTurnCounterClockwiseIsNegative() {
+        let centre = CGPoint(x: 100, y: 100)
+        let from = CGPoint(x: 200, y: 100) // 3 o'clock
+        let to = CGPoint(x: 100, y: 0)     // 12 o'clock (y-down → above)
+        let angle = CropGeometry.rotationAngle(center: centre, from: from, to: to)
+        XCTAssertEqual(angle, -90, accuracy: 1e-9)
+    }
+
+    /// Swapping `from` and `to` negates the swept angle.
+    func testRotationAngleIsAntisymmetric() {
+        let centre = CGPoint(x: 50, y: 50)
+        let a = CGPoint(x: 90, y: 40)
+        let b = CGPoint(x: 70, y: 95)
+        let forward = CropGeometry.rotationAngle(center: centre, from: a, to: b)
+        let backward = CropGeometry.rotationAngle(center: centre, from: b, to: a)
+        XCTAssertEqual(forward, -backward, accuracy: 1e-9)
+    }
+
+    func testRotationAngleZeroLengthMoveReturnsZero() {
+        let centre = CGPoint(x: 10, y: 10)
+        let p = CGPoint(x: 40, y: 25)
+        XCTAssertEqual(CropGeometry.rotationAngle(center: centre, from: p, to: p), 0)
+    }
+
+    func testRotationAnglePointAtCentreReturnsZero() {
+        let centre = CGPoint(x: 10, y: 10)
+        XCTAssertEqual(
+            CropGeometry.rotationAngle(center: centre, from: centre, to: CGPoint(x: 40, y: 25)),
+            0
+        )
+    }
+
+    /// The result stays in (−180, 180] — a near-half-turn does not wrap to
+    /// a large value.
+    func testRotationAngleNormalisesToShortWayRound() {
+        let centre = CGPoint(x: 0, y: 0)
+        let from = CGPoint(x: 10, y: 1)    // just below the +x axis (small +)
+        let to = CGPoint(x: 10, y: -1)     // just above the +x axis (small −)
+        let angle = CropGeometry.rotationAngle(center: centre, from: from, to: to)
+        XCTAssertLessThan(abs(angle), 30)
+        XCTAssertLessThan(angle, 0)
+    }
+
+    // MARK: - snapAngle
+
+    func testSnapAngleToFifteenDegreeIncrements() {
+        XCTAssertEqual(CropGeometry.snapAngle(7, toIncrement: 15), 0, accuracy: 1e-9)
+        XCTAssertEqual(CropGeometry.snapAngle(8, toIncrement: 15), 15, accuracy: 1e-9)
+        XCTAssertEqual(CropGeometry.snapAngle(-8, toIncrement: 15), -15, accuracy: 1e-9)
+        XCTAssertEqual(CropGeometry.snapAngle(22, toIncrement: 15), 15, accuracy: 1e-9)
+        XCTAssertEqual(CropGeometry.snapAngle(23, toIncrement: 15), 30, accuracy: 1e-9)
+        XCTAssertEqual(CropGeometry.snapAngle(0, toIncrement: 15), 0, accuracy: 1e-9)
+    }
+
+    func testSnapAngleNonPositiveIncrementReturnsInput() {
+        XCTAssertEqual(CropGeometry.snapAngle(13.7, toIncrement: 0), 13.7)
+        XCTAssertEqual(CropGeometry.snapAngle(13.7, toIncrement: -15), 13.7)
+    }
 }

@@ -36,6 +36,10 @@ REMOTE_CATALOG="$WORK_DIR/remote-catalog.sqlite"
 REMOTE_PREVIEW_CACHE="$WORK_DIR/remote-previews"
 LOCAL_CATALOG="$WORK_DIR/local/catalog.sqlite"
 LOCAL_PREVIEW_CACHE="$WORK_DIR/local-previews"
+# Scope the originals staging dir + LRU originals cache under $WORK_DIR so
+# any originals fetch writes its downloads + index.json here, never into the
+# user's real ~/Library/Application Support/Dimroom/originals (issue #331).
+ORIGINALS_CACHE="$WORK_DIR/originals"
 SOCKET="/tmp/dimroom-harness-restore-catalog-connect-in-session-$$.sock"
 APP_PID=""
 
@@ -105,7 +109,7 @@ stop_app() {
 
 echo "=== Seeding remote fixture catalog ==="
 rm -rf "$WORK_DIR"
-mkdir -p "$WORK_DIR" "$WORK_DIR/local" "$SCREENSHOT_DIR"
+mkdir -p "$WORK_DIR" "$WORK_DIR/local" "$ORIGINALS_CACHE" "$SCREENSHOT_DIR"
 
 "$FIXTURE_BIN" seed \
     --catalog "$REMOTE_CATALOG" \
@@ -144,9 +148,11 @@ DIMROOM_HARNESS_STUB_REMOTE_CATALOG="$REMOTE_CATALOG" \
 DIMROOM_HARNESS_STUB_REMOTE_CATALOG_PHOTO_COUNT="$EXPECTED_COUNT" \
 DIMROOM_HARNESS_AUTO_CONFIRM_CONNECT_FOR_RESTORE=connect \
 DIMROOM_HARNESS_AUTO_CONFIRM_RESTORE=1 \
+DIMROOM_ORIGINALS_DIR="$ORIGINALS_CACHE" \
     "$APP_BIN" --harness \
     --fixture-catalog "$LOCAL_CATALOG" \
-    --preview-cache "$LOCAL_PREVIEW_CACHE" &
+    --preview-cache "$LOCAL_PREVIEW_CACHE" \
+    --originals-cache "$ORIGINALS_CACHE" &
 APP_PID=$!
 wait_for_socket
 
@@ -214,9 +220,11 @@ DIMROOM_HARNESS_SOCKET="$SOCKET" \
 DIMROOM_HARNESS_DRIVE_STUB=1 \
 DIMROOM_HARNESS_STUB_REMOTE_CATALOG="$REMOTE_CATALOG" \
 DIMROOM_HARNESS_STUB_REMOTE_CATALOG_PHOTO_COUNT="$EXPECTED_COUNT" \
+DIMROOM_ORIGINALS_DIR="$ORIGINALS_CACHE" \
     "$APP_BIN" --harness \
     --fixture-catalog "$LOCAL_CATALOG" \
-    --preview-cache "$LOCAL_PREVIEW_CACHE" &
+    --preview-cache "$LOCAL_PREVIEW_CACHE" \
+    --originals-cache "$ORIGINALS_CACHE" &
 APP_PID=$!
 wait_for_socket
 

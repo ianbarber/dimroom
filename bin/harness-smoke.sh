@@ -9,6 +9,11 @@ SOCKET="/tmp/dimroom-harness-smoke-$$.sock"
 SCREENSHOT_DIR="$REPO_ROOT/.artifacts/smoke"
 SCREENSHOT_PATH="$SCREENSHOT_DIR/smoke.png"
 FIXTURE_CATALOG="$REPO_ROOT/fixtures/empty.sqlite"
+# This flow has no $WORK_DIR, but the app still constructs OriginalsCache at
+# launch (which creates its dir) — scope the staging dir + LRU cache under
+# .artifacts so it can't touch the user's real
+# ~/Library/Application Support/Dimroom/originals (issue #331).
+ORIGINALS_CACHE="$SCREENSHOT_DIR/originals"
 APP_PID=""
 
 cleanup() {
@@ -40,11 +45,14 @@ if [ ! -x "$CLI_BIN" ]; then
 fi
 
 echo "=== Launching app in harness mode ==="
+mkdir -p "$ORIGINALS_CACHE"
 # Set the socket path via env so the app uses our test socket
 DIMROOM_HARNESS_SOCKET="$SOCKET" \
 DIMROOM_HARNESS_DISABLE_DRIVE=1 \
 DIMROOM_HARNESS_AUTO_CONFIRM_RESTORE=0 \
-    "$APP_BIN" --harness --fixture-catalog "$FIXTURE_CATALOG" &
+DIMROOM_ORIGINALS_DIR="$ORIGINALS_CACHE" \
+    "$APP_BIN" --harness --fixture-catalog "$FIXTURE_CATALOG" \
+    --originals-cache "$ORIGINALS_CACHE" &
 APP_PID=$!
 
 echo "=== Waiting for socket ==="

@@ -20,6 +20,10 @@ SEED_SRC="$REPO_ROOT/fixtures/library-seed"
 WORK_DIR="$REPO_ROOT/.artifacts/harness-lens-profile"
 CATALOG_PATH="$WORK_DIR/catalog.sqlite"
 PREVIEW_CACHE="$WORK_DIR/previews"
+# Scope the originals staging dir + LRU originals cache under $WORK_DIR so
+# any originals fetch writes its downloads + index.json here, never into the
+# user's real ~/Library/Application Support/Dimroom/originals (issue #331).
+ORIGINALS_CACHE="$WORK_DIR/originals"
 SOCKET="/tmp/dimroom-harness-lens-profile-$$.sock"
 APP_PID=""
 LENS_MODEL="RF 50mm F1.2 L USM"
@@ -46,7 +50,7 @@ done
 
 echo "=== Seeding catalog from $SEED_SRC with lens model '$LENS_MODEL' ==="
 rm -rf "$WORK_DIR"
-mkdir -p "$WORK_DIR"
+mkdir -p "$WORK_DIR" "$ORIGINALS_CACHE"
 "$FIXTURE_BIN" seed \
     --catalog "$CATALOG_PATH" \
     --cache "$PREVIEW_CACHE" \
@@ -60,9 +64,11 @@ fi
 
 echo "=== Launching app in harness mode ==="
 DIMROOM_HARNESS_SOCKET="$SOCKET" \
+DIMROOM_ORIGINALS_DIR="$ORIGINALS_CACHE" \
     "$APP_BIN" --harness \
     --fixture-catalog "$CATALOG_PATH" \
-    --preview-cache "$PREVIEW_CACHE" &
+    --preview-cache "$PREVIEW_CACHE" \
+    --originals-cache "$ORIGINALS_CACHE" &
 APP_PID=$!
 
 echo "=== Waiting for socket ==="

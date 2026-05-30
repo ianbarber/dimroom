@@ -39,6 +39,12 @@ LAUNCH_B_DIR="$WORK_DIR/launch-b"
 LAUNCH_B_LOCAL_DIR="$LAUNCH_B_DIR/local"
 LAUNCH_B_LOCAL="$LAUNCH_B_LOCAL_DIR/catalog.sqlite"
 LAUNCH_B_PREVIEWS="$LAUNCH_B_DIR/previews"
+# Scope the originals staging dir + LRU originals cache under $WORK_DIR (shared
+# by both launches) so any originals fetch writes its downloads + index.json
+# here, never into the user's real
+# ~/Library/Application Support/Dimroom/originals (issue #331). Kept a sibling
+# of launch-b's read-only catalog dir so it stays writable for both launches.
+ORIGINALS_CACHE="$WORK_DIR/originals"
 SOCKET="/tmp/dimroom-harness-restore-catalog-outcomes-$$.sock"
 APP_PID=""
 
@@ -98,7 +104,7 @@ terminate_app() {
 
 echo "=== Seeding shared remote fixture catalog ==="
 rm -rf "$WORK_DIR"
-mkdir -p "$WORK_DIR"
+mkdir -p "$WORK_DIR" "$ORIGINALS_CACHE"
 mkdir -p "$SCREENSHOT_DIR"
 
 "$FIXTURE_BIN" seed \
@@ -132,9 +138,11 @@ DIMROOM_HARNESS_DRIVE_STUB=1 \
 DIMROOM_HARNESS_STUB_REMOTE_CATALOG="$REMOTE_CATALOG" \
 DIMROOM_HARNESS_STUB_REMOTE_CATALOG_PHOTO_COUNT="$EXPECTED_COUNT" \
 DIMROOM_HARNESS_SKIP_LAUNCH_RESTORE=1 \
+DIMROOM_ORIGINALS_DIR="$ORIGINALS_CACHE" \
     "$APP_BIN" --harness \
     --fixture-catalog "$LAUNCH_A_LOCAL" \
-    --preview-cache "$LAUNCH_A_PREVIEWS" &
+    --preview-cache "$LAUNCH_A_PREVIEWS" \
+    --originals-cache "$ORIGINALS_CACHE" &
 APP_PID=$!
 
 wait_for_socket "$APP_PID"
@@ -232,9 +240,11 @@ DIMROOM_HARNESS_DRIVE_STUB=1 \
 DIMROOM_HARNESS_STUB_REMOTE_CATALOG="$REMOTE_CATALOG" \
 DIMROOM_HARNESS_STUB_REMOTE_CATALOG_PHOTO_COUNT="$EXPECTED_COUNT" \
 DIMROOM_HARNESS_SKIP_LAUNCH_RESTORE=1 \
+DIMROOM_ORIGINALS_DIR="$ORIGINALS_CACHE" \
     "$APP_BIN" --harness \
     --fixture-catalog "$LAUNCH_B_LOCAL" \
-    --preview-cache "$LAUNCH_B_PREVIEWS" &
+    --preview-cache "$LAUNCH_B_PREVIEWS" \
+    --originals-cache "$ORIGINALS_CACHE" &
 APP_PID=$!
 
 wait_for_socket "$APP_PID"

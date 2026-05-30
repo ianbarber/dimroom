@@ -2136,22 +2136,87 @@ final class AppDelegate: NSObject, NSApplicationDelegate, ObservableObject {
             .appendingPathComponent("previews", isDirectory: true)
     }
 
-    /// Resolves the staging directory for copied originals. The harness flow
-    /// overrides the default via `DIMROOM_ORIGINALS_DIR` so tests do not leak
-    /// files into the user's Application Support.
+    /// Resolves the staging directory for copied originals (and, via
+    /// `resolveOriginalsCacheDirectory`, the LRU originals cache default).
+    ///
+    /// An explicit `DIMROOM_ORIGINALS_DIR` always wins. Otherwise, in
+    /// `--harness` mode the default is a per-flow sandbox under the system
+    /// temp dir rather than the user's real Application Support originals
+    /// dir, so a harness flow that forgets to pass `DIMROOM_ORIGINALS_DIR`
+    /// / `--originals-cache` is isolated at the source and can never leak
+    /// into the production cache (#367). Outside the harness the default is
+    /// the App Support originals dir, unchanged.
+    ///
+    /// The decision logic lives in the pure `static` overload below so it
+    /// is Layer-A testable without spinning up `NSApplication`.
     private func resolveOriginalsDirectory() -> URL {
-        if let envPath = ProcessInfo.processInfo.environment["DIMROOM_ORIGINALS_DIR"],
-           !envPath.isEmpty
-        {
-            return URL(fileURLWithPath: envPath)
-        }
+        let env = ProcessInfo.processInfo.environment
         let appSupport = FileManager.default.urls(
             for: .applicationSupportDirectory,
             in: .userDomainMask
         ).first ?? FileManager.default.temporaryDirectory
-        return appSupport
+        let fallback = appSupport
             .appendingPathComponent("Dimroom", isDirectory: true)
             .appendingPathComponent("originals", isDirectory: true)
+        return Self.resolveOriginalsDirectory(
+            isHarness: ProcessInfo.processInfo.arguments.contains("--harness"),
+            envOriginalsDir: env["DIMROOM_ORIGINALS_DIR"],
+            harnessSocketPath: env["DIMROOM_HARNESS_SOCKET"] ?? HarnessServer.defaultSocketPath,
+            temporaryDirectory: FileManager.default.temporaryDirectory,
+            applicationSupportFallback: fallback
+        )
+    }
+
+    /// Pure resolver for the originals staging/cache directory, split out
+    /// so the `--harness` sandbox default (#367) can be pinned in Layer A
+    /// without `NSApplication` (mirrors `harnessDriveStrategy`).
+    ///
+    /// Precedence:
+    /// 1. `envOriginalsDir` non-empty → return it verbatim. An explicit
+    ///    `DIMROOM_ORIGINALS_DIR` always wins, harness or not.
+    /// 2. else `isHarness` → `<temp>/dimroom-harness-originals/<digest>/`,
+    ///    keyed off the harness socket path so it is **identical across
+    ///    the multiple app launches a single flow performs** (e.g. the
+    ///    restore-catalog flows) — per-flow isolation *and* relaunch
+    ///    stability, never touching the real App Support dir.
+    /// 3. else → `applicationSupportFallback` (production, unchanged).
+    nonisolated static func resolveOriginalsDirectory(
+        isHarness: Bool,
+        envOriginalsDir: String?,
+        harnessSocketPath: String,
+        temporaryDirectory: URL,
+        applicationSupportFallback: URL
+    ) -> URL {
+        if let envOriginalsDir, !envOriginalsDir.isEmpty {
+            return URL(fileURLWithPath: envOriginalsDir)
+        }
+        if isHarness {
+            return temporaryDirectory
+                .appendingPathComponent("dimroom-harness-originals", isDirectory: true)
+                .appendingPathComponent(stableDigest(harnessSocketPath), isDirectory: true)
+        }
+        return applicationSupportFallback
+    }
+
+    /// Deterministic, filesystem-safe digest used to key the per-flow
+    /// harness originals sandbox off the harness socket path (#367).
+    ///
+    /// **Must stay deterministic across process launches.** A single
+    /// Layer C flow launches the app multiple times and every launch has
+    /// to resolve to the *same* sandbox, or cached originals vanish on
+    /// relaunch. Swift's `Hasher` / `String.hashValue` is seeded with a
+    /// per-process random value, so it would hand each launch a different
+    /// bucket and silently break that. This is a fixed FNV-1a transform;
+    /// `HarnessOriginalsDirectoryTests` pins a known input→output to lock
+    /// it in against an accidental switch back to `hashValue`.
+    nonisolated static func stableDigest(_ input: String) -> String {
+        var hash: UInt64 = 0xcbf2_9ce4_8422_2325  // FNV-1a 64-bit offset basis
+        let prime: UInt64 = 0x100_0000_01b3        // FNV-1a 64-bit prime
+        for byte in input.utf8 {
+            hash ^= UInt64(byte)
+            hash = hash &* prime
+        }
+        return String(hash, radix: 16)
     }
 
     /// Directory used by the LRU originals cache. Defaults to the same

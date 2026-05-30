@@ -59,6 +59,56 @@ final class SettingsTabSnapshotTests: XCTestCase {
         return image
     }
 
+    /// Like `renderFixedPixelImage`, but hosts the view in an offscreen
+    /// `NSWindow` first. The bare `NSHostingView.cacheDisplay` path draws
+    /// `TabView` chrome blank — the segmented tab bar is backed by
+    /// `NSTabView`'s segmented control, which only draws once it lives in
+    /// a window. Used by the full-`SettingsRootView` snapshot so the
+    /// golden reflects the real tab-bar geometry.
+    private func renderWindowImage(for view: some View) -> NSImage {
+        let size = Self.tabSize
+        let host = NSHostingView(rootView: AnyView(view.frame(width: size.width, height: size.height)))
+        host.frame = CGRect(origin: .zero, size: size)
+
+        let window = NSWindow(
+            contentRect: CGRect(origin: .zero, size: size),
+            styleMask: [.borderless],
+            backing: .buffered,
+            defer: false
+        )
+        window.contentView = host
+        host.layoutSubtreeIfNeeded()
+
+        // The segmented tab bar (NSSegmentedControl) defers its drawing
+        // until the window has gone through a real display cycle, so
+        // order the window front and let the runloop turn once before
+        // capturing. Without this the bar comes out blank.
+        window.orderFrontRegardless()
+        host.displayIfNeeded()
+        RunLoop.current.run(until: Date(timeIntervalSinceNow: 0.1))
+
+        guard let rep = NSBitmapImageRep(
+            bitmapDataPlanes: nil,
+            pixelsWide: Int(size.width),
+            pixelsHigh: Int(size.height),
+            bitsPerSample: 8,
+            samplesPerPixel: 4,
+            hasAlpha: true,
+            isPlanar: false,
+            colorSpaceName: .deviceRGB,
+            bytesPerRow: 0,
+            bitsPerPixel: 32
+        ) else {
+            fatalError("Failed to allocate NSBitmapImageRep for snapshot")
+        }
+        host.cacheDisplay(in: host.bounds, to: rep)
+        window.orderOut(nil)
+
+        let image = NSImage(size: size)
+        image.addRepresentation(rep)
+        return image
+    }
+
     private func freshStore() -> SettingsStore {
         let suite = "dimroom.settings-snapshot-tests.\(UUID().uuidString)"
         let defaults = UserDefaults(suiteName: suite)!
@@ -160,6 +210,37 @@ final class SettingsTabSnapshotTests: XCTestCase {
     func test_settings_develop() {
         let view = DevelopSettingsTab(store: freshStore())
         let image = renderFixedPixelImage(for: view)
+        runAssertSnapshot {
+            assertSnapshot(
+                of: image,
+                as: .image(
+                    precision: Self.snapshotPrecision,
+                    perceptualPrecision: Self.snapshotPerceptualPrecision
+                )
+            )
+        }
+    }
+
+    // MARK: - Full window chrome
+
+    /// Renders the whole `SettingsRootView` — `TabView` segmented bar
+    /// included — at the live 520×520 window size with the Drive tab
+    /// selected. The per-tab snapshots above render bare tab bodies into
+    /// the full frame, so they are optimistic by the tab-bar height; this
+    /// golden reflects the true (shorter) content area and proves the
+    /// Drive Sync row survives beneath the tab bar in the real window.
+    func test_settings_root_chrome_drive() async {
+        let view = SettingsRootView(
+            store: freshStore(),
+            driveAuthState: await connectedDriveAuthState(),
+            libraryLocation: URL(fileURLWithPath: "/Library/Dimroom"),
+            onConnectDrive: {},
+            onDisconnectDrive: {},
+            onClearOriginalsCache: {},
+            onClearPreviewCache: {},
+            initialTab: .drive
+        )
+        let image = renderWindowImage(for: view)
         runAssertSnapshot {
             assertSnapshot(
                 of: image,

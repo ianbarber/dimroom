@@ -56,6 +56,7 @@ struct DimroomCLI: ParsableCommand {
             CancelCrop.self,
             SetCropPreset.self,
             ResetCrop.self,
+            DragRotateHandle.self,
             InspectMenu.self,
             ConnectDrive.self,
             DisconnectDrive.self,
@@ -68,10 +69,12 @@ struct DimroomCLI: ParsableCommand {
             ClearOriginalsCache.self,
             ClearPreviewCache.self,
             SyncFromDrive.self,
+            BackfillDriveMarkers.self,
             RestoreCatalogFromDrive.self,
             ReloadCatalogFromDrive.self,
             TriggerExportMenu.self,
             CompleteExportSheet.self,
+            DismissRemoteAdditionsBadge.self,
             NudgeColorWheel.self,
             SetMagnifier.self,
         ]
@@ -1105,6 +1108,26 @@ extension DimroomCLI {
         }
     }
 
+    struct DragRotateHandle: ParsableCommand {
+        static let configuration = CommandConfiguration(
+            commandName: "drag-rotate-handle",
+            abstract: "Rotate the active crop by an angle delta via a corner rotate handle (about the crop centre)."
+        )
+
+        @Option(name: .long, help: "Corner: topLeft, topRight, bottomLeft, bottomRight.")
+        var corner: String
+
+        @Option(name: .long, help: "Degrees to add to the current crop angle (may be negative).")
+        var angleDelta: Double
+
+        @Option(name: .long, help: "Path to the harness socket.")
+        var socket: String = HarnessServer.defaultSocketPath
+
+        func run() throws {
+            try runCommand(.dragRotateHandle(corner: corner, angleDelta: angleDelta), socket: socket)
+        }
+    }
+
     struct InspectMenu: ParsableCommand {
         static let configuration = CommandConfiguration(
             commandName: "inspect-menu",
@@ -1257,6 +1280,20 @@ extension DimroomCLI {
         }
     }
 
+    struct DismissRemoteAdditionsBadge: ParsableCommand {
+        static let configuration = CommandConfiguration(
+            commandName: "dismiss-remote-additions-badge",
+            abstract: "Clear the Library filter bar's 'N new on Drive' badge (mirrors its X button)."
+        )
+
+        @Option(name: .long, help: "Path to the harness socket.")
+        var socket: String = HarnessServer.defaultSocketPath
+
+        func run() throws {
+            try runCommand(.dismissRemoteAdditionsBadge, socket: socket)
+        }
+    }
+
     struct SyncFromDrive: ParsableCommand {
         static let configuration = CommandConfiguration(
             commandName: "sync-from-drive",
@@ -1268,6 +1305,20 @@ extension DimroomCLI {
 
         func run() throws {
             try runCommand(.syncFromDrive, socket: socket)
+        }
+    }
+
+    struct BackfillDriveMarkers: ParsableCommand {
+        static let configuration = CommandConfiguration(
+            commandName: "backfill-drive-markers",
+            abstract: "Walk every file under the Drive /PhotoTool/ root and PATCH the dimroom appProperties marker onto any that lack it (#328). Idempotent. Returns {scanned, patched, skipped}."
+        )
+
+        @Option(name: .long, help: "Path to the harness socket.")
+        var socket: String = HarnessServer.defaultSocketPath
+
+        func run() throws {
+            try runCommand(.backfillDriveMarkers, socket: socket)
         }
     }
 

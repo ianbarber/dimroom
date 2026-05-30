@@ -108,6 +108,13 @@ public enum Command: Codable, Sendable, Equatable {
     /// classified outcome. Used by Layer C delta-sync flows so they
     /// don't have to wait for the periodic 5-minute tick.
     case syncFromDrive
+    /// Run the one-shot, idempotent backfill that walks every file under
+    /// the Drive `/PhotoTool/` root and PATCHes the shared
+    /// `appProperties.dimroom` marker onto any that lack it (#328).
+    /// Files uploaded before #310 don't carry the marker, so the change
+    /// poller's scope filter would silently drop them. Returns
+    /// `{scanned, patched, skipped}`. No associated values.
+    case backfillDriveMarkers
     /// Runs `CatalogPublisher.restoreIfNeeded` against the live
     /// uploader (or the local-file stub when
     /// `DIMROOM_HARNESS_STUB_REMOTE_CATALOG` is set). `confirm`
@@ -145,6 +152,12 @@ public enum Command: Codable, Sendable, Equatable {
     /// dialog branch). NSOpenPanel can't be driven from the harness, so
     /// `destinationPath` substitutes for the panel's URL output (#242).
     case completeExportSheet(destinationPath: String, format: String, applyEdits: Bool)
+    /// Clears the Library filter bar's "N new on Drive" badge, mirroring
+    /// the badge's own X dismiss button (added in #311). The badge is
+    /// persistent — it does not auto-dismiss like `undoToast`/`ratingToast`
+    /// — so this is the only way to exercise the dismiss path at Layer C
+    /// (#313).
+    case dismissRemoteAdditionsBadge
     /// Drives the `ColorWheelControl` keyboard path (#305) without
     /// synthesising NSEvents — the harness has no reliable way to land
     /// SwiftUI focus on a child view (see `postMenuAction`). The handler
@@ -163,6 +176,14 @@ public enum Command: Codable, Sendable, Equatable {
     /// `samplePointY`, and `zoom` are optional — omit them to toggle
     /// visibility without moving the sample point or changing zoom.
     case setMagnifier(visible: Bool, samplePointX: Double?, samplePointY: Double?, zoom: Int?)
+    /// Drives the crop overlay's drag-to-rotate handles (#323) without
+    /// synthesising a pointer drag. The handler errors unless crop mode is
+    /// active, then adds `angleDelta` (degrees) to the live `cropAngle`
+    /// through the same `setCropAngleLive` path the on-screen handle drag
+    /// and the straighten slider use. `corner` is validated against the
+    /// four corner names for protocol fidelity; rotation is always about
+    /// the crop centre, so the corner does not change the result.
+    case dragRotateHandle(corner: String, angleDelta: Double)
 
     private enum CodingKeys: String, CodingKey {
         case type
@@ -206,6 +227,8 @@ public enum Command: Codable, Sendable, Equatable {
         case samplePointX
         case samplePointY
         case zoom
+        case corner
+        case angleDelta
     }
 
     private enum CommandType: String, Codable {
@@ -272,12 +295,15 @@ public enum Command: Codable, Sendable, Equatable {
         case clearOriginalsCache
         case clearPreviewCache
         case syncFromDrive
+        case backfillDriveMarkers
         case restoreCatalogFromDrive
         case reloadCatalogFromDrive
         case triggerExportMenu
         case completeExportSheet
+        case dismissRemoteAdditionsBadge
         case nudgeColorWheel
         case setMagnifier
+        case dragRotateHandle
     }
 
     public init(from decoder: Decoder) throws {
@@ -479,6 +505,8 @@ public enum Command: Codable, Sendable, Equatable {
             self = .clearPreviewCache
         case .syncFromDrive:
             self = .syncFromDrive
+        case .backfillDriveMarkers:
+            self = .backfillDriveMarkers
         case .restoreCatalogFromDrive:
             let confirm = try container.decodeIfPresent(Bool.self, forKey: .confirm) ?? true
             self = .restoreCatalogFromDrive(confirm: confirm)
@@ -498,6 +526,8 @@ public enum Command: Codable, Sendable, Equatable {
             let format = try container.decode(String.self, forKey: .format)
             let applyEdits = try container.decode(Bool.self, forKey: .applyEdits)
             self = .completeExportSheet(destinationPath: destinationPath, format: format, applyEdits: applyEdits)
+        case .dismissRemoteAdditionsBadge:
+            self = .dismissRemoteAdditionsBadge
         case .nudgeColorWheel:
             let assetId = try container.decode(UUID.self, forKey: .assetId)
             let hueParameter = try container.decode(String.self, forKey: .hueParameter)
@@ -522,6 +552,10 @@ public enum Command: Codable, Sendable, Equatable {
                 samplePointY: samplePointY,
                 zoom: zoom
             )
+        case .dragRotateHandle:
+            let corner = try container.decode(String.self, forKey: .corner)
+            let angleDelta = try container.decode(Double.self, forKey: .angleDelta)
+            self = .dragRotateHandle(corner: corner, angleDelta: angleDelta)
         }
     }
 
@@ -716,6 +750,8 @@ public enum Command: Codable, Sendable, Equatable {
             try container.encode(CommandType.clearPreviewCache, forKey: .type)
         case .syncFromDrive:
             try container.encode(CommandType.syncFromDrive, forKey: .type)
+        case .backfillDriveMarkers:
+            try container.encode(CommandType.backfillDriveMarkers, forKey: .type)
         case .restoreCatalogFromDrive(let confirm):
             try container.encode(CommandType.restoreCatalogFromDrive, forKey: .type)
             try container.encode(confirm, forKey: .confirm)
@@ -731,6 +767,8 @@ public enum Command: Codable, Sendable, Equatable {
             try container.encode(destinationPath, forKey: .destinationPath)
             try container.encode(format, forKey: .format)
             try container.encode(applyEdits, forKey: .applyEdits)
+        case .dismissRemoteAdditionsBadge:
+            try container.encode(CommandType.dismissRemoteAdditionsBadge, forKey: .type)
         case .nudgeColorWheel(let assetId, let hueParameter, let saturationParameter, let key, let shift):
             try container.encode(CommandType.nudgeColorWheel, forKey: .type)
             try container.encode(assetId, forKey: .assetId)
@@ -744,6 +782,10 @@ public enum Command: Codable, Sendable, Equatable {
             try container.encodeIfPresent(samplePointX, forKey: .samplePointX)
             try container.encodeIfPresent(samplePointY, forKey: .samplePointY)
             try container.encodeIfPresent(zoom, forKey: .zoom)
+        case .dragRotateHandle(let corner, let angleDelta):
+            try container.encode(CommandType.dragRotateHandle, forKey: .type)
+            try container.encode(corner, forKey: .corner)
+            try container.encode(angleDelta, forKey: .angleDelta)
         }
     }
 }

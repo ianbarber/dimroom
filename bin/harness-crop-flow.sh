@@ -242,6 +242,54 @@ echo "=== Final screenshot ==="
 "$CLI_BIN" screenshot "$SCREENSHOT_DIR/crop-result.png" --socket "$SOCKET" || true
 
 # ---------------------------------------------------------------------
+# Issue #323: drag-to-rotate handles. Enter crop mode (asset A is at
+# identity after the reset-crop+commit above), drive two rotate-handle
+# drags about the crop centre and confirm the deltas accumulate onto
+# cropAngle, then commit and read it back. The CLI command lands on the
+# same setCropAngleLive path the on-screen handle drag uses.
+# ---------------------------------------------------------------------
+echo "=== drag-to-rotate — enter crop on A ==="
+"$CLI_BIN" enter-crop "$ASSET" --socket "$SOCKET" >/dev/null
+sleep 1
+
+echo "=== drag-rotate-handle topLeft +10° ==="
+ROT_OUT=$("$CLI_BIN" drag-rotate-handle --corner topLeft --angle-delta 10 --socket "$SOCKET")
+echo "$ROT_OUT"
+assert_json_field "drag-rotate-handle status" "$ROT_OUT" "status" "ok"
+sleep 1
+
+echo "=== drag-rotate-handle topRight +5° (accumulates to 15°) ==="
+ROT_OUT2=$("$CLI_BIN" drag-rotate-handle --corner topRight --angle-delta 5 --socket "$SOCKET")
+echo "$ROT_OUT2"
+assert_json_field "drag-rotate-handle#2 status" "$ROT_OUT2" "status" "ok"
+sleep 1
+
+echo "=== Screenshot — crop overlay rotated via handle ==="
+"$CLI_BIN" screenshot "$SCREENSHOT_DIR/rotate-handle-result.png" --socket "$SOCKET" || true
+
+echo "=== commit-crop → get-edit — cropAngle accumulated to 15 ==="
+"$CLI_BIN" commit-crop --socket "$SOCKET" >/dev/null
+sleep 1
+GET_ROT=$("$CLI_BIN" get-edit "$ASSET" --socket "$SOCKET")
+echo "$GET_ROT"
+ROT_ANGLE=$(printf '%s' "$GET_ROT" | /usr/bin/python3 -c "
+import json, sys
+doc = json.loads(sys.stdin.read())
+print(float(doc['data']['cropAngle']))
+")
+if [ "$ROT_ANGLE" != "15.0" ]; then
+    echo "ERROR: expected cropAngle == 15.0 after two rotate-handle drags, got '$ROT_ANGLE'"
+    exit 1
+fi
+echo "  OK: rotate handles accumulated cropAngle == $ROT_ANGLE"
+
+echo "=== drag-rotate-handle rejects out-of-crop-mode use ==="
+# Already committed, so crop mode is inactive — the command must error.
+INACTIVE_OUT=$("$CLI_BIN" drag-rotate-handle --corner topLeft --angle-delta 5 --socket "$SOCKET" || true)
+echo "$INACTIVE_OUT"
+assert_json_field "drag-rotate-handle inactive status" "$INACTIVE_OUT" "status" "error"
+
+# ---------------------------------------------------------------------
 # Issue #239 bug 2 regression: cross-asset crop state isolation. After
 # cropping asset A above, navigating to a never-cropped asset B and
 # entering crop mode must show the full frame — not asset A's leftover

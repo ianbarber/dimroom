@@ -497,6 +497,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, ObservableObject {
     private var originalsCoordinator: OriginalsCoordinator?
     private var driveClient: DriveClient?
     private var driveUploader: DriveUploader?
+    private var driveMarkerBackfill: DriveMarkerBackfill?
     private var catalogPublisher: CatalogPublisher?
     private var catalogUploader: DriveCatalogUploader?
     private var driveFileIdStore: FileSystemDriveFileIdStore?
@@ -766,6 +767,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, ObservableObject {
             uploadCoordinator: uploadCoordinator,
             appDelegate: self,
             driveUploader: driveUploader,
+            driveMarkerBackfill: driveMarkerBackfill,
             originalsCoordinator: { [weak self] in self?.originalsCoordinator },
             undoStack: { [weak self] in self?.undoStack },
             catalogPublisher: { [weak self] in self?.catalogPublisher },
@@ -869,6 +871,19 @@ final class AppDelegate: NSObject, NSApplicationDelegate, ObservableObject {
             let session = AuthorizedSession(client: httpClient, provider: resolvedDriveClient)
             let resolver = DriveFolderResolver(session: session)
             self.driveUploader = DriveUploader(session: session, folderResolver: resolver)
+
+            // One-shot legacy-marker backfill (#328). Harness flows inject
+            // a fixture-driven scanner; production walks the live
+            // `/PhotoTool/` tree over the same session as the uploader.
+            let markerScanner: any DriveMarkerScanning
+            if let backfillFixture = ProcessInfo.processInfo.environment[
+                "DIMROOM_HARNESS_DRIVE_BACKFILL_FIXTURE"
+            ] {
+                markerScanner = HarnessStubMarkerScanner(fixturePath: backfillFixture)
+            } else {
+                markerScanner = DriveMarkerScanner(session: session, folderResolver: resolver)
+            }
+            self.driveMarkerBackfill = DriveMarkerBackfill(scanner: markerScanner)
 
             let catalogUploader = DriveCatalogUploader(
                 session: session,
@@ -994,60 +1009,113 @@ final class AppDelegate: NSObject, NSApplicationDelegate, ObservableObject {
         guard let catalogPath = resolvedCatalogPath else { return }
         guard let driveClient else { return }
 
-        // Read the live-asset count BEFORE the teardown below drops
-        // `catalog`; reading after would always see `nil → 0` and the
-        // guard would never fire. A non-empty placeholder means the user
-        // imported between a failed launch-time OAuth and this retry, so
-        // we skip the destructive restore rather than clobber their work
-        // (#293). The existing launch-path catalog wiring stays live.
-        let placeholderAssetCount = (try? catalog?.countAssets()) ?? 0
+        // Capture the placeholder catalog reference NOW (not lazily via
+        // `self.catalog`): the helper reads its live-asset count before
+        // running `teardown`, which nils `self.catalog`. Passing the
+        // reference here keeps the "count read before teardown" ordering
+        // the #293 guard depends on.
+        await Self.performSameSessionRestore(
+            placeholderCatalog: catalog,
+            catalogPath: catalogPath,
+            teardown: {
+                // Drop refs that pin the placeholder catalog before
+                // deleting the file. GRDB releases the underlying SQLite
+                // connection on deinit of `CatalogDatabase`, so clearing
+                // every retainer lets the file handle close before
+                // `removeItem` runs.
+                if let publisher = self.catalogPublisher {
+                    await publisher.stop()
+                }
+                self.catalogPublisher = nil
+                self.originalsCoordinator = nil
+                self.catalog?.onChange = nil
+                self.catalog = nil
+                self.changePollerEventsTask?.cancel()
+                self.changePollerEventsTask = nil
+                self.changePoller = nil
+            },
+            removeItem: { try FileManager.default.removeItem(atPath: $0) },
+            restore: {
+                let fileIdStore = self.driveFileIdStore ?? FileSystemDriveFileIdStore(
+                    path: FileSystemDriveFileIdStore.defaultPath()
+                )
+                let uploader: any CatalogUploading
+                if let stubCatalogUploader = self.stubCatalogUploader {
+                    uploader = stubCatalogUploader
+                } else {
+                    let httpClient = URLSessionHTTPClient()
+                    let session = AuthorizedSession(client: httpClient, provider: driveClient)
+                    let resolver = DriveFolderResolver(session: session)
+                    uploader = DriveCatalogUploader(session: session, folderResolver: resolver)
+                }
+                return try await CatalogPublisher.restoreIfNeeded(
+                    localPath: catalogPath,
+                    uploader: uploader,
+                    fileIdStore: fileIdStore,
+                    prompt: { _ in
+                        // The user already consented to Connect+restore
+                        // seconds ago via the launch-time alert (#256); a
+                        // second prompt here would be confusing.
+                        true
+                    }
+                )
+            },
+            reopenAndWire: {
+                // Re-open the catalog — restore wrote the file when it
+                // landed, otherwise `openCatalog` creates an empty one.
+                // Either way the view models below get a live SQLite
+                // handle to read from.
+                guard let restoredCatalog = self.openCatalog(at: catalogPath) else {
+                    print("[Dimroom] same-session restore: failed to re-open catalog at \(catalogPath)")
+                    return
+                }
+                self.wireCatalog(restoredCatalog, args: self.resolvedArgs)
+            },
+            onFailure: { error in
+                let reason = (error as? SyncEngineError).map(Self.describeRestoreError)
+                    ?? String(describing: error)
+                _ = Self.offerFreshStartAfterFailure(reason: reason)
+            }
+        )
+    }
+
+    /// Orchestration for `runSameSessionRestore()`, lifted off the
+    /// `AppDelegate` instance so the #293 guard can be exercised against
+    /// a real seeded `CatalogDatabase` without constructing an
+    /// `AppDelegate` (see `SameSessionRestoreTeardownTests`).
+    ///
+    /// The destructive effects are injected as closures so a test can
+    /// spy on them. The live-asset count is read from `placeholderCatalog`
+    /// *before* `teardown` runs; when `shouldRunSameSessionRestore` says
+    /// the placeholder still holds imports the function returns *before*
+    /// invoking `teardown` / `removeItem` / `restore`, leaving the user's
+    /// interim work and the launch-path wiring untouched (#293). This is
+    /// the integration the predicate test alone cannot pin: deleting the
+    /// guard makes the effects fire on a non-empty placeholder.
+    ///
+    /// On a `countAssets()` read failure the count collapses to `0` (the
+    /// `try?` / `?? 0`), so we lean toward running the restore rather
+    /// than letting a transient read error block it.
+    nonisolated static func performSameSessionRestore(
+        placeholderCatalog: CatalogDatabase?,
+        catalogPath: String,
+        teardown: @MainActor () async -> Void,
+        removeItem: @MainActor (String) throws -> Void,
+        restore: @MainActor () async throws -> RestoreOutcome,
+        reopenAndWire: @MainActor () -> Void,
+        onFailure: @MainActor (any Error) -> Void
+    ) async {
+        let placeholderAssetCount = (try? placeholderCatalog?.countAssets()) ?? 0
         guard Self.shouldRunSameSessionRestore(placeholderAssetCount: placeholderAssetCount) else {
             print("[Dimroom] same-session restore skipped: placeholder catalog has \(placeholderAssetCount) asset(s), keeping local work")
             return
         }
 
-        // Drop refs that pin the placeholder catalog before deleting
-        // the file. GRDB releases the underlying SQLite connection on
-        // deinit of `CatalogDatabase`, so clearing every retainer lets
-        // the file handle close before `removeItem` runs.
-        if let publisher = catalogPublisher {
-            await publisher.stop()
-        }
-        catalogPublisher = nil
-        originalsCoordinator = nil
-        catalog?.onChange = nil
-        catalog = nil
-        changePollerEventsTask?.cancel()
-        changePollerEventsTask = nil
-        changePoller = nil
-
-        try? FileManager.default.removeItem(atPath: catalogPath)
-
-        let fileIdStore = driveFileIdStore ?? FileSystemDriveFileIdStore(
-            path: FileSystemDriveFileIdStore.defaultPath()
-        )
-        let uploader: any CatalogUploading
-        if let stubCatalogUploader {
-            uploader = stubCatalogUploader
-        } else {
-            let httpClient = URLSessionHTTPClient()
-            let session = AuthorizedSession(client: httpClient, provider: driveClient)
-            let resolver = DriveFolderResolver(session: session)
-            uploader = DriveCatalogUploader(session: session, folderResolver: resolver)
-        }
+        await teardown()
+        try? await removeItem(catalogPath)
 
         do {
-            let outcome = try await CatalogPublisher.restoreIfNeeded(
-                localPath: catalogPath,
-                uploader: uploader,
-                fileIdStore: fileIdStore,
-                prompt: { _ in
-                    // The user already consented to Connect+restore
-                    // seconds ago via the launch-time alert (#256); a
-                    // second prompt here would be confusing.
-                    true
-                }
-            )
+            let outcome = try await restore()
             switch outcome {
             case .restored(_, let bytes):
                 print("[Dimroom] same-session catalog restore succeeded (\(bytes) bytes)")
@@ -1058,20 +1126,11 @@ final class AppDelegate: NSObject, NSApplicationDelegate, ObservableObject {
             }
         } catch {
             print("[Dimroom] same-session catalog restore failed: \(error)")
-            try? FileManager.default.removeItem(atPath: catalogPath)
-            let reason = (error as? SyncEngineError).map(Self.describeRestoreError)
-                ?? String(describing: error)
-            _ = Self.offerFreshStartAfterFailure(reason: reason)
+            try? await removeItem(catalogPath)
+            await onFailure(error)
         }
 
-        // Re-open the catalog — restore wrote the file when it landed,
-        // otherwise `openCatalog` creates an empty one. Either way the
-        // view models below get a live SQLite handle to read from.
-        guard let restoredCatalog = openCatalog(at: catalogPath) else {
-            print("[Dimroom] same-session restore: failed to re-open catalog at \(catalogPath)")
-            return
-        }
-        wireCatalog(restoredCatalog, args: resolvedArgs)
+        await reopenAndWire()
     }
 
     // MARK: - Export
@@ -1361,10 +1420,50 @@ final class AppDelegate: NSObject, NSApplicationDelegate, ObservableObject {
     /// against the freshly-opened one. Extracted from
     /// `reloadCatalogFromDrive` so the swap mechanics live next to the
     /// equivalent launch-time wiring in `applicationDidFinishLaunching`.
+    ///
+    /// Resolves the originals-cache inputs from `ProcessInfo`/Settings
+    /// and then delegates the actual teardown to
+    /// `rewireForReloadedCatalog`. Keeping the `ProcessInfo` reads here
+    /// lets the rewire kernel be driven directly by the Layer A leak
+    /// tests (#321) without standing up the launch environment.
     @MainActor
     private func applyReloadedCatalog(
         _ newCatalog: CatalogDatabase,
         previewStore: PreviewStore
+    ) async {
+        let args = ProcessInfo.processInfo.arguments
+        let cacheDir = resolveOriginalsCacheDirectory(from: args)
+        let budget = resolveOriginalsCacheBudget()
+        let downloader: OriginalsDownloader = resolveHarnessDownloader()
+            ?? driveClient
+            ?? UnavailableOriginalsDownloader()
+        await rewireForReloadedCatalog(
+            newCatalog,
+            previewStore: previewStore,
+            cacheDirectory: cacheDir,
+            budgetBytes: budget,
+            originalsDownloader: downloader,
+            driveClient: driveClient
+        )
+    }
+
+    /// The teardown + rewire kernel of the hot-reload swap, with the
+    /// originals-cache inputs and the `DriveClient` injected rather than
+    /// resolved from `ProcessInfo`. Split out of `applyReloadedCatalog`
+    /// so `CatalogReloadLeakTests` can drive the real property teardown
+    /// against a seeded old-catalog object graph and assert the previous
+    /// `CatalogDatabase` / `OriginalsCoordinator` / `ChangePoller`
+    /// deallocate — pinning the no-leak property #259 called for but
+    /// #314 shipped without (#321). `internal`, not `private`, only so
+    /// the test target (`@testable import Dimroom`) can call it.
+    @MainActor
+    func rewireForReloadedCatalog(
+        _ newCatalog: CatalogDatabase,
+        previewStore: PreviewStore,
+        cacheDirectory: URL,
+        budgetBytes: Int64,
+        originalsDownloader: OriginalsDownloader,
+        driveClient: DriveClient?
     ) async {
         // 1. Stop the in-flight poller event subscription and the
         //    publisher debouncer so they can't fire against the old
@@ -1399,28 +1498,34 @@ final class AppDelegate: NSObject, NSApplicationDelegate, ObservableObject {
         developViewModel.attach(undoStack: undoStack)
 
         // 4. Rebuild the originals coordinator + cache against the new
-        //    catalog. Same resolvers `applicationDidFinishLaunching`
-        //    uses, so the on-disk LRU history survives.
-        let args = ProcessInfo.processInfo.arguments
-        let cacheDir = resolveOriginalsCacheDirectory(from: args)
-        let budget = resolveOriginalsCacheBudget()
-        let downloader: OriginalsDownloader = resolveHarnessDownloader()
-            ?? driveClient
-            ?? UnavailableOriginalsDownloader()
+        //    catalog, using the injected resolvers so the on-disk LRU
+        //    history survives. The coordinator is wired into the view
+        //    models and `originalsCoordinator` *unconditionally* — only
+        //    the cache attach is gated on a successful `OriginalsCache`
+        //    init. `configure` above does not reset the view models'
+        //    `originalFetcher`, so if these assignments were skipped on
+        //    cache-init failure (as they were before #321) the view
+        //    models and `originalsCoordinator` would keep pointing at
+        //    the *previous* catalog's coordinator, pinning the
+        //    swapped-out `CatalogDatabase`. Always binding the new,
+        //    possibly cacheless, coordinator keeps every consumer on the
+        //    current catalog; a cacheless coordinator returns `nil` for
+        //    fetches — the same degraded behaviour the launch path
+        //    produces when the cache can't be created.
         let coordinator = OriginalsCoordinator(catalog: newCatalog)
         if let cache = try? OriginalsCache(
-            directory: cacheDir,
-            budgetBytes: budget,
-            downloader: downloader,
+            directory: cacheDirectory,
+            budgetBytes: budgetBytes,
+            downloader: originalsDownloader,
             onEvict: { [weak coordinator] id in
                 coordinator?.handleEviction(assetId: id)
             }
         ) {
             coordinator.attach(cache: cache)
-            libraryViewModel.originalFetcher = coordinator
-            developViewModel.attach(originalFetcher: coordinator)
-            originalsCoordinator = coordinator
         }
+        libraryViewModel.originalFetcher = coordinator
+        developViewModel.attach(originalFetcher: coordinator)
+        originalsCoordinator = coordinator
 
         // 5. Rebuild the publisher + poller against the new catalog.
         //    Harness flows that drive `reloadCatalogFromDrive` with the
@@ -1428,6 +1533,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, ObservableObject {
         //    via the resolved DriveClient — the same wiring the launch
         //    path uses.
         if let resolvedDriveClient = driveClient {
+            let args = ProcessInfo.processInfo.arguments
             let httpClient = URLSessionHTTPClient()
             let session = AuthorizedSession(client: httpClient, provider: resolvedDriveClient)
             let resolver = DriveFolderResolver(session: session)
@@ -1481,6 +1587,34 @@ final class AppDelegate: NSObject, NSApplicationDelegate, ObservableObject {
         //    `configure(...)` calls above already cleared
         //    `currentAssetId` / `editState`.
         router.route = .library
+    }
+
+    // MARK: - Test helpers
+
+    /// Install a pre-reload object graph so `CatalogReloadLeakTests` can
+    /// drive `rewireForReloadedCatalog` against a realistic "old catalog
+    /// plus derived objects" precondition without standing up
+    /// `applicationDidFinishLaunching`. Mirrors the post-`openCatalog`
+    /// wiring: the coordinator becomes the live `originalFetcher` on both
+    /// view models (which is exactly what turns a missed teardown into a
+    /// leak of the old catalog), and the catalog / publisher / poller /
+    /// events-task occupy the same slots the reload path tears down.
+    /// These slots are `private`, so the test can't seed them directly
+    /// even with `@testable import`; this is the single seam it uses.
+    func installReloadStateForTesting(
+        catalog: CatalogDatabase,
+        coordinator: OriginalsCoordinator,
+        publisher: CatalogPublisher?,
+        poller: ChangePoller?,
+        eventsTask: Task<Void, Never>?
+    ) {
+        self.catalog = catalog
+        self.originalsCoordinator = coordinator
+        self.catalogPublisher = publisher
+        self.changePoller = poller
+        self.changePollerEventsTask = eventsTask
+        libraryViewModel.originalFetcher = coordinator
+        developViewModel.attach(originalFetcher: coordinator)
     }
 
     private func presentSyncConflictAlert(localPending: Bool) {

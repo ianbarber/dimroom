@@ -166,6 +166,41 @@ final class EditStateTests: XCTestCase {
         XCTAssertEqual(state, decoded)
     }
 
+    func testCropReferenceSizeJSONRoundTrip() throws {
+        // A crop authored against a preview records the reference size so
+        // the renderer can rescale it at export time (#320). It must
+        // survive encode/decode.
+        let state = EditState(
+            cropRect: CGRect(x: 0, y: 0, width: 1024, height: 768),
+            cropAngle: 3.0,
+            cropReferenceSize: CGSize(width: 2048, height: 1365)
+        )
+
+        let encoder = JSONEncoder()
+        encoder.outputFormatting = .sortedKeys
+        let data = try encoder.encode(state)
+        let decoded = try JSONDecoder().decode(EditState.self, from: data)
+
+        XCTAssertEqual(decoded.cropReferenceSize, CGSize(width: 2048, height: 1365))
+        XCTAssertEqual(decoded, state)
+    }
+
+    func testLegacyEditStateJSONDecodesCropReferenceSizeToNil() throws {
+        // A row written before #320 has a pixel-space cropRect but no
+        // cropReferenceSize. It must decode with cropReferenceSize == nil
+        // (the renderer then falls back to a 1.0 scale factor).
+        let legacy = """
+        {
+            "exposure": 0,
+            "cropRect": [[10, 20], [300, 400]]
+        }
+        """
+
+        let decoded = try JSONDecoder().decode(EditState.self, from: Data(legacy.utf8))
+        XCTAssertNotNil(decoded.cropRect)
+        XCTAssertNil(decoded.cropReferenceSize)
+    }
+
     func testLegacyEditStateJSONDecodesWithDefaults() throws {
         // A pre-existing catalog row written before sharpening/vignette/HSL
         // fields existed. The new keys are absent; decoder must fall back to

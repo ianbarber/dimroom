@@ -1316,6 +1316,22 @@ final class CommandCodingTests: XCTestCase {
         XCTAssertEqual(json, #"{"type":"clearPreviewCache"}"#)
     }
 
+    // MARK: - dismissRemoteAdditionsBadge
+
+    func testDismissRemoteAdditionsBadgeRoundTrip() throws {
+        let command = Command.dismissRemoteAdditionsBadge
+        let data = try encoder.encode(command)
+        let decoded = try decoder.decode(Command.self, from: data)
+        XCTAssertEqual(command, decoded)
+    }
+
+    func testDismissRemoteAdditionsBadgeJSON() throws {
+        let command = Command.dismissRemoteAdditionsBadge
+        let data = try encoder.encode(command)
+        let json = String(data: data, encoding: .utf8)!
+        XCTAssertEqual(json, #"{"type":"dismissRemoteAdditionsBadge"}"#)
+    }
+
     // MARK: - syncFromDrive
 
     func testSyncFromDriveRoundTrip() throws {
@@ -1336,6 +1352,28 @@ final class CommandCodingTests: XCTestCase {
         let json = #"{"type":"syncFromDrive"}"#
         let command = try decoder.decode(Command.self, from: Data(json.utf8))
         XCTAssertEqual(command, .syncFromDrive)
+    }
+
+    // MARK: - backfillDriveMarkers (#328)
+
+    func testBackfillDriveMarkersRoundTrip() throws {
+        let command = Command.backfillDriveMarkers
+        let data = try encoder.encode(command)
+        let decoded = try decoder.decode(Command.self, from: data)
+        XCTAssertEqual(command, decoded)
+    }
+
+    func testBackfillDriveMarkersJSON() throws {
+        let command = Command.backfillDriveMarkers
+        let data = try encoder.encode(command)
+        let json = String(data: data, encoding: .utf8)!
+        XCTAssertEqual(json, #"{"type":"backfillDriveMarkers"}"#)
+    }
+
+    func testDecodeBackfillDriveMarkersFromJSON() throws {
+        let json = #"{"type":"backfillDriveMarkers"}"#
+        let command = try decoder.decode(Command.self, from: Data(json.utf8))
+        XCTAssertEqual(command, .backfillDriveMarkers)
     }
 
     // MARK: - nudgeColorWheel (#305)
@@ -1451,6 +1489,35 @@ final class CommandCodingTests: XCTestCase {
         XCTAssertEqual(decoded.magnifier.visible, true)
         XCTAssertEqual(decoded.magnifier.zoom, 1)
         XCTAssertEqual(decoded.magnifier.usingPreviewFallback, true)
+    }
+
+    // MARK: - dragRotateHandle (#323)
+
+    func testDragRotateHandleRoundTrip() throws {
+        for corner in ["topLeft", "topRight", "bottomLeft", "bottomRight"] {
+            for delta in [10.0, -2.5, 0.0] {
+                let command = Command.dragRotateHandle(corner: corner, angleDelta: delta)
+                let data = try encoder.encode(command)
+                let decoded = try decoder.decode(Command.self, from: data)
+                XCTAssertEqual(command, decoded)
+            }
+        }
+    }
+
+    func testDragRotateHandleJSON() throws {
+        let command = Command.dragRotateHandle(corner: "topLeft", angleDelta: 10)
+        let data = try encoder.encode(command)
+        let json = String(data: data, encoding: .utf8)!
+        XCTAssertEqual(
+            json,
+            #"{"angleDelta":10,"corner":"topLeft","type":"dragRotateHandle"}"#
+        )
+    }
+
+    func testDecodeDragRotateHandleFromJSON() throws {
+        let json = #"{"type":"dragRotateHandle","corner":"bottomRight","angleDelta":-3.5}"#
+        let command = try decoder.decode(Command.self, from: Data(json.utf8))
+        XCTAssertEqual(command, .dragRotateHandle(corner: "bottomRight", angleDelta: -3.5))
     }
 
     // MARK: - Route

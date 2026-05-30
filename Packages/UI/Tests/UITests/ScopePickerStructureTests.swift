@@ -53,4 +53,22 @@ final class ScopePickerStructureTests: XCTestCase {
             "Text child must carry its own .foregroundStyle — the enclosing HStack's does not propagate inside a Menu label."
         )
     }
+
+    func test_menu_has_dark_color_scheme() throws {
+        let menu = try makePicker().inspect().menu()
+
+        // Regression signature for #325: `.menuStyle(.borderlessButton)` draws
+        // the closed-state label via the system control foreground path, which
+        // ignores the per-child `.foregroundStyle` above — so the closed pill
+        // renders near-black against the dark filter bar. `.colorScheme(.dark)`
+        // makes the system-supplied closed label light again. Mirrors
+        // FilterBarStructureTests.test_segmented_rating_picker_has_dark_color_scheme;
+        // an ImageRenderer snapshot can't catch this live-vs-offline divergence.
+        let scheme = try menu.environment(\.colorScheme)
+        XCTAssertEqual(
+            scheme,
+            .dark,
+            "ScopePicker Menu must carry .colorScheme(.dark) — without it, .menuStyle(.borderlessButton) renders the closed-state label in default near-black against the dark filter bar (#325)."
+        )
+    }
 }

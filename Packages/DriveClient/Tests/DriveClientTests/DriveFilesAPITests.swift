@@ -84,4 +84,45 @@ final class DriveFilesAPITests: XCTestCase {
         XCTAssertEqual(file.appProperties?["contentHash"], "h123")
         XCTAssertEqual(file.appProperties?["dimroomAssetId"], "uuid")
     }
+
+    // MARK: - Marker backfill (#328)
+
+    func testListChildrenRequestShape() {
+        let req = DriveFilesAPI.listChildrenRequest(parentId: "parent-id")
+        XCTAssertEqual(req.httpMethod, "GET")
+        let components = URLComponents(url: req.url!, resolvingAgainstBaseURL: false)!
+        let query = Dictionary(
+            uniqueKeysWithValues: components.queryItems!.map { ($0.name, $0.value ?? "") }
+        )
+        XCTAssertEqual(query["fields"], "nextPageToken,files(id,name,mimeType,appProperties)")
+        XCTAssertEqual(query["spaces"], "drive")
+        let q = query["q"]!
+        XCTAssertTrue(q.contains("'parent-id' in parents"), "got: \(q)")
+        XCTAssertTrue(q.contains("trashed = false"), "got: \(q)")
+        // No pageToken on the first page.
+        XCTAssertNil(query["pageToken"])
+    }
+
+    func testListChildrenRequestThreadsPageToken() {
+        let req = DriveFilesAPI.listChildrenRequest(parentId: "parent-id", pageToken: "next-page")
+        let components = URLComponents(url: req.url!, resolvingAgainstBaseURL: false)!
+        let pageToken = components.queryItems!.first { $0.name == "pageToken" }?.value
+        XCTAssertEqual(pageToken, "next-page")
+    }
+
+    func testPatchAppPropertiesRequestShape() throws {
+        let req = try DriveFilesAPI.patchAppPropertiesRequest(
+            fileId: "file-123",
+            appProperties: ["dimroom": "1"]
+        )
+        XCTAssertEqual(req.httpMethod, "PATCH")
+        XCTAssertTrue(req.url!.absoluteString.hasSuffix("/files/file-123"), "got: \(req.url!)")
+        XCTAssertEqual(req.value(forHTTPHeaderField: "Content-Type"), "application/json; charset=utf-8")
+        let body = try XCTUnwrap(req.httpBody)
+        let json = try JSONSerialization.jsonObject(with: body) as? [String: Any]
+        // The body must carry *only* appProperties so Drive's merge
+        // semantics preserve existing contentHash / dimroomAssetId keys.
+        XCTAssertEqual(json?.keys.count, 1)
+        XCTAssertEqual(json?["appProperties"] as? [String: String], ["dimroom": "1"])
+    }
 }

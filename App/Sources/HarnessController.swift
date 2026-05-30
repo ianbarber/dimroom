@@ -30,6 +30,7 @@ final class HarnessController: @unchecked Sendable {
     private let exportCoordinator: ExportCoordinator
     private let uploadCoordinator: UploadCoordinator
     private let driveUploader: (any DriveUploading)?
+    private let driveMarkerBackfill: DriveMarkerBackfill?
     private let originalsCoordinatorProvider: @Sendable () -> OriginalsCoordinator?
     private let undoStackProvider: @Sendable () -> UndoStack?
     private let catalogPublisherProvider: @Sendable () -> CatalogPublisher?
@@ -72,6 +73,7 @@ final class HarnessController: @unchecked Sendable {
         uploadCoordinator: UploadCoordinator,
         appDelegate: AppDelegate,
         driveUploader: (any DriveUploading)? = nil,
+        driveMarkerBackfill: DriveMarkerBackfill? = nil,
         originalsCoordinator: @escaping @Sendable () -> OriginalsCoordinator? = { nil },
         undoStack: @escaping @Sendable () -> UndoStack? = { nil },
         catalogPublisher: @escaping @Sendable () -> CatalogPublisher? = { nil },
@@ -94,6 +96,7 @@ final class HarnessController: @unchecked Sendable {
         self.uploadCoordinator = uploadCoordinator
         self.appDelegate = appDelegate
         self.driveUploader = driveUploader
+        self.driveMarkerBackfill = driveMarkerBackfill
         self.originalsCoordinatorProvider = originalsCoordinator
         self.undoStackProvider = undoStack
         self.catalogPublisherProvider = catalogPublisher
@@ -380,6 +383,9 @@ final class HarnessController: @unchecked Sendable {
         case .resetCrop:
             return await handleResetCrop()
 
+        case .dragRotateHandle(let corner, let angleDelta):
+            return await handleDragRotateHandle(corner: corner, angleDelta: angleDelta)
+
         case .inspectMenu(let title):
             return await handleInspectMenu(title: title)
 
@@ -420,6 +426,9 @@ final class HarnessController: @unchecked Sendable {
         case .syncFromDrive:
             return await handleSyncFromDrive()
 
+        case .backfillDriveMarkers:
+            return await handleBackfillDriveMarkers()
+
         case .restoreCatalogFromDrive(let confirm):
             return await handleRestoreCatalogFromDrive(confirm: confirm)
 
@@ -429,6 +438,10 @@ final class HarnessController: @unchecked Sendable {
                 modifiedTime: modifiedTime,
                 pageToken: pageToken
             )
+
+        case .dismissRemoteAdditionsBadge:
+            await MainActor.run { libraryViewModel.dismissRemoteAdditionsBadge() }
+            return .ok()
         }
     }
 
@@ -756,6 +769,25 @@ final class HarnessController: @unchecked Sendable {
         return .ok()
     }
 
+    private func handleDragRotateHandle(corner: String, angleDelta: Double) async -> Response {
+        let validCorners = ["topLeft", "topRight", "bottomLeft", "bottomRight"]
+        guard validCorners.contains(corner) else {
+            return .error("unknown corner '\(corner)'; expected one of: \(validCorners.joined(separator: ", "))")
+        }
+        let active = await MainActor.run { developViewModel.cropViewModel.isActive }
+        guard active else {
+            return .error("crop mode is not active; call enter-crop first")
+        }
+        // Same write path as the on-screen handle drag: accumulate the
+        // delta onto the live cropAngle and re-render. Pivot is always the
+        // crop centre, so `corner` only validates the protocol shape.
+        await MainActor.run {
+            let current = developViewModel.cropViewModel.cropAngle
+            developViewModel.setCropAngleLive(current + angleDelta)
+        }
+        return .ok()
+    }
+
     // MARK: - Upload to Drive
 
     private func handleUploadToDrive(assetId: UUID) async -> Response {
@@ -817,6 +849,24 @@ final class HarnessController: @unchecked Sendable {
             return .error("syncFromDrive failed: \(error)")
         } catch {
             return .error("syncFromDrive failed: \(error.localizedDescription)")
+        }
+    }
+
+    // MARK: - Marker backfill (#328)
+
+    private func handleBackfillDriveMarkers() async -> Response {
+        guard let driveMarkerBackfill else {
+            return .error("drive marker backfill not configured (drive not authenticated)")
+        }
+        do {
+            let summary = try await driveMarkerBackfill.run()
+            return .ok(data: .dictionary([
+                "scanned": .int(summary.scanned),
+                "patched": .int(summary.patched),
+                "skipped": .int(summary.skipped),
+            ]))
+        } catch {
+            return .error("backfillDriveMarkers failed: \(error.localizedDescription)")
         }
     }
 

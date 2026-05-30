@@ -76,4 +76,68 @@ final class HarnessOAuthStubsTests: XCTestCase {
 
         XCTAssertEqual(response.statusCode, 404)
     }
+
+    // MARK: - HarnessFailFirstBrowserLauncher (#371)
+
+    /// The fail-first launcher denies the first authorize attempt
+    /// (`?error=access_denied` → `authorizationDenied`) and succeeds on
+    /// the second, without persisting a token for the denied attempt.
+    /// This is the seam the Layer C imports-survival flow drives.
+    func testFailFirstLauncherDeniesFirstAttemptThenSucceeds() async throws {
+        let store = InMemoryTokenStore()
+        let client = DriveClient(
+            config: OAuthConfig(clientID: "harness-stub-client"),
+            httpClient: HarnessStubHTTPClient(),
+            tokenStore: store,
+            browserLauncher: HarnessFailFirstBrowserLauncher(failures: 1),
+            redirectServerFactory: { LoopbackRedirectServer() }
+        )
+
+        do {
+            try await client.authenticate()
+            XCTFail("expected first authenticate() to throw authorizationDenied")
+        } catch let error as DriveClientError {
+            guard case .authorizationDenied = error else {
+                return XCTFail("expected authorizationDenied, got \(error)")
+            }
+        }
+
+        var authenticated = await client.isAuthenticated
+        XCTAssertFalse(authenticated, "denied attempt must not persist a refresh token")
+        XCTAssertNil(try store.loadRefreshToken())
+
+        try await client.authenticate()
+
+        authenticated = await client.isAuthenticated
+        XCTAssertTrue(authenticated)
+        XCTAssertEqual(try store.loadRefreshToken(), "stub-refresh")
+    }
+
+    /// `failures: 2` denies twice before succeeding — pins that the
+    /// counter advances per call rather than being a one-shot boolean.
+    func testFailFirstLauncherDeniesTwoAttemptsThenSucceeds() async throws {
+        let client = DriveClient(
+            config: OAuthConfig(clientID: "harness-stub-client"),
+            httpClient: HarnessStubHTTPClient(),
+            tokenStore: InMemoryTokenStore(),
+            browserLauncher: HarnessFailFirstBrowserLauncher(failures: 2),
+            redirectServerFactory: { LoopbackRedirectServer() }
+        )
+
+        for attempt in 1...2 {
+            do {
+                try await client.authenticate()
+                XCTFail("expected attempt \(attempt) to throw authorizationDenied")
+            } catch let error as DriveClientError {
+                guard case .authorizationDenied = error else {
+                    return XCTFail("attempt \(attempt): expected authorizationDenied, got \(error)")
+                }
+            }
+        }
+
+        try await client.authenticate()
+
+        let authenticated = await client.isAuthenticated
+        XCTAssertTrue(authenticated)
+    }
 }

@@ -145,6 +145,12 @@ public enum Command: Codable, Sendable, Equatable {
     /// dialog branch). NSOpenPanel can't be driven from the harness, so
     /// `destinationPath` substitutes for the panel's URL output (#242).
     case completeExportSheet(destinationPath: String, format: String, applyEdits: Bool)
+    /// Clears the Library filter bar's "N new on Drive" badge, mirroring
+    /// the badge's own X dismiss button (added in #311). The badge is
+    /// persistent — it does not auto-dismiss like `undoToast`/`ratingToast`
+    /// — so this is the only way to exercise the dismiss path at Layer C
+    /// (#313).
+    case dismissRemoteAdditionsBadge
     /// Drives the `ColorWheelControl` keyboard path (#305) without
     /// synthesising NSEvents — the harness has no reliable way to land
     /// SwiftUI focus on a child view (see `postMenuAction`). The handler
@@ -266,6 +272,7 @@ public enum Command: Codable, Sendable, Equatable {
         case reloadCatalogFromDrive
         case triggerExportMenu
         case completeExportSheet
+        case dismissRemoteAdditionsBadge
         case nudgeColorWheel
     }
 
@@ -487,6 +494,8 @@ public enum Command: Codable, Sendable, Equatable {
             let format = try container.decode(String.self, forKey: .format)
             let applyEdits = try container.decode(Bool.self, forKey: .applyEdits)
             self = .completeExportSheet(destinationPath: destinationPath, format: format, applyEdits: applyEdits)
+        case .dismissRemoteAdditionsBadge:
+            self = .dismissRemoteAdditionsBadge
         case .nudgeColorWheel:
             let assetId = try container.decode(UUID.self, forKey: .assetId)
             let hueParameter = try container.decode(String.self, forKey: .hueParameter)
@@ -709,6 +718,8 @@ public enum Command: Codable, Sendable, Equatable {
             try container.encode(destinationPath, forKey: .destinationPath)
             try container.encode(format, forKey: .format)
             try container.encode(applyEdits, forKey: .applyEdits)
+        case .dismissRemoteAdditionsBadge:
+            try container.encode(CommandType.dismissRemoteAdditionsBadge, forKey: .type)
         case .nudgeColorWheel(let assetId, let hueParameter, let saturationParameter, let key, let shift):
             try container.encode(CommandType.nudgeColorWheel, forKey: .type)
             try container.encode(assetId, forKey: .assetId)

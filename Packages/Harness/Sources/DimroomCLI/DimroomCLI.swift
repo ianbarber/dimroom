@@ -72,6 +72,7 @@ struct DimroomCLI: ParsableCommand {
             ReloadCatalogFromDrive.self,
             TriggerExportMenu.self,
             CompleteExportSheet.self,
+            DismissRemoteAdditionsBadge.self,
             NudgeColorWheel.self,
         ]
     )
@@ -1253,6 +1254,20 @@ extension DimroomCLI {
 
         func run() throws {
             try runCommand(.clearPreviewCache, socket: socket)
+        }
+    }
+
+    struct DismissRemoteAdditionsBadge: ParsableCommand {
+        static let configuration = CommandConfiguration(
+            commandName: "dismiss-remote-additions-badge",
+            abstract: "Clear the Library filter bar's 'N new on Drive' badge (mirrors its X button)."
+        )
+
+        @Option(name: .long, help: "Path to the harness socket.")
+        var socket: String = HarnessServer.defaultSocketPath
+
+        func run() throws {
+            try runCommand(.dismissRemoteAdditionsBadge, socket: socket)
         }
     }
 

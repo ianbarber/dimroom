@@ -126,6 +126,65 @@ func makeMidGreyImage(width: Int = 64, height: Int = 64, value: UInt8 = 128) -> 
     return CIImage(cgImage: cgImage)
 }
 
+/// Create a "looking up at a building" keystone target: a white shape on black
+/// whose vertical edges converge toward the top, so the white run is narrower at
+/// the top than at the bottom. Used to verify perspective-vertical correction
+/// straightens (rather than worsens) converging verticals.
+///
+/// `topHalfWidthFraction` / `bottomHalfWidthFraction` are the half-widths of the
+/// white region (as fractions of image width) at the top and bottom rows; the
+/// half-width interpolates linearly between them up the image. Defaults give a
+/// strong upward convergence (top gap = half the bottom gap).
+func makeKeystoneTargetImage(
+    width: Int = 240,
+    height: Int = 240,
+    topHalfWidthFraction: Double = 0.2,
+    bottomHalfWidthFraction: Double = 0.4
+) -> CIImage {
+    let bytesPerPixel = 4
+    let bytesPerRow = width * bytesPerPixel
+    var pixels = [UInt8](repeating: 0, count: width * height * bytesPerPixel)
+    let cx = Double(width) / 2.0
+
+    for r in 0..<height {
+        // Buffer row 0 is the top of the image (CIImage y = height - 1).
+        // Convert to a 0…1 vertical position where 1 is the top.
+        let yTopFraction = Double(height - 1 - r) / Double(height - 1)
+        let halfWidthFraction = bottomHalfWidthFraction
+            + (topHalfWidthFraction - bottomHalfWidthFraction) * yTopFraction
+        let halfWidth = halfWidthFraction * Double(width)
+        let lo = cx - halfWidth
+        let hi = cx + halfWidth
+        for x in 0..<width {
+            let offset = r * bytesPerRow + x * bytesPerPixel
+            let value: UInt8 = (Double(x) >= lo && Double(x) <= hi) ? 255 : 0
+            pixels[offset] = value
+            pixels[offset + 1] = value
+            pixels[offset + 2] = value
+            pixels[offset + 3] = 255
+        }
+    }
+
+    let data = Data(pixels)
+    let colorSpace = CGColorSpace(name: CGColorSpace.sRGB)!
+    let bitmapInfo = CGBitmapInfo(rawValue: CGImageAlphaInfo.premultipliedLast.rawValue)
+    let provider = CGDataProvider(data: data as CFData)!
+    let cgImage = CGImage(
+        width: width,
+        height: height,
+        bitsPerComponent: 8,
+        bitsPerPixel: 32,
+        bytesPerRow: bytesPerRow,
+        space: colorSpace,
+        bitmapInfo: bitmapInfo,
+        provider: provider,
+        decode: nil,
+        shouldInterpolate: false,
+        intent: .defaultIntent
+    )!
+    return CIImage(cgImage: cgImage)
+}
+
 /// Create a solid-colour test image with the given 8-bit RGB triple.
 /// Used by HSL tests where each band is exercised against a pure
 /// sample of its representative hue (e.g. pure red for the Red band).

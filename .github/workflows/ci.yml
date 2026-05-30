@@ -362,3 +362,10 @@ jobs:
             exit 0
           fi
           bin/harness-settings-flow.sh
+      - name: Run harness backfill markers flow
+        run: |
+          if [ ! -x bin/harness-backfill-markers-flow.sh ]; then
+            echo "No harness backfill-markers flow script yet — skipping."
+            exit 0
+          fi
+          bin/harness-backfill-markers-flow.sh

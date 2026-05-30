@@ -108,6 +108,13 @@ public enum Command: Codable, Sendable, Equatable {
     /// classified outcome. Used by Layer C delta-sync flows so they
     /// don't have to wait for the periodic 5-minute tick.
     case syncFromDrive
+    /// Run the one-shot, idempotent backfill that walks every file under
+    /// the Drive `/PhotoTool/` root and PATCHes the shared
+    /// `appProperties.dimroom` marker onto any that lack it (#328).
+    /// Files uploaded before #310 don't carry the marker, so the change
+    /// poller's scope filter would silently drop them. Returns
+    /// `{scanned, patched, skipped}`. No associated values.
+    case backfillDriveMarkers
     /// Runs `CatalogPublisher.restoreIfNeeded` against the live
     /// uploader (or the local-file stub when
     /// `DIMROOM_HARNESS_STUB_REMOTE_CATALOG` is set). `confirm`
@@ -278,6 +285,7 @@ public enum Command: Codable, Sendable, Equatable {
         case clearOriginalsCache
         case clearPreviewCache
         case syncFromDrive
+        case backfillDriveMarkers
         case restoreCatalogFromDrive
         case reloadCatalogFromDrive
         case triggerExportMenu
@@ -486,6 +494,8 @@ public enum Command: Codable, Sendable, Equatable {
             self = .clearPreviewCache
         case .syncFromDrive:
             self = .syncFromDrive
+        case .backfillDriveMarkers:
+            self = .backfillDriveMarkers
         case .restoreCatalogFromDrive:
             let confirm = try container.decodeIfPresent(Bool.self, forKey: .confirm) ?? true
             self = .restoreCatalogFromDrive(confirm: confirm)
@@ -718,6 +728,8 @@ public enum Command: Codable, Sendable, Equatable {
             try container.encode(CommandType.clearPreviewCache, forKey: .type)
         case .syncFromDrive:
             try container.encode(CommandType.syncFromDrive, forKey: .type)
+        case .backfillDriveMarkers:
+            try container.encode(CommandType.backfillDriveMarkers, forKey: .type)
         case .restoreCatalogFromDrive(let confirm):
             try container.encode(CommandType.restoreCatalogFromDrive, forKey: .type)
             try container.encode(confirm, forKey: .confirm)

@@ -151,6 +151,7 @@ public final class UploadCoordinator: ObservableObject {
             case .missingLocalFile: return "original file missing locally"
             case .folderCreationFailed(let status): return "folder creation failed (\(status))"
             case .listFailed(let status): return "folder query failed (\(status))"
+            case .patchFailed(let status): return "metadata update failed (\(status))"
             case .uploadFailed(let status, _): return "upload failed (\(status))"
             case .resumableSessionLost: return "resumable session lost"
             case .retryBudgetExhausted: return "retry budget exhausted"

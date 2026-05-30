@@ -475,6 +475,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, ObservableObject {
     private var originalsCoordinator: OriginalsCoordinator?
     private var driveClient: DriveClient?
     private var driveUploader: DriveUploader?
+    private var driveMarkerBackfill: DriveMarkerBackfill?
     private var catalogPublisher: CatalogPublisher?
     private var catalogUploader: DriveCatalogUploader?
     private var driveFileIdStore: FileSystemDriveFileIdStore?
@@ -739,6 +740,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, ObservableObject {
             uploadCoordinator: uploadCoordinator,
             appDelegate: self,
             driveUploader: driveUploader,
+            driveMarkerBackfill: driveMarkerBackfill,
             originalsCoordinator: { [weak self] in self?.originalsCoordinator },
             undoStack: { [weak self] in self?.undoStack },
             catalogPublisher: { [weak self] in self?.catalogPublisher },
@@ -842,6 +844,19 @@ final class AppDelegate: NSObject, NSApplicationDelegate, ObservableObject {
             let session = AuthorizedSession(client: httpClient, provider: resolvedDriveClient)
             let resolver = DriveFolderResolver(session: session)
             self.driveUploader = DriveUploader(session: session, folderResolver: resolver)
+
+            // One-shot legacy-marker backfill (#328). Harness flows inject
+            // a fixture-driven scanner; production walks the live
+            // `/PhotoTool/` tree over the same session as the uploader.
+            let markerScanner: any DriveMarkerScanning
+            if let backfillFixture = ProcessInfo.processInfo.environment[
+                "DIMROOM_HARNESS_DRIVE_BACKFILL_FIXTURE"
+            ] {
+                markerScanner = HarnessStubMarkerScanner(fixturePath: backfillFixture)
+            } else {
+                markerScanner = DriveMarkerScanner(session: session, folderResolver: resolver)
+            }
+            self.driveMarkerBackfill = DriveMarkerBackfill(scanner: markerScanner)
 
             let catalogUploader = DriveCatalogUploader(
                 session: session,

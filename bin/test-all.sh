@@ -35,6 +35,15 @@ else
 fi
 echo "::endgroup::"
 
+echo "::group::bin/tests/test-claude-timeout.sh"
+if "$REPO_ROOT/bin/tests/test-claude-timeout.sh"; then
+    echo "PASS: claude-timeout"
+else
+    echo "FAIL: claude-timeout"
+    FAILED=1
+fi
+echo "::endgroup::"
+
 if [ "$FAILED" -ne 0 ]; then
     echo "One or more packages failed testing."
     exit 1

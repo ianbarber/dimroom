@@ -44,6 +44,8 @@
 set -euo pipefail
 
 REPO_ROOT="$(cd "$(dirname "$0")/.." && pwd)"
+# shellcheck source=lib/harness-launch.sh
+. "$REPO_ROOT/bin/lib/harness-launch.sh"
 SCREENSHOT_DIR="${SCREENSHOT_DIR:-$REPO_ROOT/.artifacts/restore-catalog-connect-in-session-with-imports}"
 WORK_DIR="$REPO_ROOT/.artifacts/harness-restore-catalog-connect-in-session-with-imports"
 REMOTE_CATALOG="$WORK_DIR/remote-catalog.sqlite"
@@ -99,22 +101,6 @@ take_screenshot() {
         echo "ERROR: screenshot file not created at $shot_path"
         exit 1
     fi
-}
-
-wait_for_socket() {
-    for i in $(seq 1 30); do
-        if [ -e "$SOCKET" ]; then
-            echo "Socket ready after ${i}s"
-            return 0
-        fi
-        if ! kill -0 "$APP_PID" 2>/dev/null; then
-            echo "ERROR: App exited before socket was ready"
-            exit 1
-        fi
-        sleep 1
-    done
-    echo "ERROR: Socket not ready after 30s"
-    exit 1
 }
 
 stop_app() {
@@ -175,20 +161,18 @@ fi
 # a 3-asset catalog to restore from — making the regression observable.
 # ---------------------------------------------------------------------
 echo "=== Launching app — armed gate, no auto-connect, fail-first OAuth ==="
-DIMROOM_HARNESS_SOCKET="$SOCKET" \
-DIMROOM_HARNESS_DRIVE_STUB=1 \
-DIMROOM_HARNESS_DRIVE_STUB_FAIL_FIRST_OAUTH=1 \
-DIMROOM_HARNESS_GATE_WITHOUT_AUTOCONNECT=1 \
-DIMROOM_HARNESS_STUB_REMOTE_CATALOG="$REMOTE_CATALOG" \
-DIMROOM_HARNESS_STUB_REMOTE_CATALOG_PHOTO_COUNT="$REMOTE_COUNT" \
-DIMROOM_HARNESS_AUTO_CONFIRM_CONNECT_FOR_RESTORE=connect \
-DIMROOM_ORIGINALS_DIR="$ORIGINALS_CACHE" \
-    "$APP_BIN" --harness \
-    --fixture-catalog "$LOCAL_CATALOG" \
-    --preview-cache "$LOCAL_PREVIEW_CACHE" \
-    --originals-cache "$ORIGINALS_CACHE" &
-APP_PID=$!
-wait_for_socket
+FIXTURE_CATALOG="$LOCAL_CATALOG"
+PREVIEW_CACHE="$LOCAL_PREVIEW_CACHE"
+HARNESS_WORK_DIR="$WORK_DIR"
+HARNESS_ENV=(
+    DIMROOM_HARNESS_DRIVE_STUB=1
+    DIMROOM_HARNESS_DRIVE_STUB_FAIL_FIRST_OAUTH=1
+    DIMROOM_HARNESS_GATE_WITHOUT_AUTOCONNECT=1
+    DIMROOM_HARNESS_STUB_REMOTE_CATALOG="$REMOTE_CATALOG"
+    DIMROOM_HARNESS_STUB_REMOTE_CATALOG_PHOTO_COUNT="$REMOTE_COUNT"
+    DIMROOM_HARNESS_AUTO_CONFIRM_CONNECT_FOR_RESTORE=connect
+)
+harness_launch_app
 
 echo "=== [1] Placeholder is empty before any import ==="
 STATE_OUT=$("$CLI_BIN" state --socket "$SOCKET")

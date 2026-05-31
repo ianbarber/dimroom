@@ -28,6 +28,8 @@
 set -euo pipefail
 
 REPO_ROOT="$(cd "$(dirname "$0")/.." && pwd)"
+# shellcheck source=lib/harness-launch.sh
+. "$REPO_ROOT/bin/lib/harness-launch.sh"
 SCREENSHOT_DIR="${SCREENSHOT_DIR:-$REPO_ROOT/.artifacts/restore-catalog-outcomes}"
 WORK_DIR="$REPO_ROOT/.artifacts/harness-restore-catalog-outcomes"
 REMOTE_CATALOG="$WORK_DIR/remote-catalog.sqlite"
@@ -73,23 +75,6 @@ for bin in "$APP_BIN" "$CLI_BIN" "$FIXTURE_BIN"; do
     fi
 done
 
-wait_for_socket() {
-    local pid="$1"
-    for i in $(seq 1 30); do
-        if [ -e "$SOCKET" ]; then
-            echo "Socket ready after ${i}s"
-            return 0
-        fi
-        if ! kill -0 "$pid" 2>/dev/null; then
-            echo "ERROR: App exited before socket was ready"
-            return 1
-        fi
-        sleep 1
-    done
-    echo "ERROR: Socket not ready after 30s"
-    return 1
-}
-
 terminate_app() {
     "$CLI_BIN" quit --socket "$SOCKET" 2>&1 || true
     sleep 1
@@ -133,19 +118,16 @@ if [ -f "$LAUNCH_A_LOCAL" ]; then
     exit 1
 fi
 
-DIMROOM_HARNESS_SOCKET="$SOCKET" \
-DIMROOM_HARNESS_DRIVE_STUB=1 \
-DIMROOM_HARNESS_STUB_REMOTE_CATALOG="$REMOTE_CATALOG" \
-DIMROOM_HARNESS_STUB_REMOTE_CATALOG_PHOTO_COUNT="$EXPECTED_COUNT" \
-DIMROOM_HARNESS_SKIP_LAUNCH_RESTORE=1 \
-DIMROOM_ORIGINALS_DIR="$ORIGINALS_CACHE" \
-    "$APP_BIN" --harness \
-    --fixture-catalog "$LAUNCH_A_LOCAL" \
-    --preview-cache "$LAUNCH_A_PREVIEWS" \
-    --originals-cache "$ORIGINALS_CACHE" &
-APP_PID=$!
-
-wait_for_socket "$APP_PID"
+FIXTURE_CATALOG="$LAUNCH_A_LOCAL"
+PREVIEW_CACHE="$LAUNCH_A_PREVIEWS"
+HARNESS_WORK_DIR="$WORK_DIR"
+HARNESS_ENV=(
+    DIMROOM_HARNESS_DRIVE_STUB=1
+    DIMROOM_HARNESS_STUB_REMOTE_CATALOG="$REMOTE_CATALOG"
+    DIMROOM_HARNESS_STUB_REMOTE_CATALOG_PHOTO_COUNT="$EXPECTED_COUNT"
+    DIMROOM_HARNESS_SKIP_LAUNCH_RESTORE=1
+)
+harness_launch_app
 
 echo "=== Assert local catalog absent — the skip env var must keep openCatalog from creating it ==="
 if [ -f "$LAUNCH_A_LOCAL" ]; then
@@ -235,19 +217,16 @@ if [ -f "$LAUNCH_B_LOCAL" ]; then
     exit 1
 fi
 
-DIMROOM_HARNESS_SOCKET="$SOCKET" \
-DIMROOM_HARNESS_DRIVE_STUB=1 \
-DIMROOM_HARNESS_STUB_REMOTE_CATALOG="$REMOTE_CATALOG" \
-DIMROOM_HARNESS_STUB_REMOTE_CATALOG_PHOTO_COUNT="$EXPECTED_COUNT" \
-DIMROOM_HARNESS_SKIP_LAUNCH_RESTORE=1 \
-DIMROOM_ORIGINALS_DIR="$ORIGINALS_CACHE" \
-    "$APP_BIN" --harness \
-    --fixture-catalog "$LAUNCH_B_LOCAL" \
-    --preview-cache "$LAUNCH_B_PREVIEWS" \
-    --originals-cache "$ORIGINALS_CACHE" &
-APP_PID=$!
-
-wait_for_socket "$APP_PID"
+FIXTURE_CATALOG="$LAUNCH_B_LOCAL"
+PREVIEW_CACHE="$LAUNCH_B_PREVIEWS"
+HARNESS_WORK_DIR="$WORK_DIR"
+HARNESS_ENV=(
+    DIMROOM_HARNESS_DRIVE_STUB=1
+    DIMROOM_HARNESS_STUB_REMOTE_CATALOG="$REMOTE_CATALOG"
+    DIMROOM_HARNESS_STUB_REMOTE_CATALOG_PHOTO_COUNT="$EXPECTED_COUNT"
+    DIMROOM_HARNESS_SKIP_LAUNCH_RESTORE=1
+)
+harness_launch_app
 
 echo "=== restore-catalog-from-drive --confirm — expect restoreFailed ==="
 FAIL_OUT=$("$CLI_BIN" restore-catalog-from-drive --confirm --socket "$SOCKET")

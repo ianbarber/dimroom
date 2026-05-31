@@ -355,6 +355,13 @@ jobs:
             exit 0
           fi
           bin/harness-restore-catalog-connect-in-session-flow.sh
+      - name: Run harness restore-catalog connect in-session with imports flow
+        run: |
+          if [ ! -x bin/harness-restore-catalog-connect-in-session-with-imports-flow.sh ]; then
+            echo "No harness restore-catalog-connect-in-session-with-imports flow script yet — skipping."
+            exit 0
+          fi
+          bin/harness-restore-catalog-connect-in-session-with-imports-flow.sh
       - name: Run harness settings flow
         run: |
           if [ ! -x bin/harness-settings-flow.sh ]; then

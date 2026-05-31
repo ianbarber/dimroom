@@ -1827,13 +1827,24 @@ final class AppDelegate: NSObject, NSApplicationDelegate, ObservableObject {
             // Connect flow once the launch-blocking semaphore has
             // been released (#256).
             if Self.offerConnectForRestore() {
-                pendingDriveConnectAfterLaunch = true
                 // The `driveAuthState.$status` sink installed later in
                 // `applicationDidFinishLaunching` watches for the
                 // resulting `.connecting → .connected` transition and
                 // re-runs the restore against a live `DriveClient`
-                // (#283). Without this flag the sink no-ops.
+                // (#283). Without this flag the sink no-ops. Always armed
+                // so the gate is live whether the connect fires here or
+                // is driven explicitly by a harness flow.
                 pendingSameSessionRestore = true
+                // Normally the consumer at the tail of
+                // `applicationDidFinishLaunching` kicks off the menu
+                // Connect flow automatically. A harness flow that needs a
+                // window to import into the placeholder between a failed
+                // and a succeeded OAuth (#371, the #293 regression case)
+                // suppresses the auto-connect and drives both attempts
+                // itself via `connect-drive`.
+                if !Self.shouldGateWithoutAutoConnect(env: ProcessInfo.processInfo.environment) {
+                    pendingDriveConnectAfterLaunch = true
+                }
             }
             return
         case .attemptRestoreWithStub:
@@ -2318,13 +2329,48 @@ final class AppDelegate: NSObject, NSApplicationDelegate, ObservableObject {
         env["DIMROOM_HARNESS_DISABLE_DRIVE"] != nil
     }
 
+    /// Number of OAuth authorize attempts the harness stub client should
+    /// deny before succeeding (#371). Lets a Layer C flow reproduce the
+    /// #293 "failed-then-succeeded OAuth with interim imports" window by
+    /// failing the first `connect-drive` so a folder can be imported into
+    /// the placeholder before a second, succeeding attempt fires the
+    /// same-session restore. Unset → 0 (never fail; the default
+    /// always-succeed stub). A numeric value → that count. A present but
+    /// non-numeric value → 1 (mirrors the "is set" opt-in of the sibling
+    /// knobs while still yielding a usable fail-once default). Pinned by
+    /// `FailFirstOAuthSeamTests`.
+    nonisolated static func failFirstOAuthCount(env: [String: String]) -> Int {
+        guard let raw = env["DIMROOM_HARNESS_DRIVE_STUB_FAIL_FIRST_OAUTH"] else {
+            return 0
+        }
+        return Int(raw) ?? 1
+    }
+
+    /// When set (#371), the launch-time `.offerConnectNoAuth` branch arms
+    /// the same-session restore gate (`pendingSameSessionRestore`) but
+    /// does NOT auto-fire the menu Connect flow, leaving the harness flow
+    /// to drive both OAuth attempts explicitly via `connect-drive`. The
+    /// auto-connect path goes through `connectGoogleDriveFromMenu()`,
+    /// which raises a blocking `NSAlert` on failure — unusable for the
+    /// fail-first flow. Matches `shouldDisableDriveForHarness`'s "is set"
+    /// semantics. Pinned by `FailFirstOAuthSeamTests`.
+    nonisolated static func shouldGateWithoutAutoConnect(
+        env: [String: String]
+    ) -> Bool {
+        env["DIMROOM_HARNESS_GATE_WITHOUT_AUTOCONNECT"] != nil
+    }
+
     private func makeHarnessStubDriveClient() -> DriveClient {
         let config = OAuthConfig(clientID: "harness-stub-client")
+        let failures = Self.failFirstOAuthCount(env: ProcessInfo.processInfo.environment)
+        let browserLauncher: BrowserLauncher = failures > 0
+            ? HarnessFailFirstBrowserLauncher(failures: failures)
+            : HarnessStubBrowserLauncher()
         return DriveClient(
             config: config,
             httpClient: HarnessStubHTTPClient(),
             tokenStore: InMemoryTokenStore(),
-            browserLauncher: HarnessStubBrowserLauncher()
+            browserLauncher: browserLauncher
         )
     }
 

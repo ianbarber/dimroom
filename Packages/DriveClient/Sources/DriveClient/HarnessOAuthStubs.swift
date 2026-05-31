@@ -14,37 +14,113 @@ public struct HarnessStubBrowserLauncher: BrowserLauncher {
     }
 
     public func open(_ url: URL) throws {
-        guard let components = URLComponents(url: url, resolvingAgainstBaseURL: false),
-              let items = components.queryItems else {
-            throw DriveClientError.invalidRedirect("authorization URL has no query items")
+        try replayHarnessAuthorizationRedirect(
+            authorizationURL: url,
+            session: session
+        ) { _ in
+            [URLQueryItem(name: "code", value: code)]
         }
-        var redirectURI: String?
-        var state: String?
-        for item in items {
-            switch item.name {
-            case "redirect_uri": redirectURI = item.value
-            case "state": state = item.value
-            default: break
+    }
+}
+
+/// Harness affordance. A `BrowserLauncher` that simulates the user
+/// denying the OAuth consent screen for the first `failures` authorize
+/// attempts (redirecting with `?error=access_denied`, which
+/// `LoopbackRedirectServer` turns into `DriveClientError.authorizationDenied`)
+/// and succeeding thereafter — delegating to the same success-redirect
+/// logic as `HarnessStubBrowserLauncher`. Lets a Layer C flow reproduce
+/// the #293 "failed-then-succeeded OAuth with interim imports" window.
+/// Gated by the App target on `DIMROOM_HARNESS_DRIVE_STUB_FAIL_FIRST_OAUTH`.
+public struct HarnessFailFirstBrowserLauncher: BrowserLauncher {
+    /// `open(_:)` is the protocol's synchronous `throws` method, so the
+    /// attempt counter must be synchronous. A lock-backed reference type
+    /// keeps the launcher `Sendable` while letting copies of the struct
+    /// share one counter (`DriveClient` may capture it by value).
+    private final class AttemptCounter: @unchecked Sendable {
+        private let lock = NSLock()
+        private var count = 0
+        func next() -> Int {
+            lock.lock()
+            defer { lock.unlock() }
+            defer { count += 1 }
+            return count
+        }
+    }
+
+    private let failures: Int
+    private let errorCode: String
+    private let code: String
+    private let session: URLSession
+    private let counter = AttemptCounter()
+
+    public init(
+        failures: Int,
+        errorCode: String = "access_denied",
+        code: String = "harness-stub-code",
+        session: URLSession = .shared
+    ) {
+        self.failures = failures
+        self.errorCode = errorCode
+        self.code = code
+        self.session = session
+    }
+
+    public func open(_ url: URL) throws {
+        let attempt = counter.next()
+        let shouldFail = attempt < failures
+        try replayHarnessAuthorizationRedirect(
+            authorizationURL: url,
+            session: session
+        ) { _ in
+            if shouldFail {
+                return [URLQueryItem(name: "error", value: errorCode)]
             }
+            return [URLQueryItem(name: "code", value: code)]
         }
-        guard let redirectURI, let base = URL(string: redirectURI) else {
-            throw DriveClientError.invalidRedirect("authorization URL missing redirect_uri")
+    }
+}
+
+/// Shared redirect-replay for the harness browser-launcher stubs. Parses
+/// the `redirect_uri` and `state` out of the authorization URL, rebuilds
+/// the loopback callback URL with `resultItems` (a `code` for success or
+/// an `error` for a denied attempt) plus the round-tripped `state`, and
+/// fires it against the running `LoopbackRedirectServer`. `resultItems`
+/// receives the parsed `state` but stubs round-trip it via the appended
+/// item below, so they ignore it.
+private func replayHarnessAuthorizationRedirect(
+    authorizationURL url: URL,
+    session: URLSession,
+    resultItems: (_ state: String?) -> [URLQueryItem]
+) throws {
+    guard let components = URLComponents(url: url, resolvingAgainstBaseURL: false),
+          let items = components.queryItems else {
+        throw DriveClientError.invalidRedirect("authorization URL has no query items")
+    }
+    var redirectURI: String?
+    var state: String?
+    for item in items {
+        switch item.name {
+        case "redirect_uri": redirectURI = item.value
+        case "state": state = item.value
+        default: break
         }
-        guard var redirectComponents = URLComponents(url: base, resolvingAgainstBaseURL: false) else {
-            throw DriveClientError.invalidRedirect("redirect_uri is not a valid URL")
-        }
-        var query: [URLQueryItem] = [URLQueryItem(name: "code", value: code)]
-        if let state {
-            query.append(URLQueryItem(name: "state", value: state))
-        }
-        redirectComponents.queryItems = query
-        guard let callbackURL = redirectComponents.url else {
-            throw DriveClientError.invalidRedirect("could not build callback URL")
-        }
-        let session = self.session
-        Task.detached {
-            _ = try? await session.data(for: URLRequest(url: callbackURL))
-        }
+    }
+    guard let redirectURI, let base = URL(string: redirectURI) else {
+        throw DriveClientError.invalidRedirect("authorization URL missing redirect_uri")
+    }
+    guard var redirectComponents = URLComponents(url: base, resolvingAgainstBaseURL: false) else {
+        throw DriveClientError.invalidRedirect("redirect_uri is not a valid URL")
+    }
+    var query = resultItems(state)
+    if let state {
+        query.append(URLQueryItem(name: "state", value: state))
+    }
+    redirectComponents.queryItems = query
+    guard let callbackURL = redirectComponents.url else {
+        throw DriveClientError.invalidRedirect("could not build callback URL")
+    }
+    Task.detached {
+        _ = try? await session.data(for: URLRequest(url: callbackURL))
     }
 }
 

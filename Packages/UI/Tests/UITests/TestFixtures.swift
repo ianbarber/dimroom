@@ -119,6 +119,39 @@ enum TestFixtures {
         try writeSolidColorJPEG(width: width, height: height, color: color, to: url)
     }
 
+    /// Write a JPEG split into four solid-colour quadrants (top-left,
+    /// top-right, bottom-left, bottom-right; top-left buffer origin). Gives
+    /// a stub "original" a known feature per quadrant so the magnifier's
+    /// original→preview coordinate mapping can be asserted: a sample at a
+    /// quadrant centre must yield that quadrant's colour (#376).
+    static func writeQuadrantJPEG(
+        width: Int,
+        height: Int,
+        colors: (
+            tl: (r: UInt8, g: UInt8, b: UInt8),
+            tr: (r: UInt8, g: UInt8, b: UInt8),
+            bl: (r: UInt8, g: UInt8, b: UInt8),
+            br: (r: UInt8, g: UInt8, b: UInt8)
+        ),
+        to url: URL
+    ) throws {
+        let bytesPerPixel = 4
+        var pixels = [UInt8](repeating: 0, count: width * height * bytesPerPixel)
+        for row in 0..<height {
+            let top = row < height / 2
+            for col in 0..<width {
+                let left = col < width / 2
+                let c = top ? (left ? colors.tl : colors.tr) : (left ? colors.bl : colors.br)
+                let o = (row * width + col) * bytesPerPixel
+                pixels[o] = c.r
+                pixels[o + 1] = c.g
+                pixels[o + 2] = c.b
+                pixels[o + 3] = 255
+            }
+        }
+        try encodeRGBA8JPEG(pixels: &pixels, width: width, height: height, to: url)
+    }
+
     private static func writeSolidColorJPEG(
         width: Int,
         height: Int,
@@ -136,6 +169,18 @@ enum TestFixtures {
                 pixels[o + 3] = 255
             }
         }
+        try encodeRGBA8JPEG(pixels: &pixels, width: width, height: height, to: url)
+    }
+
+    /// Encode a premultiplied-last RGBA8 buffer (top-left origin) as a JPEG
+    /// at `url`. Shared by the solid and quadrant writers.
+    private static func encodeRGBA8JPEG(
+        pixels: inout [UInt8],
+        width: Int,
+        height: Int,
+        to url: URL
+    ) throws {
+        let bytesPerPixel = 4
         let colorSpace = CGColorSpaceCreateDeviceRGB()
         guard let ctx = pixels.withUnsafeMutableBufferPointer({ ptr in
             CGContext(

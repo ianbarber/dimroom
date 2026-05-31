@@ -20,6 +20,7 @@ You are addressing review feedback on a PR for **dimroom**. You will read every 
    ```
    git worktree add .worktrees/issue-${ISSUE_NUMBER} <branch-name>
    ```
+   **Then resume from the checkpoint** — see "Progress checkpoints & context handoff" below: run `bin/agent-checkpoint.sh phase .` and read its notes. A prior respond pass may have already fixed and replied to some comments before dying; the notes tell you which. Re-enumerate the comments anyway (step 3) and skip the ones already addressed (a pushed fix + a reply on the comment are idempotent observations). Once set up, checkpoint it: `bin/agent-checkpoint.sh write . comments-enumerated "starting respond pass" "$(git rev-parse HEAD)"`.
 
 3. **Enumerate every unresolved review comment.** For each one, decide:
 
@@ -36,16 +37,34 @@ You are addressing review feedback on a PR for **dimroom**. You will read every 
    - Snapshot tests
    - Harness flows (regenerate screenshots if any UI-affecting change happened)
 
+   When the ladder is green, checkpoint it: `bin/agent-checkpoint.sh write . reverified "ladder green, ready to push" "$(git rev-parse HEAD)"`.
+
 5. **Re-capture screenshots if UI changed.** Use `.claude/skills/capture-screenshots.md`. Replace the previous attachments by uploading new ones via `gh pr comment` and noting that they supersede the previous batch.
 
 6. **Push.** New commits, not amended.
    ```
    git push
    ```
+   Then checkpoint it: `bin/agent-checkpoint.sh write . fixes-pushed "fixes pushed, replies posted" "$(git rev-parse HEAD)"`.
 
 7. **Set label back to `state:in-review`** (remove `state:changes-requested`).
 
 8. **Stop.**
+
+## Progress checkpoints & context handoff
+
+A run can die mid-stage — a socket error, an API outage, or the per-session timeout (#374). This stage works in the persistent `.worktrees/issue-${ISSUE_NUMBER}` tree, so it checkpoints progress to `.agent-state.json` there to avoid re-doing fixes on retry.
+
+- **The helper:** `bin/agent-checkpoint.sh write <dir> <phase> "<notes>" [sha]` writes the checkpoint atomically; `bin/agent-checkpoint.sh phase <dir>` prints just the recorded phase. Run them with `<dir>` = `.` from inside the worktree. The file is gitignored, so it never lands in the PR.
+- **Milestones:** `comments-enumerated` → `reverified` → `fixes-pushed`. In the notes, record **which comments are already addressed** — that's the state git/GitHub can't show you at a glance, and it's what lets the next pass avoid re-fixing the same comment.
+- **Resuming:** on a continuation, read the checkpoint, then re-enumerate the live review comments and skip the ones already fixed-and-replied.
+
+**If you find you've used substantial context and still have a lot of comments to address, do NOT try to finish in one session.** Instead:
+
+1. Write the current state: `bin/agent-checkpoint.sh write . <phase> "<comments addressed, comments remaining, any gotchas>" "$(git rev-parse HEAD)"`.
+2. Commit and push what you have with a WIP message (`wip(area): partial review response — handoff, see .agent-state.json`).
+3. **Leave the label at `state:changes-requested`** — do NOT set `state:in-review`. The next pass must be another responder run that re-enumerates the comments, not a review of half-addressed feedback.
+4. Exit with a brief summary of which comments are done and which remain.
 
 ## Rules
 

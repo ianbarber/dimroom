@@ -15,7 +15,7 @@ You are planning a GitHub issue for **dimroom**. You will not write any code in 
    - The full issue body via `gh issue view $ISSUE_NUMBER`
    - The README's delivery stages section (to understand which stage this issue belongs to)
    - Any package READMEs under `Packages/*/README.md` that the issue touches
-   - Any prior `<!-- plan -->` comment on the issue (if you are re-planning)
+   - Any prior `<!-- plan -->` comment on the issue. **This is also the resume signal:** if a `<!-- plan -->` comment already exists and the label is already `state:planned`, a prior pass finished — there is nothing to do, so stop. If the comment exists but the label hasn't moved, just re-post/finish the plan and move the label. Planning keeps **no** `.agent-state.json` checkpoint (see "Progress checkpoints & context handoff" below).
 
 2. **Validate the issue is plannable.** If any of these are true, do NOT plan — instead post a clarifying comment, set the label to `state:blocked`, and stop:
    - Goal is unclear or missing
@@ -63,6 +63,12 @@ You are planning a GitHub issue for **dimroom**. You will not write any code in 
    ```
 
 6. **Stop.** Do not create a branch. Do not write code. Do not start implementing.
+
+## Progress checkpoints & context handoff
+
+A run can die mid-stage — a socket error, an API outage, or the per-session timeout (#374). **Planning keeps no `.agent-state.json` checkpoint.** It runs in the main checkout with no worktree, and its sole artifact is the idempotent `<!-- plan -->` issue comment; a fresh pass re-derives where it stands from whether that comment exists and whether the label has moved (the resume signal in step 1). The compute to re-plan from scratch is cheap.
+
+**If you find you've used substantial context and the plan still isn't ready, do NOT post a half-formed plan.** A vague plan misleads the implementer. Instead: post nothing (or, if you've already drafted partial notes worth keeping, post them clearly marked as a draft), leave the label at `state:needs-plan`, and exit with a one-line note on what's still undecided. The next loop pass plans the issue fresh.
 
 ## Rules
 

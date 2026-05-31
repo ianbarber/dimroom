@@ -75,6 +75,12 @@ struct SettingsRootView: View {
                 .tabItem { Label("Develop", systemImage: "slider.horizontal.3") }
                 .tag(Tab.develop)
         }
-        .frame(width: 520, height: 520)
+        // Fixed width (conventional for a preferences window), but let
+        // the active tab's intrinsic content drive the height so every
+        // tab's controls are visible without scrolling. `minHeight`
+        // keeps the shorter tabs (General/Develop) from collapsing.
+        .frame(width: 520)
+        .fixedSize(horizontal: false, vertical: true)
+        .frame(minHeight: 360)
     }
 }

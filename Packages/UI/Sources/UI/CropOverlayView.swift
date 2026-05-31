@@ -100,7 +100,7 @@ public struct CropOverlayView: View {
                 ruleOfThirdsGrid(cropPixels: cropPixels)
                 translateCatcher(cropPixels: cropPixels, imageSize: geo.size)
                 handles(cropPixels: cropPixels, imageSize: geo.size)
-                rotationHandles(cropPixels: cropPixels, centre: cropCentre)
+                rotationHandles(cropPixels: cropPixels, centre: cropCentre, bounds: geo.size)
                 rotationReadout()
             }
             .coordinateSpace(name: rotationSpace)
@@ -221,10 +221,20 @@ public struct CropOverlayView: View {
     /// hover-/drag-revealed curved-arrow icon. The zones live in the
     /// darkened exterior beyond the 12pt resize handles, so resizing and
     /// rotating never compete for the same pixels.
-    private func rotationHandles(cropPixels: CGRect, centre: CGPoint) -> some View {
+    ///
+    /// `bounds` is the overlay's pixel size; `handleCentre` clamps each
+    /// zone inside it so a corner sitting on the image edge (full-frame
+    /// crop, fit-rotated-bounds) keeps a reachable rotate target instead
+    /// of pushing the affordance off-frame where it can't be grabbed (#389).
+    private func rotationHandles(cropPixels: CGRect, centre: CGPoint, bounds: CGSize) -> some View {
         ZStack(alignment: .topLeading) {
             ForEach(RotationCorner.allCases, id: \.self) { corner in
-                let handleCentre = corner.handleCentre(in: cropPixels, offset: rotationHandleOffset)
+                let handleCentre = corner.handleCentre(
+                    in: cropPixels,
+                    offset: rotationHandleOffset,
+                    bounds: bounds,
+                    hitSize: rotationHitSize
+                )
                 rotationHandle(for: corner)
                     .frame(width: rotationHitSize, height: rotationHitSize)
                     .offset(
@@ -425,14 +435,34 @@ enum RotationCorner: String, CaseIterable {
     }
 
     /// Centre of the rotate hit-zone: `offset` points from the corner along
-    /// the outward diagonal (Euclidean distance, hence the √2 split).
-    func handleCentre(in rect: CGRect, offset: CGFloat) -> CGPoint {
+    /// the outward diagonal (Euclidean distance, hence the √2 split), then
+    /// the result is clamped so the full `hitSize`×`hitSize` zone stays
+    /// inside the overlay `bounds`. The clamp is a no-op for the common
+    /// inset crop (the outward centre is already in bounds) and only bites
+    /// for a corner on the image edge, where it pulls the affordance just
+    /// inside the boundary on that corner's interior side so it stays
+    /// reachable (#389).
+    func handleCentre(in rect: CGRect, offset: CGFloat, bounds: CGSize, hitSize: CGFloat) -> CGPoint {
         let c = corner(in: rect)
         let component = offset / 2.0.squareRoot()
-        return CGPoint(
+        let outwardCentre = CGPoint(
             x: c.x + outward.width * component,
             y: c.y + outward.height * component
         )
+        return CGPoint(
+            x: Self.clampAxis(outwardCentre.x, axisLength: bounds.width, hitSize: hitSize),
+            y: Self.clampAxis(outwardCentre.y, axisLength: bounds.height, hitSize: hitSize)
+        )
+    }
+
+    /// Pull `value` inward so a `hitSize`-wide zone centred on it stays
+    /// within `[0, axisLength]`. If the axis is narrower than the zone
+    /// (degenerate: can't fit at all) centre on the axis midpoint, the
+    /// best available position, rather than producing an inverted range.
+    private static func clampAxis(_ value: CGFloat, axisLength: CGFloat, hitSize: CGFloat) -> CGFloat {
+        let half = hitSize / 2
+        guard axisLength >= hitSize else { return axisLength / 2 }
+        return min(max(value, half), axisLength - half)
     }
 
     /// Spin the curved-arrow glyph so each corner's icon reads as facing

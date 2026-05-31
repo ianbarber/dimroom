@@ -41,7 +41,9 @@ final class CropRotationHitZoneTests: XCTestCase {
             let rotateZone = square(
                 centredAt: corner.handleCentre(
                     in: sampleRect,
-                    offset: overlay.rotationHandleOffset
+                    offset: overlay.rotationHandleOffset,
+                    bounds: CGSize(width: 640, height: 480),
+                    hitSize: overlay.rotationHitSize
                 ),
                 size: overlay.rotationHitSize
             )
@@ -72,7 +74,9 @@ final class CropRotationHitZoneTests: XCTestCase {
             let rotateZone = square(
                 centredAt: corner.handleCentre(
                     in: sampleRect,
-                    offset: overlay.rotationHandleOffset
+                    offset: overlay.rotationHandleOffset,
+                    bounds: CGSize(width: 640, height: 480),
+                    hitSize: overlay.rotationHitSize
                 ),
                 size: overlay.rotationHitSize
             )

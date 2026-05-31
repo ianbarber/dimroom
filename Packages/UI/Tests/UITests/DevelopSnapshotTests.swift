@@ -304,19 +304,25 @@ final class DevelopSnapshotTests: XCTestCase {
         }
     }
 
-    /// Develop view at identity values, rendered tall enough that the
+    /// Develop view at identity values, rendered just tall enough that the
     /// Geometry section's three sliders (Vertical / Horizontal / Rotation)
     /// and two toggles (Chromatic Aberration / Lens Vignette) fit inside
     /// the visible viewport. Locks the layout of the Geometry group on its
     /// own — the existing `test_develop_geometry` exercises non-identity
     /// values but at 1024×768 the panel sits below the fold.
+    ///
+    /// The frame height is the smallest that keeps the full Geometry group
+    /// in view: the sidebar's last content row sits at y≈1559 (the Lens
+    /// Vignette toggle), so 1580 leaves a ~21px bottom margin in keeping
+    /// with the sidebar's own 12px padding while trimming the dead vertical
+    /// band the old 1800 frame left below the group.
     @MainActor
     func test_develop_geometry_panel() async throws {
         let vm = try await makeActivatedViewModel(hash: "snap-geom-panel")
 
         let image = renderFixedPixelImage(
             for: DevelopView(viewModel: vm),
-            size: CGSize(width: 1024, height: 1800)
+            size: CGSize(width: 1024, height: 1580)
         )
 
         runAssertSnapshot {

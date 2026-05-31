@@ -383,3 +383,10 @@ jobs:
             exit 0
           fi
           bin/harness-originals-isolation-check.sh --default-launch
+      - name: Run harness magnifier flow
+        run: |
+          if [ ! -x bin/harness-magnifier-flow.sh ]; then
+            echo "No harness magnifier flow script yet — skipping."
+            exit 0
+          fi
+          bin/harness-magnifier-flow.sh

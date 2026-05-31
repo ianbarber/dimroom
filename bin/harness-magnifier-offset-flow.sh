@@ -134,8 +134,10 @@ echo "=== show magnifier so the window lays out (geometry reader reports size) =
 "$CLI_BIN" set-magnifier --visible true --x 0.5 --y 0.5 --zoom 2 --socket "$SOCKET" >/dev/null
 sleep 1
 
-echo "=== set-magnifier-offset --x -50 --y 30 (in-bounds, preserved verbatim) ==="
-"$CLI_BIN" set-magnifier-offset --x -50 --y 30 --socket "$SOCKET" >/dev/null
+# Negative option values need the `--opt=value` form, else ArgumentParser
+# reads the leading `-` as another flag.
+echo "=== set-magnifier-offset --x=-50 --y=30 (in-bounds, preserved verbatim) ==="
+"$CLI_BIN" set-magnifier-offset --x=-50 --y=30 --socket "$SOCKET" >/dev/null
 sleep 1
 STATE=$("$CLI_BIN" state --socket "$SOCKET")
 OFF_X=$(magnifier_field "$STATE" windowOffsetX)
@@ -145,8 +147,8 @@ assert_num "$OFF_Y" "abs(v - 30) < 1e-6" "in-bounds windowOffsetY should be pres
 echo "  OK: in-bounds offset preserved ($OFF_X, $OFF_Y)"
 "$CLI_BIN" screenshot "$SCREENSHOT_DIR/magnifier-offset-inbounds.png" --socket "$SOCKET" >/dev/null
 
-echo "=== set-magnifier-offset --x 100000 --y 100000 (off bottom-right → clamped) ==="
-"$CLI_BIN" set-magnifier-offset --x 100000 --y 100000 --socket "$SOCKET" >/dev/null
+echo "=== set-magnifier-offset --x=100000 --y=100000 (off bottom-right → clamped) ==="
+"$CLI_BIN" set-magnifier-offset --x=100000 --y=100000 --socket "$SOCKET" >/dev/null
 sleep 1
 STATE=$("$CLI_BIN" state --socket "$SOCKET")
 OFF_X=$(magnifier_field "$STATE" windowOffsetX)
@@ -162,8 +164,8 @@ if [ ! -f "$SCREENSHOT_DIR/magnifier-offset-clamped-br.png" ]; then
     exit 1
 fi
 
-echo "=== set-magnifier-offset --x -100000 --y -100000 (off top-left → clamped) ==="
-"$CLI_BIN" set-magnifier-offset --x -100000 --y -100000 --socket "$SOCKET" >/dev/null
+echo "=== set-magnifier-offset --x=-100000 --y=-100000 (off top-left → clamped) ==="
+"$CLI_BIN" set-magnifier-offset --x=-100000 --y=-100000 --socket "$SOCKET" >/dev/null
 sleep 1
 STATE=$("$CLI_BIN" state --socket "$SOCKET")
 OFF_X=$(magnifier_field "$STATE" windowOffsetX)

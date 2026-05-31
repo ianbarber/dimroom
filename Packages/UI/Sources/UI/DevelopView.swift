@@ -414,11 +414,24 @@ public struct DevelopView: View {
                         x: viewModel.magnifierWindowOffset.width,
                         y: viewModel.magnifierWindowOffset.height
                     )
-                    .padding(12)
+                    .padding(DevelopViewModel.magnifierWindowPadding)
                     .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topTrailing)
             }
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity)
+        // Feed the preview area's size into the view model so the magnifier
+        // window's drag offset can be clamped on-screen — both live during a
+        // drag and as a self-heal when a stale off-screen offset is restored
+        // from Settings at launch (#377).
+        .background(
+            GeometryReader { proxy in
+                Color.clear
+                    .onAppear { viewModel.setMagnifierContainerSize(proxy.size) }
+                    .onChange(of: proxy.size) { _, newSize in
+                        viewModel.setMagnifierContainerSize(newSize)
+                    }
+            }
+        )
     }
 
     /// Transparent hit layer over the fitted image that maps a click or

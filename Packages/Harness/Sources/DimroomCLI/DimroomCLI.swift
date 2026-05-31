@@ -77,6 +77,7 @@ struct DimroomCLI: ParsableCommand {
             DismissRemoteAdditionsBadge.self,
             NudgeColorWheel.self,
             SetMagnifier.self,
+            SetMagnifierOffset.self,
         ]
     )
 }
@@ -1421,6 +1422,26 @@ extension DimroomCLI {
                 .setMagnifier(visible: visible, samplePointX: x, samplePointY: y, zoom: zoom),
                 socket: socket
             )
+        }
+    }
+
+    struct SetMagnifierOffset: ParsableCommand {
+        static let configuration = CommandConfiguration(
+            commandName: "set-magnifier-offset",
+            abstract: "Set the Develop magnifier window's drag offset in points from its default top-trailing anchor. The app clamps the value so the whole window stays on-screen (#377)."
+        )
+
+        @Option(name: .long, help: "Horizontal offset in points (negative moves left from the anchor).")
+        var x: Double
+
+        @Option(name: .long, help: "Vertical offset in points (positive moves down from the anchor).")
+        var y: Double
+
+        @Option(name: .long, help: "Path to the harness socket.")
+        var socket: String = HarnessServer.defaultSocketPath
+
+        func run() throws {
+            try runCommand(.setMagnifierWindowOffset(x: x, y: y), socket: socket)
         }
     }
 }

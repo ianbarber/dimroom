@@ -79,19 +79,29 @@ public struct AppState: Codable, Sendable, Equatable {
         public let samplePointY: Double
         public let zoom: Int
         public let usingPreviewFallback: Bool
+        /// Floating-window drag offset (points) from the default
+        /// top-trailing anchor, after the on-screen clamp. Lets Layer C
+        /// assert `setMagnifierWindowOffset` was bounded without scraping
+        /// a screenshot (#377).
+        public let windowOffsetX: Double
+        public let windowOffsetY: Double
 
         public init(
             visible: Bool = false,
             samplePointX: Double = 0.5,
             samplePointY: Double = 0.5,
             zoom: Int = 2,
-            usingPreviewFallback: Bool = false
+            usingPreviewFallback: Bool = false,
+            windowOffsetX: Double = 0,
+            windowOffsetY: Double = 0
         ) {
             self.visible = visible
             self.samplePointX = samplePointX
             self.samplePointY = samplePointY
             self.zoom = zoom
             self.usingPreviewFallback = usingPreviewFallback
+            self.windowOffsetX = windowOffsetX
+            self.windowOffsetY = windowOffsetY
         }
     }
 

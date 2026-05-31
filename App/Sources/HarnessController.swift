@@ -165,7 +165,9 @@ final class HarnessController: @unchecked Sendable {
                         samplePointX: developViewModel.magnifierSamplePoint.x,
                         samplePointY: developViewModel.magnifierSamplePoint.y,
                         zoom: developViewModel.magnifierZoom,
-                        usingPreviewFallback: developViewModel.magnifierUsingPreviewFallback
+                        usingPreviewFallback: developViewModel.magnifierUsingPreviewFallback,
+                        windowOffsetX: developViewModel.magnifierWindowOffset.width,
+                        windowOffsetY: developViewModel.magnifierWindowOffset.height
                     )
                 )
             }
@@ -303,6 +305,9 @@ final class HarnessController: @unchecked Sendable {
                 samplePointY: samplePointY,
                 zoom: zoom
             )
+
+        case .setMagnifierWindowOffset(let x, let y):
+            return await handleSetMagnifierWindowOffset(x: x, y: y)
 
         case .setEditParameter(let assetId, let parameter, let value):
             return await handleSetEditParameter(assetId: assetId, parameter: parameter, value: value)
@@ -1406,6 +1411,29 @@ final class HarnessController: @unchecked Sendable {
                 point = nil
             }
             developViewModel.setMagnifier(visible: visible, samplePoint: point, zoom: zoom)
+        }
+        return .ok()
+    }
+
+    /// Set the floating magnifier window's drag offset (#377). Mirrors
+    /// `handleSetMagnifier`'s routing — switches to Develop and activates
+    /// the library's selected asset if Develop has none — then calls the
+    /// same clamping `setMagnifierWindowOffset` the drag gesture uses, so
+    /// the offset lands clamped on-screen. The pointer drag itself cannot
+    /// be synthesised in the harness (see #348).
+    private func handleSetMagnifierWindowOffset(x: Double, y: Double) async -> Response {
+        await MainActor.run {
+            if router.route != .develop {
+                router.route = .develop
+            }
+        }
+        let needsActivate = await MainActor.run { developViewModel.currentAssetId == nil }
+        if needsActivate {
+            let selected = await MainActor.run { libraryViewModel.selectedAssetId }
+            await developViewModel.activate(assetId: selected)
+        }
+        await MainActor.run {
+            developViewModel.setMagnifierWindowOffset(CGSize(width: x, height: y))
         }
         return .ok()
     }

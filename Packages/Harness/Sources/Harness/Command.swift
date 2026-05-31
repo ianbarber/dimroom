@@ -176,6 +176,14 @@ public enum Command: Codable, Sendable, Equatable {
     /// `samplePointY`, and `zoom` are optional — omit them to toggle
     /// visibility without moving the sample point or changing zoom.
     case setMagnifier(visible: Bool, samplePointX: Double?, samplePointY: Double?, zoom: Int?)
+    /// Set the floating magnifier window's drag offset directly (#377).
+    /// The real move is a pointer drag the harness cannot synthesise (see
+    /// #348), so this routes to Develop and calls the same clamping
+    /// `setMagnifierWindowOffset` path the drag gesture uses — letting Layer
+    /// C verify the offset is clamped on-screen. `x`/`y` are the desired
+    /// offset in points from the default top-trailing anchor; the handler
+    /// clamps them so the whole window stays within the preview bounds.
+    case setMagnifierWindowOffset(x: Double, y: Double)
     /// Drives the crop overlay's drag-to-rotate handles (#323) without
     /// synthesising a pointer drag. The handler errors unless crop mode is
     /// active, then adds `angleDelta` (degrees) to the live `cropAngle`
@@ -303,6 +311,7 @@ public enum Command: Codable, Sendable, Equatable {
         case dismissRemoteAdditionsBadge
         case nudgeColorWheel
         case setMagnifier
+        case setMagnifierWindowOffset
         case dragRotateHandle
     }
 
@@ -552,6 +561,10 @@ public enum Command: Codable, Sendable, Equatable {
                 samplePointY: samplePointY,
                 zoom: zoom
             )
+        case .setMagnifierWindowOffset:
+            let x = try container.decode(Double.self, forKey: .x)
+            let y = try container.decode(Double.self, forKey: .y)
+            self = .setMagnifierWindowOffset(x: x, y: y)
         case .dragRotateHandle:
             let corner = try container.decode(String.self, forKey: .corner)
             let angleDelta = try container.decode(Double.self, forKey: .angleDelta)
@@ -782,6 +795,10 @@ public enum Command: Codable, Sendable, Equatable {
             try container.encodeIfPresent(samplePointX, forKey: .samplePointX)
             try container.encodeIfPresent(samplePointY, forKey: .samplePointY)
             try container.encodeIfPresent(zoom, forKey: .zoom)
+        case .setMagnifierWindowOffset(let x, let y):
+            try container.encode(CommandType.setMagnifierWindowOffset, forKey: .type)
+            try container.encode(x, forKey: .x)
+            try container.encode(y, forKey: .y)
         case .dragRotateHandle(let corner, let angleDelta):
             try container.encode(CommandType.dragRotateHandle, forKey: .type)
             try container.encode(corner, forKey: .corner)

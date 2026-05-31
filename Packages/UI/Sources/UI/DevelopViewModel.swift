@@ -74,8 +74,27 @@ public final class DevelopViewModel: ObservableObject {
     @Published public private(set) var magnifierReticleRect: CGRect?
 
     /// Side of the square magnifier window, in points. A 200pt window at
-    /// 1:1 samples 200px; at 2:1 samples 100px.
-    public static let magnifierPointSize: CGFloat = 200
+    /// 1:1 samples 200px; at 2:1 samples 100px. `nonisolated` so the pure
+    /// `clampedMagnifierOffset` can read it off the main actor.
+    nonisolated public static let magnifierPointSize: CGFloat = 200
+
+    /// Height of the magnifier window's header (drag handle + controls)
+    /// row. The window-height math in `clampedMagnifierOffset` is derived
+    /// from this, so `PixelMagnifierView` reads it rather than repeating
+    /// the literal — keeping the clamp and the view in lock-step.
+    nonisolated public static let magnifierHeaderHeight: CGFloat = 24
+
+    /// Inset of the floating magnifier window from the Develop preview's
+    /// edges at its default top-trailing anchor. `DevelopView` applies it
+    /// as the window's `.padding`, and the clamp keeps the window within a
+    /// matching margin on every edge.
+    nonisolated public static let magnifierWindowPadding: CGFloat = 12
+
+    /// Layout size of the floating magnifier window: the square patch plus
+    /// the header row above it. Drives the off-screen clamp.
+    nonisolated public static var magnifierWindowSize: CGSize {
+        CGSize(width: magnifierPointSize, height: magnifierHeaderHeight + magnifierPointSize)
+    }
 
     /// Child view model driving the interactive crop overlay. Owned
     /// here so DevelopView can bind to it and so `commitCrop` has a
@@ -107,6 +126,11 @@ public final class DevelopViewModel: ObservableObject {
     private var magnifierSource: CIImage?
     private var magnifierRenderTask: Task<Void, Never>?
     private var magnifierSourceTask: Task<Void, Never>?
+    /// Most recent size of the Develop preview area hosting the floating
+    /// magnifier window, reported by `DevelopView`'s geometry reader.
+    /// `.zero` until the preview first lays out — the clamp treats that as
+    /// "size unknown" and leaves the offset alone (the launch self-heal).
+    private var magnifierContainerSize: CGSize = .zero
 
     public init(
         catalog: CatalogDatabase,
@@ -539,10 +563,53 @@ public final class DevelopViewModel: ObservableObject {
         setMagnifierZoom(magnifierZoom == 1 ? 2 : 1)
     }
 
-    /// Update the floating window's drag offset. The AppDelegate mirrors
-    /// `magnifierWindowOffset` into Settings so the position persists.
+    /// Update the floating window's drag offset, clamped so the whole
+    /// window stays within the Develop preview bounds (#377). The
+    /// AppDelegate mirrors `magnifierWindowOffset` into Settings so the
+    /// position persists.
     public func setMagnifierWindowOffset(_ offset: CGSize) {
-        magnifierWindowOffset = offset
+        magnifierWindowOffset = Self.clampedMagnifierOffset(offset, container: magnifierContainerSize)
+    }
+
+    /// Record the size of the preview area that hosts the magnifier window
+    /// and re-clamp the current offset against it. Called by `DevelopView`'s
+    /// geometry reader on layout and on resize, so a stale off-screen offset
+    /// restored from Settings at launch self-heals once the preview lays out
+    /// (#377). No-op-publishes are suppressed so a steady stream of identical
+    /// geometry frames doesn't churn the Settings mirror.
+    public func setMagnifierContainerSize(_ size: CGSize) {
+        magnifierContainerSize = size
+        let clamped = Self.clampedMagnifierOffset(magnifierWindowOffset, container: size)
+        if clamped != magnifierWindowOffset {
+            magnifierWindowOffset = clamped
+        }
+    }
+
+    /// Clamp a desired magnifier-window drag `offset` so the entire window
+    /// stays inside `container`, keeping a `magnifierWindowPadding` margin
+    /// on every edge to mirror the window's default top-trailing inset.
+    ///
+    /// The window is anchored top-trailing, so its default position (offset
+    /// `.zero`) is already the furthest top/right it should sit: the offset
+    /// travels left (negative width) and down (positive height) from there.
+    /// Horizontal travel is therefore bounded to `[-availableX, 0]` and
+    /// vertical to `[0, availableY]`, where `available*` is the slack left
+    /// after the window and its two margins. When the preview is smaller
+    /// than the window (negative slack) the range collapses to `0`, pinning
+    /// the window at its anchor as a best effort. A non-positive container
+    /// size means "not laid out yet" and passes the offset through unchanged.
+    nonisolated public static func clampedMagnifierOffset(
+        _ offset: CGSize,
+        container: CGSize
+    ) -> CGSize {
+        guard container.width > 0, container.height > 0 else { return offset }
+        let window = magnifierWindowSize
+        let pad = magnifierWindowPadding
+        let availableX = max(0, container.width - window.width - 2 * pad)
+        let availableY = max(0, container.height - window.height - 2 * pad)
+        let dx = min(max(offset.width, -availableX), 0)
+        let dy = min(max(offset.height, 0), availableY)
+        return CGSize(width: dx, height: dy)
     }
 
     /// Unified entry used by the harness `setMagnifier` command. Fields

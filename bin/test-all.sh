@@ -26,6 +26,15 @@ else
 fi
 echo "::endgroup::"
 
+echo "::group::bin/tests/test-agent-checkpoint.sh"
+if "$REPO_ROOT/bin/tests/test-agent-checkpoint.sh"; then
+    echo "PASS: agent-checkpoint"
+else
+    echo "FAIL: agent-checkpoint"
+    FAILED=1
+fi
+echo "::endgroup::"
+
 echo "::group::bash tests (bin/tests/run.sh)"
 if "$REPO_ROOT/bin/tests/run.sh"; then
     echo "PASS: bin/tests/run.sh"

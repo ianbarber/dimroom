@@ -15,6 +15,7 @@ You are reviewing a PR for **dimroom**. You will read the diff adversarially, ru
    - `gh pr view $PR_NUMBER` — PR body and conversation
    - `gh pr diff $PR_NUMBER` — the diff itself
    - `gh pr checks $PR_NUMBER` — CI status
+   - **Resume check:** if a prior review pass crashed, its output is already visible in GitHub — look for a review you posted (`gh pr view $PR_NUMBER --json reviews`) and whether the issue label already moved off `state:in-review`. If you already posted a decision and moved the label, the review is done — stop. Review keeps **no** `.agent-state.json` checkpoint (see "Progress checkpoints & context handoff" below); just re-review from the diff.
 
 2. **Check PR base branch.** Run `gh pr view $PR_NUMBER --json baseRefName -q .baseRefName`. If the base is anything other than `main`, immediately request changes: "PR must target `main`, not `<branch>`. Fix with `gh pr edit $PR_NUMBER --base main` and rebase." Set `state:changes-requested` and stop.
 
@@ -68,6 +69,16 @@ You are reviewing a PR for **dimroom**. You will read the diff adversarially, ru
    - Set issue label to `state:ready-to-merge` (remove `state:in-review`).
    - Mention `@ianbarber` in a comment so the human gets notified.
    - Stop.
+
+## Progress checkpoints & context handoff
+
+A run can die mid-stage — a socket error, an API outage, or the per-session timeout (#374). Unlike implement/respond, **review keeps no `.agent-state.json` checkpoint.** Its only durable artifact is the posted review (a `--request-changes` or LGTM `--comment`) plus the label move, both idempotent GitHub observations a fresh pass re-derives via the resume check in step 1. Its worktree is the disposable `.review-worktrees/pr-${PR_NUMBER}` tree (removed and recreated each pass), and its verification ladder is cheap to re-run from scratch — so there is nothing finer-grained worth persisting.
+
+**If you find you've used substantial context and still have a lot of the diff left to review, do NOT rush a verdict on a half-read diff.** A degraded or guessed review is worse than none. Instead:
+
+1. Do **not** post a partial `--request-changes` or LGTM, and do **not** move the label — leave it at `state:in-review`.
+2. If the `.review-worktrees/pr-${PR_NUMBER}` worktree is in a messy state, `git worktree remove` it so the next pass starts clean.
+3. Exit with a brief summary of what you reviewed and what still needs eyes. The next loop pass picks the PR up fresh (still `state:in-review`) and re-reviews from the diff.
 
 ## Rules
 

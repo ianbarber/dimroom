@@ -48,6 +48,7 @@ fastlane/screenshots/**/*.png
 fastlane/test_output
 
 # Agent loop scratch space
+.agent-state.json
 .artifacts/
 .worktrees/
 .review-worktrees/

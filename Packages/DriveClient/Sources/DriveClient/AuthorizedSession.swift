@@ -55,6 +55,18 @@ public struct AuthorizedSession: Sendable {
             ".\(destinationURL.lastPathComponent).partial-\(UUID().uuidString)"
         )
 
+        // Any exit that doesn't move the temp into place must not leave the
+        // `.partial-<uuid>` file behind: a non-2xx terminal status, a
+        // mid-stream throw from the streaming client, or a cancellation. The
+        // 401-retry path below still removes `tempURL` eagerly because it
+        // reuses the same path before this defer can fire.
+        var movedIntoPlace = false
+        defer {
+            if !movedIntoPlace {
+                try? FileManager.default.removeItem(at: tempURL)
+            }
+        }
+
         let attempt: @Sendable (String) async throws -> HTTPURLResponse = { token in
             var authed = request
             authed.setValue("Bearer \(token)", forHTTPHeaderField: "Authorization")
@@ -75,7 +87,6 @@ public struct AuthorizedSession: Sendable {
         }
 
         guard (200..<300).contains(response.statusCode) else {
-            try? FileManager.default.removeItem(at: tempURL)
             return response
         }
 
@@ -83,6 +94,7 @@ public struct AuthorizedSession: Sendable {
             try FileManager.default.removeItem(at: destinationURL)
         }
         try FileManager.default.moveItem(at: tempURL, to: destinationURL)
+        movedIntoPlace = true
         return response
     }
 }

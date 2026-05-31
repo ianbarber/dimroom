@@ -177,6 +177,54 @@ final class DownloadFileTests: XCTestCase {
         XCTAssertEqual(written, chunks.reduce(Data(), +))
     }
 
+    /// A stream that writes some bytes and then errors mid-download must leave
+    /// nothing behind: the error propagates and the `.partial-<uuid>` temp file
+    /// the stream already wrote into is cleaned up by `AuthorizedSession`'s
+    /// `defer`. Removing that defer makes assertion (3) fail.
+    func testPartFileCleanedUpWhenStreamFailsMidway() async throws {
+        let tokens = InMemoryTokenStore(initial: "refresh-1")
+        let http = StubHTTPClient(responses: [
+            .success(200, Data(#"{"access_token":"tok-1","expires_in":3600,"token_type":"Bearer"}"#.utf8)),
+        ])
+        let sentinel = NSError(domain: "test.stream", code: 42)
+        let streaming = StubStreamingHTTPClient(responses: [
+            .streamFailure(
+                200,
+                chunks: [
+                    Data(repeating: 0x01, count: 256),
+                    Data(repeating: 0x02, count: 256),
+                ],
+                error: sentinel
+            ),
+        ])
+        let client = DriveClient(
+            config: OAuthConfig(clientID: "cid"),
+            httpClient: http,
+            streamingClient: streaming,
+            tokenStore: tokens
+        )
+        let tempDir = try makeTempDirectory()
+        defer { try? FileManager.default.removeItem(at: tempDir) }
+        let dest = tempDir.appendingPathComponent("file.bin")
+
+        // (1) The mid-stream error rethrows unchanged.
+        do {
+            try await client.downloadFile(id: "FILE-ID", to: dest)
+            XCTFail("expected the mid-stream error to propagate")
+        } catch let error as NSError {
+            XCTAssertEqual(error.domain, "test.stream")
+            XCTAssertEqual(error.code, 42)
+        }
+
+        // (2) The destination was never completed.
+        XCTAssertFalse(FileManager.default.fileExists(atPath: dest.path))
+        // (3) The `.partial-<uuid>` temp the stream wrote into is gone — the
+        // only thing that could remain in tempDir is that leak, so emptiness is
+        // the precise assertion.
+        let contents = try FileManager.default.contentsOfDirectory(atPath: tempDir.path)
+        XCTAssertEqual(contents, [])
+    }
+
     private final class Reported: @unchecked Sendable {
         private let lock = NSLock()
         private var storage: [Double] = []

@@ -30,6 +30,8 @@
 set -euo pipefail
 
 REPO_ROOT="$(cd "$(dirname "$0")/.." && pwd)"
+# shellcheck source=lib/harness-launch.sh
+. "$REPO_ROOT/bin/lib/harness-launch.sh"
 SCREENSHOT_DIR="${SCREENSHOT_DIR:-$REPO_ROOT/.artifacts/restore-catalog-connect-in-session}"
 WORK_DIR="$REPO_ROOT/.artifacts/harness-restore-catalog-connect-in-session"
 REMOTE_CATALOG="$WORK_DIR/remote-catalog.sqlite"
@@ -80,22 +82,6 @@ take_screenshot() {
     fi
 }
 
-wait_for_socket() {
-    for i in $(seq 1 30); do
-        if [ -e "$SOCKET" ]; then
-            echo "Socket ready after ${i}s"
-            return 0
-        fi
-        if ! kill -0 "$APP_PID" 2>/dev/null; then
-            echo "ERROR: App exited before socket was ready"
-            exit 1
-        fi
-        sleep 1
-    done
-    echo "ERROR: Socket not ready after 30s"
-    exit 1
-}
-
 stop_app() {
     "$CLI_BIN" quit --socket "$SOCKET" 2>&1 || true
     sleep 1
@@ -142,19 +128,17 @@ fi
 # ---------------------------------------------------------------------
 
 echo "=== [in-session] Launching app — no local catalog, stub OAuth, stub remote (post-connect only) ==="
-DIMROOM_HARNESS_SOCKET="$SOCKET" \
-DIMROOM_HARNESS_DRIVE_STUB=1 \
-DIMROOM_HARNESS_STUB_REMOTE_CATALOG="$REMOTE_CATALOG" \
-DIMROOM_HARNESS_STUB_REMOTE_CATALOG_PHOTO_COUNT="$EXPECTED_COUNT" \
-DIMROOM_HARNESS_AUTO_CONFIRM_CONNECT_FOR_RESTORE=connect \
-DIMROOM_HARNESS_AUTO_CONFIRM_RESTORE=1 \
-DIMROOM_ORIGINALS_DIR="$ORIGINALS_CACHE" \
-    "$APP_BIN" --harness \
-    --fixture-catalog "$LOCAL_CATALOG" \
-    --preview-cache "$LOCAL_PREVIEW_CACHE" \
-    --originals-cache "$ORIGINALS_CACHE" &
-APP_PID=$!
-wait_for_socket
+FIXTURE_CATALOG="$LOCAL_CATALOG"
+PREVIEW_CACHE="$LOCAL_PREVIEW_CACHE"
+HARNESS_WORK_DIR="$WORK_DIR"
+HARNESS_ENV=(
+    DIMROOM_HARNESS_DRIVE_STUB=1
+    DIMROOM_HARNESS_STUB_REMOTE_CATALOG="$REMOTE_CATALOG"
+    DIMROOM_HARNESS_STUB_REMOTE_CATALOG_PHOTO_COUNT="$EXPECTED_COUNT"
+    DIMROOM_HARNESS_AUTO_CONFIRM_CONNECT_FOR_RESTORE=connect
+    DIMROOM_HARNESS_AUTO_CONFIRM_RESTORE=1
+)
+harness_launch_app
 
 echo "=== [in-session] Polling drive-auth-state until connected ==="
 CONNECTED=""
@@ -216,17 +200,15 @@ if [ ! -f "$LOCAL_CATALOG" ]; then
     exit 1
 fi
 
-DIMROOM_HARNESS_SOCKET="$SOCKET" \
-DIMROOM_HARNESS_DRIVE_STUB=1 \
-DIMROOM_HARNESS_STUB_REMOTE_CATALOG="$REMOTE_CATALOG" \
-DIMROOM_HARNESS_STUB_REMOTE_CATALOG_PHOTO_COUNT="$EXPECTED_COUNT" \
-DIMROOM_ORIGINALS_DIR="$ORIGINALS_CACHE" \
-    "$APP_BIN" --harness \
-    --fixture-catalog "$LOCAL_CATALOG" \
-    --preview-cache "$LOCAL_PREVIEW_CACHE" \
-    --originals-cache "$ORIGINALS_CACHE" &
-APP_PID=$!
-wait_for_socket
+FIXTURE_CATALOG="$LOCAL_CATALOG"
+PREVIEW_CACHE="$LOCAL_PREVIEW_CACHE"
+HARNESS_WORK_DIR="$WORK_DIR"
+HARNESS_ENV=(
+    DIMROOM_HARNESS_DRIVE_STUB=1
+    DIMROOM_HARNESS_STUB_REMOTE_CATALOG="$REMOTE_CATALOG"
+    DIMROOM_HARNESS_STUB_REMOTE_CATALOG_PHOTO_COUNT="$EXPECTED_COUNT"
+)
+harness_launch_app
 
 STATE_OUT=$("$CLI_BIN" state --socket "$SOCKET")
 echo "$STATE_OUT"

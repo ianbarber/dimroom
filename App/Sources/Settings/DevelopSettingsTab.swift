@@ -49,5 +49,8 @@ struct DevelopSettingsTab: View {
         }
         .formStyle(.grouped)
         .padding()
+        // Report natural height so the Settings window can size to fit
+        // all sections (see SettingsRootView).
+        .fixedSize(horizontal: false, vertical: true)
     }
 }

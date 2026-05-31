@@ -12,13 +12,23 @@ public final class StubStreamingHTTPClient: StreamingHTTPClient, @unchecked Send
     public struct Response {
         public let status: Int
         public let chunks: [Data]
+        public let error: Error?
 
         public static func success(_ status: Int, chunks: [Data]) -> Response {
-            Response(status: status, chunks: chunks)
+            Response(status: status, chunks: chunks, error: nil)
         }
 
         public static func success(_ status: Int, data: Data) -> Response {
-            Response(status: status, chunks: [data])
+            Response(status: status, chunks: [data], error: nil)
+        }
+
+        /// Writes `chunks` to the destination and then throws `error`,
+        /// simulating a connection drop or server RST after bytes have already
+        /// landed on disk. Pass a 2xx `status` so the stub takes its write path
+        /// before the throw — that's the case that leaves a `.partial` temp
+        /// file for the caller's cleanup to reclaim.
+        public static func streamFailure(_ status: Int, chunks: [Data], error: Error) -> Response {
+            Response(status: status, chunks: chunks, error: error)
         }
     }
 
@@ -81,6 +91,13 @@ public final class StubStreamingHTTPClient: StreamingHTTPClient, @unchecked Send
                     progress(Double(written) / Double(total))
                 }
             }
+        }
+
+        // Surface a mid-stream failure after the bytes already written above
+        // are flushed and the handle is closed (its `defer` ran when the block
+        // exited). The caller sees a throw with the temp file present on disk.
+        if let error = response.error {
+            throw error
         }
 
         let http = HTTPURLResponse(

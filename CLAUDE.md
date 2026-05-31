@@ -86,6 +86,7 @@ These are not up for re-litigation in casual tasks. If you find yourself wanting
 - **Mode switch keys:** `G` Library, `E` Loupe, `D` Develop. Lightroom-style.
 - **Snapshot tests:** `pointfreeco/swift-snapshot-testing`.
 - **Screenshot delivery for PRs:** prefer `gh pr comment` with image upload; fall back to an orphan `artifacts/<branch>` branch if uploads prove flaky.
+- **Dark-theme control contrast:** the app's surfaces are hardcoded dark (`Color(white: 0.05…0.12)`); there is no light mode. System-styled controls (`.segmented`/`.menu` `Picker`, borderless `Menu`) render their labels through the AppKit control foreground path, which ignores `.foregroundStyle` and so shows near-black text on the dark background — the recurring bug class of #74/#241/#319/#325. When adding such a control, apply the shared `.darkThemeControl()` modifier (`Packages/UI/Sources/UI/DarkTheme.swift`), which forces `.colorScheme(.dark)` so the system supplies a light label. For a `.bordered` `Button` carrying a custom dark `.tint`, that lever does not help — pin `.foregroundStyle(.white)` on the label's children instead (see `DevelopView.cropToggle`). Because the regression only manifests in live AppKit rendering, the load-bearing guard is a ViewInspector structural test asserting the modifier stays attached, not an offline snapshot.
 
 ## Verification ladder
 

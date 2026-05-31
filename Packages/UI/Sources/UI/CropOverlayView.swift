@@ -62,17 +62,24 @@ public struct CropOverlayView: View {
         self.onAngleChange = onAngleChange
     }
 
-    private let handleSize: CGFloat = 12
+    // `handleSize`, `rotationHandleOffset`, and `rotationHitSize` are
+    // `internal` (not `private`) so the Layer A non-overlap regression
+    // test can read them under `@testable import UI` instead of
+    // duplicating the magic numbers.
+    let handleSize: CGFloat = 12
     private let exteriorFill = Color.black.opacity(0.55)
     private let handleColor = Color.white
     private let gridColor = Color.white.opacity(0.4)
     private let borderColor = Color.white.opacity(0.9)
 
     /// Euclidean distance from a crop corner to the centre of its rotation
-    /// hit-zone, along the 45° diagonal pointing away from the crop.
-    private let rotationHandleOffset: CGFloat = 22
+    /// hit-zone, along the 45° diagonal pointing away from the crop. At 34pt
+    /// the zone's inner edge clears the `corner ± 6pt` resize handle by ~3pt
+    /// (`34/√2 − 30/2 = 9.04pt` vs the handle's 6pt half-width), so the two
+    /// hit-zones never compete for the same pixels (#356).
+    let rotationHandleOffset: CGFloat = 34
     /// Edge length of a rotation hit-zone (and its icon container).
-    private let rotationHitSize: CGFloat = 30
+    let rotationHitSize: CGFloat = 30
     /// Curved-arrow icon point size inside the hit-zone.
     private let rotationIconSize: CGFloat = 15
     /// Named coordinate space so rotate-drag locations resolve against the

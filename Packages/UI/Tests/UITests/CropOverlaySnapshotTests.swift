@@ -162,6 +162,35 @@ final class CropOverlaySnapshotTests: XCTestCase {
         }
     }
 
+    /// #389: a full-frame crop puts every corner on the image edge, where
+    /// the outward rotate offset would push the affordance off-frame. The
+    /// clamp pulls each zone just inside the boundary, so all four
+    /// curved-arrow affordances render fully within the frame near their
+    /// corners (rather than being clipped at the edges).
+    @MainActor
+    func test_crop_overlay_rotation_handles_full_frame_clamped_inward() {
+        let vm = CropViewModel()
+        vm.activate(
+            cropRect: CGRect(x: 0, y: 0, width: 1, height: 1),
+            angle: 0,
+            imageAspect: 4.0 / 3.0
+        )
+
+        let image = renderFixedPixelImage(
+            for: overlayOnBackdrop(viewModel: vm, forceRotationHandlesVisible: true)
+        )
+
+        runAssertSnapshot {
+            assertSnapshot(
+                of: image,
+                as: .image(
+                    precision: Self.snapshotPrecision,
+                    perceptualPrecision: Self.snapshotPerceptualPrecision
+                )
+            )
+        }
+    }
+
     /// 1:1 crop centred with a +10° straighten angle. This snapshot
     /// doesn't rotate the overlay itself (rotation happens in the
     /// renderer) — it exists to ensure the overlay stays axis-aligned

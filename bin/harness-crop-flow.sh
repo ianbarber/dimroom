@@ -273,6 +273,87 @@ echo "$INACTIVE_OUT"
 assert_json_field "drag-rotate-handle inactive status" "$INACTIVE_OUT" "status" "error"
 
 # ---------------------------------------------------------------------
+# Issue #170: exercise CropGeometry.fitCropToRotatedBounds shrink. The
+# shrink helper only runs on the setCropAngleLive path (the straighten
+# slider / drag-rotate handle) — never on the direct commitCrop the
+# `set-crop` command uses — so an aggressive angle on the rotate handle
+# is the only Layer C way to fire it. Sequence: set a centred near-edge
+# 0.8×0.8 crop at angle 0 to capture a baseline rect, enter crop mode,
+# drag-rotate to 30° (rotated projection 0.8·cos30°+0.8·sin30° ≈ 1.093 >
+# 1.0 forces the rect to shrink about its centre), commit, and assert the
+# persisted cropRect is strictly smaller on both axes. cropRect is stored
+# in CI pixel space, so we baseline-compare rather than threshold at 0.8.
+# ---------------------------------------------------------------------
+echo "=== shrink — baseline 0.8x0.8 crop at angle 0 on A ==="
+"$CLI_BIN" set-crop "$ASSET" \
+    --x 0.1 --y 0.1 --width 0.8 --height 0.8 --angle 0 \
+    --socket "$SOCKET" >/dev/null
+sleep 1
+GET_BASE=$("$CLI_BIN" get-edit "$ASSET" --socket "$SOCKET")
+echo "$GET_BASE"
+BASE_WH=$(printf '%s' "$GET_BASE" | /usr/bin/python3 -c "
+import json, sys
+doc = json.loads(sys.stdin.read())
+r = doc['data'].get('cropRect')
+if not r:
+    print('no-crop')
+    sys.exit(0)
+if isinstance(r, list):
+    w, h = r[1][0], r[1][1]
+elif 'width' in r and 'height' in r:
+    w, h = r['width'], r['height']
+else:
+    w, h = r['size']['width'], r['size']['height']
+print(f'{w} {h}')
+")
+if [ "$BASE_WH" = "no-crop" ]; then
+    echo "ERROR: shrink baseline set-crop did not persist a cropRect"
+    echo "Response: $GET_BASE"
+    exit 1
+fi
+echo "  baseline cropRect (px) w h = $BASE_WH"
+
+echo "=== shrink — enter crop, drag-rotate handle to 30° ==="
+"$CLI_BIN" enter-crop "$ASSET" --socket "$SOCKET" >/dev/null
+sleep 1
+ROT_SHRINK=$("$CLI_BIN" drag-rotate-handle --corner topLeft --angle-delta 30 --socket "$SOCKET")
+echo "$ROT_SHRINK"
+assert_json_field "drag-rotate-handle 30° status" "$ROT_SHRINK" "status" "ok"
+sleep 1
+
+echo "=== Screenshot — near-edge crop rotated 30° (pre-commit) ==="
+"$CLI_BIN" screenshot "$SCREENSHOT_DIR/crop-shrink-30deg.png" --socket "$SOCKET" || true
+
+echo "=== shrink — commit, verify cropRect shrank on both axes ==="
+"$CLI_BIN" commit-crop --socket "$SOCKET" >/dev/null
+sleep 1
+GET_SHRINK=$("$CLI_BIN" get-edit "$ASSET" --socket "$SOCKET")
+echo "$GET_SHRINK"
+SHRINK_CHECK=$(printf '%s' "$GET_SHRINK" | BASE_WH="$BASE_WH" /usr/bin/python3 -c "
+import json, os, sys
+doc = json.loads(sys.stdin.read())
+w0, h0 = (float(v) for v in os.environ['BASE_WH'].split())
+r = doc['data'].get('cropRect')
+if not r:
+    print('no-crop')
+    sys.exit(0)
+if isinstance(r, list):
+    w1, h1 = r[1][0], r[1][1]
+elif 'width' in r and 'height' in r:
+    w1, h1 = r['width'], r['height']
+else:
+    w1, h1 = r['size']['width'], r['size']['height']
+angle = float(doc['data'].get('cropAngle') or 0)
+ok = w1 < w0 and h1 < h0 and abs(angle - 30.0) < 0.0001
+print('ok' if ok else f'fail w0={w0} h0={h0} w1={w1} h1={h1} angle={angle}')
+")
+if [ "$SHRINK_CHECK" != "ok" ]; then
+    echo "ERROR: fitCropToRotatedBounds did not shrink the near-edge crop at 30° — $SHRINK_CHECK"
+    exit 1
+fi
+echo "  OK: 30° rotation shrank cropRect on both axes (fitCropToRotatedBounds fired)"
+
+# ---------------------------------------------------------------------
 # Issue #239 bug 2 regression: cross-asset crop state isolation. After
 # cropping asset A above, navigating to a never-cropped asset B and
 # entering crop mode must show the full frame — not asset A's leftover

@@ -67,4 +67,12 @@ echo "=== bin/tests/test-harness-launch.sh ==="
 harness_launch_ok=0
 "$REPO_ROOT/bin/tests/test-harness-launch.sh" || harness_launch_ok=1
 
-[ "$agent_loop_ok" -eq 0 ] && [ "$harness_launch_ok" -eq 0 ]
+# Dispatch the originals-isolation classifier suite (Layer A for the #386
+# guard). Same shape as the harness-launch dispatch — self-reports and exits
+# non-zero on any failure; its result folds into this entrypoint's status.
+echo
+echo "=== bin/tests/test-originals-isolation.sh ==="
+originals_isolation_ok=0
+"$REPO_ROOT/bin/tests/test-originals-isolation.sh" || originals_isolation_ok=1
+
+[ "$agent_loop_ok" -eq 0 ] && [ "$harness_launch_ok" -eq 0 ] && [ "$originals_isolation_ok" -eq 0 ]

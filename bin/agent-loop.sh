@@ -10,6 +10,7 @@
 #   bin/agent-loop.sh --planner-only     # only plan needs-plan issues
 #   bin/agent-loop.sh --reviewer-only    # only review in-review PRs
 #   bin/agent-loop.sh --implementer-only # only implement planned / in-progress / changes-requested
+#   bin/agent-loop.sh --claude-timeout N # hard timeout (seconds) per claude invocation (default 1800)
 #
 # Parallel setup — run each in a separate terminal:
 #   Terminal 1: bin/agent-loop.sh --watch --planner-only
@@ -43,6 +44,7 @@ SLEEP_SECONDS=300
 PLANNER_ONLY=0
 REVIEWER_ONLY=0
 IMPLEMENTER_ONLY=0
+CLAUDE_TIMEOUT_SECONDS=1800
 
 if [ "$DIMROOM_AGENT_LOOP_SOURCED" -eq 0 ]; then
   while [ $# -gt 0 ]; do
@@ -55,8 +57,15 @@ if [ "$DIMROOM_AGENT_LOOP_SOURCED" -eq 0 ]; then
       --planner-only) PLANNER_ONLY=1; shift ;;
       --reviewer-only) REVIEWER_ONLY=1; shift ;;
       --implementer-only) IMPLEMENTER_ONLY=1; shift ;;
+      --claude-timeout)
+        CLAUDE_TIMEOUT_SECONDS="${2:-}"
+        case "$CLAUDE_TIMEOUT_SECONDS" in
+          ''|*[!0-9]*) echo "--claude-timeout requires a positive integer (got: ${2:-})" >&2; exit 2 ;;
+        esac
+        [ "$CLAUDE_TIMEOUT_SECONDS" -gt 0 ] || { echo "--claude-timeout must be greater than 0" >&2; exit 2; }
+        shift 2 ;;
       -h|--help)
-        sed -n '2,18p' "$0"
+        sed -n '2,19p' "$0"
         exit 0
         ;;
       *) echo "Unknown arg: $1" >&2; exit 2 ;;
@@ -95,6 +104,59 @@ run() {
 
 require() {
   command -v "$1" >/dev/null 2>&1 || { echo "missing dependency: $1" >&2; exit 1; }
+}
+
+# Run a command under a hard timeout so a wedged `claude --print` can't stall
+# the loop forever (issue #374). Usage:
+#
+#   run_with_timeout <timeout_secs> <logfile> <cmd> [args...]   [< input]
+#
+# The command's combined output is tee'd to <logfile>, matching the inline
+# invocation this replaced. A background watchdog SIGKILLs the command's whole
+# process group on timeout, so claude and any children (node, etc.) are reaped
+# rather than orphaned. Returns the command's own exit status normally, or 124
+# (GNU `timeout` convention) when the watchdog fired. Job control (`set -m`) is
+# enabled briefly so the backgrounded job becomes its own process-group leader,
+# which is what lets the negative-PID kill reap the whole tree.
+run_with_timeout() {
+  local timeout_secs="$1" logfile="$2"
+  shift 2
+
+  # Marker file, created by the watchdog iff it fires, so a real timeout is
+  # distinguishable from the command coincidentally exiting 137.
+  local marker
+  marker="$(mktemp -t dimroom-timeout.XXXXXX)"
+  rm -f "$marker"
+
+  set -m
+  # Run the command, tee its output, and surface the command's real exit code
+  # (not tee's) out of the subshell.
+  ( "$@" 2>&1 | tee -a "$logfile"; exit "${PIPESTATUS[0]}" ) &
+  local job_pid=$!
+  # Watchdog: after the timeout, mark then SIGKILL the job's process group
+  # (with a flat kill of the job as a fallback so we never wedge on wait).
+  ( sleep "$timeout_secs"
+    touch "$marker"
+    kill -9 -- -"$job_pid" 2>/dev/null
+    kill -9 "$job_pid" 2>/dev/null ) &
+  local watchdog_pid=$!
+  set +m
+
+  local rc=0
+  wait "$job_pid" 2>/dev/null || rc=$?
+
+  # Job is done (finished or killed); tear down the watchdog and its sleep
+  # child so nothing lingers into the next pass.
+  kill -- -"$watchdog_pid" 2>/dev/null || true
+  kill "$watchdog_pid" 2>/dev/null || true
+  wait "$watchdog_pid" 2>/dev/null || true
+
+  if [ -f "$marker" ]; then
+    rm -f "$marker"
+    return 124
+  fi
+  rm -f "$marker"
+  return "$rc"
 }
 
 if [ "$DIMROOM_AGENT_LOOP_SOURCED" -eq 0 ]; then
@@ -328,19 +390,24 @@ EOF
 
   log "invoking claude (headless) for issue #$issue stage $state"
   set +e
-  ISSUE_NUMBER="$issue" \
-  ISSUE_TITLE="$title" \
-  ISSUE_LABELS="$labels" \
-  PR_NUMBER="$pr" \
-  claude \
-    --print \
-    --dangerously-skip-permissions \
-    < "$prompt_file" 2>&1 | tee -a "$LOG_FILE"
-  local rc=${PIPESTATUS[0]}
+  run_with_timeout "$CLAUDE_TIMEOUT_SECONDS" "$LOG_FILE" \
+    env ISSUE_NUMBER="$issue" \
+        ISSUE_TITLE="$title" \
+        ISSUE_LABELS="$labels" \
+        PR_NUMBER="$pr" \
+    claude \
+      --print \
+      --dangerously-skip-permissions \
+    < "$prompt_file"
+  local rc=$?
   set -e
 
   rm -f "$prompt_file"
-  log "claude exited with $rc"
+  if [ "$rc" -eq 124 ]; then
+    log "claude killed after timeout (${CLAUDE_TIMEOUT_SECONDS}s) — issue #$issue may be in inconsistent state, will retry on next pass"
+  else
+    log "claude exited with $rc"
+  fi
   return 0
 }
 
@@ -354,7 +421,10 @@ Run the cleanup-artifacts skill for merged PR #$pr.
 
 Read .claude/skills/cleanup-artifacts.md and follow it exactly. The PR has just been merged by the human. Resolve ISSUE_NUMBER and BRANCH from \`gh pr view $pr\` before starting.
 EOF
-  PR_NUMBER="$pr" claude --print --permission-mode acceptEdits < "$prompt_file"
+  run_with_timeout "$CLAUDE_TIMEOUT_SECONDS" "$LOG_FILE" \
+    env PR_NUMBER="$pr" \
+    claude --print --permission-mode acceptEdits \
+    < "$prompt_file" || true
   rm -f "$prompt_file"
 }
 

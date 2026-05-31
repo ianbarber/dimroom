@@ -28,16 +28,34 @@ final class SettingsTabSnapshotTests: XCTestCase {
         }
     }
 
-    private static let tabSize = CGSize(width: 520, height: 520)
+    /// Production Settings-window width. Height is intrinsic — driven by
+    /// the active tab's content — matching `SettingsRootView`, which now
+    /// sizes to fit each tab rather than clamping to a fixed height.
+    private static let tabWidth: CGFloat = 520
     private static let snapshotPrecision: Float = 0.99
     private static let snapshotPerceptualPrecision: Float = 0.98
 
-    private func renderFixedPixelImage(for view: some View) -> NSImage {
-        let size = Self.tabSize
-        let host = NSHostingView(rootView: AnyView(view.frame(width: size.width, height: size.height)))
+    /// Hosts `view` constrained to the production tab width with
+    /// content-driven height — the same `fixedSize(vertical:)` the live
+    /// `Settings` window relies on — and returns the host laid out at its
+    /// measured fitting size. The golden's pixel height therefore equals
+    /// the tab's natural content height, so a clipped section (the #262
+    /// bug) cannot hide off-frame.
+    private func measuredHost(for view: some View) -> (NSHostingView<AnyView>, CGSize) {
+        let host = NSHostingView(rootView: AnyView(
+            view
+                .frame(width: Self.tabWidth)
+                .fixedSize(horizontal: false, vertical: true)
+        ))
+        host.layoutSubtreeIfNeeded()
+        let height = host.fittingSize.height.rounded(.up)
+        let size = CGSize(width: Self.tabWidth, height: height)
         host.frame = CGRect(origin: .zero, size: size)
         host.layoutSubtreeIfNeeded()
+        return (host, size)
+    }
 
+    private func bitmap(of host: NSView, size: CGSize) -> NSImage {
         guard let rep = NSBitmapImageRep(
             bitmapDataPlanes: nil,
             pixelsWide: Int(size.width),
@@ -59,6 +77,11 @@ final class SettingsTabSnapshotTests: XCTestCase {
         return image
     }
 
+    private func renderFixedPixelImage(for view: some View) -> NSImage {
+        let (host, size) = measuredHost(for: view)
+        return bitmap(of: host, size: size)
+    }
+
     /// Like `renderFixedPixelImage`, but hosts the view in an offscreen
     /// `NSWindow` first. The bare `NSHostingView.cacheDisplay` path draws
     /// `TabView` chrome blank — the segmented tab bar is backed by
@@ -66,9 +89,7 @@ final class SettingsTabSnapshotTests: XCTestCase {
     /// a window. Used by the full-`SettingsRootView` snapshot so the
     /// golden reflects the real tab-bar geometry.
     private func renderWindowImage(for view: some View) -> NSImage {
-        let size = Self.tabSize
-        let host = NSHostingView(rootView: AnyView(view.frame(width: size.width, height: size.height)))
-        host.frame = CGRect(origin: .zero, size: size)
+        let (host, size) = measuredHost(for: view)
 
         let window = NSWindow(
             contentRect: CGRect(origin: .zero, size: size),
@@ -87,25 +108,8 @@ final class SettingsTabSnapshotTests: XCTestCase {
         host.displayIfNeeded()
         RunLoop.current.run(until: Date(timeIntervalSinceNow: 0.1))
 
-        guard let rep = NSBitmapImageRep(
-            bitmapDataPlanes: nil,
-            pixelsWide: Int(size.width),
-            pixelsHigh: Int(size.height),
-            bitsPerSample: 8,
-            samplesPerPixel: 4,
-            hasAlpha: true,
-            isPlanar: false,
-            colorSpaceName: .deviceRGB,
-            bytesPerRow: 0,
-            bitsPerPixel: 32
-        ) else {
-            fatalError("Failed to allocate NSBitmapImageRep for snapshot")
-        }
-        host.cacheDisplay(in: host.bounds, to: rep)
+        let image = bitmap(of: host, size: size)
         window.orderOut(nil)
-
-        let image = NSImage(size: size)
-        image.addRepresentation(rep)
         return image
     }
 

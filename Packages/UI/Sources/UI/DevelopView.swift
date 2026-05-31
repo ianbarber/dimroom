@@ -268,6 +268,11 @@ public struct DevelopView: View {
             }
             .pickerStyle(.segmented)
             .labelsHidden()
+            // `.segmented` is backed by NSSegmentedControl, whose segment
+            // labels render near-black against the dark sidebar; the shared
+            // dark-theme convention forces the system label colour light.
+            // See `darkThemeControl()` and #241.
+            .darkThemeControl()
             .accessibilityIdentifier("curve-channel-picker")
 
             CurveEditorView(

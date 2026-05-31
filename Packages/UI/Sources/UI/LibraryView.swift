@@ -106,14 +106,10 @@ public struct LibraryView: View {
             .pickerStyle(.segmented)
             .labelsHidden()
             .frame(maxWidth: 320)
-            // Why: `.pickerStyle(.segmented)` is backed by NSSegmentedControl,
-            // which renders segment text in its default (near-black) color and
-            // ignores `.foregroundStyle` applied to the inner `Text` views.
-            // Forcing dark color scheme makes the system-supplied segment text
-            // light, restoring contrast against the dark filter bar. See #241.
-            // ImageRenderer renders segment text light regardless, so a
-            // structural test (FilterBarStructureTests) guards this modifier.
-            .colorScheme(.dark)
+            // Shared dark-theme convention: NSSegmentedControl renders its
+            // segment text near-black against the dark filter bar otherwise.
+            // See `darkThemeControl()` (#241); guarded by FilterBarStructureTests.
+            .darkThemeControl()
             if let badge = viewModel.remoteAdditionsBadge {
                 remoteAdditionsBadgeView(badge)
             }

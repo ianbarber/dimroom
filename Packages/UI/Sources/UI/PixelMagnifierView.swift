@@ -65,7 +65,7 @@ struct PixelMagnifierView: View {
             .help("Hide magnifier (L)")
         }
         .padding(.horizontal, 8)
-        .frame(height: 24)
+        .frame(height: DevelopViewModel.magnifierHeaderHeight)
         .frame(width: side)
         .background(Color(white: 0.18))
         .contentShape(Rectangle())

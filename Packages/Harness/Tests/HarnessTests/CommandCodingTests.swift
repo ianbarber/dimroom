@@ -546,7 +546,7 @@ final class CommandCodingTests: XCTestCase {
         let json = String(data: data, encoding: .utf8)!
         XCTAssertEqual(
             json,
-            #"{"assetCount":3,"developIsDownloadingOriginal":false,"downloadProgressByAssetId":{},"downloadingAssetIds":[],"hasUndoToast":false,"isZoomed":false,"magnifier":{"samplePointX":0.5,"samplePointY":0.5,"usingPreviewFallback":false,"visible":false,"zoom":2},"minRating":3,"route":"library","scopeKind":"all","selectedAssetId":"12345678-1234-1234-1234-123456789012","selectedAssetIds":[],"showHistogram":true}"#
+            #"{"assetCount":3,"developIsDownloadingOriginal":false,"downloadProgressByAssetId":{},"downloadingAssetIds":[],"hasUndoToast":false,"isZoomed":false,"magnifier":{"samplePointX":0.5,"samplePointY":0.5,"usingPreviewFallback":false,"visible":false,"windowOffsetX":0,"windowOffsetY":0,"zoom":2},"minRating":3,"route":"library","scopeKind":"all","selectedAssetId":"12345678-1234-1234-1234-123456789012","selectedAssetIds":[],"showHistogram":true}"#
         )
     }
 
@@ -564,7 +564,7 @@ final class CommandCodingTests: XCTestCase {
         let json = String(data: data, encoding: .utf8)!
         XCTAssertEqual(
             json,
-            #"{"assetCount":0,"developIsDownloadingOriginal":false,"downloadProgressByAssetId":{},"downloadingAssetIds":[],"hasUndoToast":false,"isZoomed":false,"magnifier":{"samplePointX":0.5,"samplePointY":0.5,"usingPreviewFallback":false,"visible":false,"zoom":2},"minRating":0,"route":"library","scopeKind":"all","selectedAssetIds":[],"showHistogram":true}"#
+            #"{"assetCount":0,"developIsDownloadingOriginal":false,"downloadProgressByAssetId":{},"downloadingAssetIds":[],"hasUndoToast":false,"isZoomed":false,"magnifier":{"samplePointX":0.5,"samplePointY":0.5,"usingPreviewFallback":false,"visible":false,"windowOffsetX":0,"windowOffsetY":0,"zoom":2},"minRating":0,"route":"library","scopeKind":"all","selectedAssetIds":[],"showHistogram":true}"#
         )
     }
 
@@ -582,7 +582,7 @@ final class CommandCodingTests: XCTestCase {
         let json = String(data: data, encoding: .utf8)!
         XCTAssertEqual(
             json,
-            #"{"assetCount":0,"developIsDownloadingOriginal":false,"downloadProgressByAssetId":{},"downloadingAssetIds":[],"hasUndoToast":false,"isZoomed":true,"magnifier":{"samplePointX":0.5,"samplePointY":0.5,"usingPreviewFallback":false,"visible":false,"zoom":2},"minRating":0,"route":"loupe","scopeKind":"all","selectedAssetIds":[],"showHistogram":true}"#
+            #"{"assetCount":0,"developIsDownloadingOriginal":false,"downloadProgressByAssetId":{},"downloadingAssetIds":[],"hasUndoToast":false,"isZoomed":true,"magnifier":{"samplePointX":0.5,"samplePointY":0.5,"usingPreviewFallback":false,"visible":false,"windowOffsetX":0,"windowOffsetY":0,"zoom":2},"minRating":0,"route":"loupe","scopeKind":"all","selectedAssetIds":[],"showHistogram":true}"#
         )
     }
 
@@ -613,7 +613,7 @@ final class CommandCodingTests: XCTestCase {
         let json = String(data: data, encoding: .utf8)!
         XCTAssertEqual(
             json,
-            #"{"assetCount":0,"developIsDownloadingOriginal":false,"downloadProgressByAssetId":{"12345678-1234-1234-1234-123456789012":0.5},"downloadingAssetIds":["12345678-1234-1234-1234-123456789012"],"hasUndoToast":false,"isZoomed":false,"magnifier":{"samplePointX":0.5,"samplePointY":0.5,"usingPreviewFallback":false,"visible":false,"zoom":2},"minRating":0,"route":"loupe","scopeKind":"all","selectedAssetId":"12345678-1234-1234-1234-123456789012","selectedAssetIds":[],"showHistogram":true}"#
+            #"{"assetCount":0,"developIsDownloadingOriginal":false,"downloadProgressByAssetId":{"12345678-1234-1234-1234-123456789012":0.5},"downloadingAssetIds":["12345678-1234-1234-1234-123456789012"],"hasUndoToast":false,"isZoomed":false,"magnifier":{"samplePointX":0.5,"samplePointY":0.5,"usingPreviewFallback":false,"visible":false,"windowOffsetX":0,"windowOffsetY":0,"zoom":2},"minRating":0,"route":"loupe","scopeKind":"all","selectedAssetId":"12345678-1234-1234-1234-123456789012","selectedAssetIds":[],"showHistogram":true}"#
         )
     }
 
@@ -640,7 +640,7 @@ final class CommandCodingTests: XCTestCase {
         let json = String(data: data, encoding: .utf8)!
         XCTAssertEqual(
             json,
-            #"{"assetCount":0,"developDownloadProgress":0.25,"developIsDownloadingOriginal":true,"downloadProgressByAssetId":{},"downloadingAssetIds":[],"hasUndoToast":false,"isZoomed":false,"magnifier":{"samplePointX":0.5,"samplePointY":0.5,"usingPreviewFallback":false,"visible":false,"zoom":2},"minRating":0,"route":"develop","scopeKind":"all","selectedAssetIds":[],"showHistogram":true}"#
+            #"{"assetCount":0,"developDownloadProgress":0.25,"developIsDownloadingOriginal":true,"downloadProgressByAssetId":{},"downloadingAssetIds":[],"hasUndoToast":false,"isZoomed":false,"magnifier":{"samplePointX":0.5,"samplePointY":0.5,"usingPreviewFallback":false,"visible":false,"windowOffsetX":0,"windowOffsetY":0,"zoom":2},"minRating":0,"route":"develop","scopeKind":"all","selectedAssetIds":[],"showHistogram":true}"#
         )
     }
 
@@ -1480,7 +1480,9 @@ final class CommandCodingTests: XCTestCase {
                 samplePointX: 0.3,
                 samplePointY: 0.7,
                 zoom: 1,
-                usingPreviewFallback: true
+                usingPreviewFallback: true,
+                windowOffsetX: -120.5,
+                windowOffsetY: 64
             )
         )
         let data = try encoder.encode(state)
@@ -1489,6 +1491,29 @@ final class CommandCodingTests: XCTestCase {
         XCTAssertEqual(decoded.magnifier.visible, true)
         XCTAssertEqual(decoded.magnifier.zoom, 1)
         XCTAssertEqual(decoded.magnifier.usingPreviewFallback, true)
+        XCTAssertEqual(decoded.magnifier.windowOffsetX, -120.5)
+        XCTAssertEqual(decoded.magnifier.windowOffsetY, 64)
+    }
+
+    // MARK: - setMagnifierWindowOffset (#377)
+
+    func testSetMagnifierWindowOffsetRoundTrip() throws {
+        for (x, y) in [(0.0, 0.0), (-120.0, 64.0), (5000.0, -5000.0)] {
+            let command = Command.setMagnifierWindowOffset(x: x, y: y)
+            let data = try encoder.encode(command)
+            let decoded = try decoder.decode(Command.self, from: data)
+            XCTAssertEqual(command, decoded)
+        }
+    }
+
+    func testSetMagnifierWindowOffsetJSON() throws {
+        let command = Command.setMagnifierWindowOffset(x: -120.5, y: 64)
+        let data = try encoder.encode(command)
+        let json = String(data: data, encoding: .utf8)!
+        XCTAssertEqual(
+            json,
+            #"{"type":"setMagnifierWindowOffset","x":-120.5,"y":64}"#
+        )
     }
 
     // MARK: - dragRotateHandle (#323)

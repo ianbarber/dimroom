@@ -69,12 +69,12 @@ struct ScopePicker: View {
         // the system control foreground path in live AppKit, which ignores the
         // per-child `.foregroundStyle` set above — so the closed pill renders
         // near-black against the dark filter bar even though the open menu and
-        // `ImageRenderer` snapshots look correct. Forcing the dark color scheme
-        // makes the system-supplied closed label render light, restoring
-        // contrast. Same rendering-path divergence as the segmented rating
-        // Picker in #241; guarded structurally in ScopePickerStructureTests
-        // because a pixel snapshot provably can't catch it (see #74, #121).
-        .colorScheme(.dark)
+        // `ImageRenderer` snapshots look correct. The shared dark-theme
+        // convention makes the system-supplied closed label render light,
+        // restoring contrast. Same rendering-path divergence as the segmented
+        // rating Picker in #241; guarded structurally in ScopePickerStructureTests
+        // because a pixel snapshot provably can't catch it (see #74, #121, #325).
+        .darkThemeControl()
         .fixedSize()
     }
 

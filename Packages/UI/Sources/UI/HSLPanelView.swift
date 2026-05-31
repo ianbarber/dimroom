@@ -26,6 +26,11 @@ struct HSLPanelView: View {
             }
             .pickerStyle(.segmented)
             .labelsHidden()
+            // `.segmented` is backed by NSSegmentedControl, whose segment
+            // labels render near-black against the dark sidebar; the shared
+            // dark-theme convention forces the system label colour light.
+            // See `darkThemeControl()` and #241.
+            .darkThemeControl()
 
             VStack(alignment: .leading, spacing: 6) {
                 ForEach(HSLColorRange.allCases) { range in

@@ -376,3 +376,10 @@ jobs:
             exit 0
           fi
           bin/harness-backfill-markers-flow.sh
+      - name: Run harness originals-dir isolation guard
+        run: |
+          if [ ! -x bin/harness-originals-isolation-check.sh ]; then
+            echo "No harness originals-isolation guard script yet — skipping."
+            exit 0
+          fi
+          bin/harness-originals-isolation-check.sh --default-launch

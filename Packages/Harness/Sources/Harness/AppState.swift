@@ -71,6 +71,12 @@ public struct AppState: Codable, Sendable, Equatable {
     /// the `setMagnifier` command flipped visibility, moved the sample
     /// point, and switched zoom without scraping a screenshot.
     public let magnifier: MagnifierState
+    /// Current `UploadCoordinator.phase`, mapped to one of `idle`,
+    /// `uploading`, `done`, or `failed`. Lets Layer C flows assert that an
+    /// import did (or, for the auto-upload toggle #270, did not) kick off a
+    /// Drive upload without scraping the progress overlay. Defaults to
+    /// `idle` to match the coordinator's startup state.
+    public let uploadCoordinatorPhase: String
 
     /// Snapshot of the Develop pixel magnifier for Layer C assertions.
     public struct MagnifierState: Codable, Sendable, Equatable {
@@ -122,7 +128,8 @@ public struct AppState: Codable, Sendable, Equatable {
         developDownloadProgress: Double? = nil,
         developCurrentAssetId: UUID? = nil,
         libraryRemoteAdditionsCount: Int? = nil,
-        magnifier: MagnifierState = MagnifierState()
+        magnifier: MagnifierState = MagnifierState(),
+        uploadCoordinatorPhase: String = "idle"
     ) {
         self.route = route
         self.assetCount = assetCount
@@ -141,5 +148,6 @@ public struct AppState: Codable, Sendable, Equatable {
         self.developCurrentAssetId = developCurrentAssetId
         self.libraryRemoteAdditionsCount = libraryRemoteAdditionsCount
         self.magnifier = magnifier
+        self.uploadCoordinatorPhase = uploadCoordinatorPhase
     }
 }

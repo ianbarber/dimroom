@@ -531,7 +531,11 @@ final class HarnessController: @unchecked Sendable {
     }
 
     private func handleClearPreviewCache() async -> Response {
-        await previewStore.removeAll()
+        // Route through the same helper the Settings button uses so clearing
+        // previews in harness mode also reloads the library grid (#268).
+        await AppDelegate.clearPreviewCache(previewStore) { [self] in
+            libraryViewModel.reload()
+        }
         return .ok()
     }
 

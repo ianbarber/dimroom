@@ -81,7 +81,7 @@ public final class UploadCoordinator: ObservableObject {
 
             do {
                 let outcome = try await uploader.upload(ref) { [weak self] uploadedBytes, totalBytes in
-                    Task { @MainActor in
+                    Task { @MainActor [weak self] in
                         guard let self else { return }
                         self.currentBytes = uploadedBytes
                         self.totalBytes = totalBytes

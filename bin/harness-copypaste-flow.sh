@@ -20,43 +20,6 @@ APP_PID=""
 
 trap harness_cleanup EXIT
 
-assert_json_field() {
-    local label="$1" json="$2" field="$3" expected="$4"
-    local actual
-    actual=$(printf '%s' "$json" | "$REPO_ROOT/bin/harness-json-extract" "$field")
-    if [ "$actual" != "$expected" ]; then
-        echo "ERROR: $label — expected $field == $expected, got $actual"
-        echo "Response: $json"
-        exit 1
-    fi
-    echo "  OK: $label — $field == $expected"
-}
-
-assert_json_number() {
-    local label="$1" json="$2" field="$3" expected="$4"
-    if printf '%s' "$json" | "$REPO_ROOT/bin/harness-json-extract" "$field" --float --equals "$expected" --epsilon 1e-9; then
-        echo "  OK: $label — $field ≈ $expected"
-        return
-    fi
-    local actual
-    actual=$(printf '%s' "$json" | "$REPO_ROOT/bin/harness-json-extract" "$field" --float 2>/dev/null || echo '?')
-    echo "ERROR: $label — expected $field == $expected, got $actual"
-    echo "Response: $json"
-    exit 1
-}
-
-assert_json_field_absent() {
-    local label="$1" json="$2" field="$3"
-    local present
-    present=$(printf '%s' "$json" | "$REPO_ROOT/bin/harness-json-extract" "$field" --absent)
-    if [ "$present" != "absent" ]; then
-        echo "ERROR: $label — expected $field to be absent or null"
-        echo "Response: $json"
-        exit 1
-    fi
-    echo "  OK: $label — $field absent/null"
-}
-
 echo "=== Building App ==="
 swift build --package-path "$REPO_ROOT/App" 2>&1
 

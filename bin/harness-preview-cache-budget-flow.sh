@@ -42,18 +42,6 @@ cache_kb() {
     du -sk "$PREVIEW_CACHE" 2>/dev/null | awk '{print $1}'
 }
 
-assert_json_field() {
-    local label="$1" json="$2" field="$3" expected="$4"
-    local actual
-    actual=$(printf '%s' "$json" | "$REPO_ROOT/bin/harness-json-extract" "$field")
-    if [ "$actual" != "$expected" ]; then
-        echo "ERROR: $label — expected $field == $expected, got $actual"
-        echo "Response: $json"
-        exit 1
-    fi
-    echo "  OK: $label — $field == $expected"
-}
-
 echo "=== Building App ==="
 swift build --package-path "$REPO_ROOT/App" 2>&1
 

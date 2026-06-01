@@ -28,18 +28,6 @@ APP_PID=""
 
 trap harness_cleanup EXIT
 
-assert_json_field() {
-    local label="$1" json="$2" field="$3" expected="$4"
-    local actual
-    actual=$(printf '%s' "$json" | "$REPO_ROOT/bin/harness-json-extract" "$field")
-    if [ "$actual" != "$expected" ]; then
-        echo "ERROR: $label — expected $field == $expected, got $actual"
-        echo "Response: $json"
-        exit 1
-    fi
-    echo "  OK: $label — $field == $expected"
-}
-
 # --- #320 crop-export regression helpers ------------------------------
 # The system python3 has neither Quartz nor PIL, so we hand-roll a minimal
 # uncompressed-TIFF writer and reader (stdlib `struct` only). The writer

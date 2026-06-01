@@ -47,9 +47,15 @@ jobs:
         run: |
           set -e
           cd Packages/UI
-          # Recording mode always fails the tests that wrote a golden,
-          # so ignore the exit code — the artifact upload below is what
-          # matters.
+          # A *build* failure (e.g. a compile error in a dependency like
+          # DriveClient) must fail the job — otherwise the upload below
+          # silently re-publishes the committed goldens (issue #399).
+          # --build-tests builds the same targets `swift test` would, so a
+          # compile error can't slip through the later `|| true`.
+          swift build --build-tests
+          # Recording mode always *fails* the tests that wrote a golden,
+          # so the non-zero test exit is expected and tolerated here; the
+          # build above already proved everything compiles.
           swift test || true
 
       - name: Upload generated snapshots

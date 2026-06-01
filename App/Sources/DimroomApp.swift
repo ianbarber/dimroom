@@ -585,7 +585,10 @@ final class AppDelegate: NSObject, NSApplicationDelegate, ObservableObject {
 
         let resolvedOriginalsDirectory = resolveOriginalsDirectory()
         let previewCacheDirectory = resolvePreviewCacheDirectory(from: args)
-        let resolvedPreviewStore = PreviewStore(cacheDirectory: previewCacheDirectory)
+        let resolvedPreviewStore = PreviewStore(
+            cacheDirectory: previewCacheDirectory,
+            budgetBytes: settingsStore.previewCacheBudgetBytes
+        )
 
         // Seed the view models with the user-configured initial values
         // before configuring catalog access. Subscriptions below keep
@@ -2402,6 +2405,14 @@ final class AppDelegate: NSObject, NSApplicationDelegate, ObservableObject {
             .sink { [weak self] newValue in
                 guard let coordinator = self?.originalsCoordinator else { return }
                 Task { await coordinator.setCacheBudget(newValue) }
+            }
+            .store(in: &settingsCancellables)
+
+        settingsStore.$previewCacheBudgetBytes
+            .dropFirst()
+            .sink { [weak self] newValue in
+                guard let previewStore = self?.previewStore else { return }
+                Task { await previewStore.setBudget(newValue) }
             }
             .store(in: &settingsCancellables)
 

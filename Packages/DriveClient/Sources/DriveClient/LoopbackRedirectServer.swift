@@ -43,7 +43,8 @@ public actor LoopbackRedirectServer {
             throw DriveClientError.redirectServerFailed(String(describing: error))
         }
         listener.newConnectionHandler = { [weak self] connection in
-            Task { await self?.handle(connection: connection) }
+            guard let self else { return }
+            Task { await self.handle(connection: connection) }
         }
         let resolvedPort: UInt16 = try await withCheckedThrowingContinuation { continuation in
             let box = ContinuationBox(continuation)

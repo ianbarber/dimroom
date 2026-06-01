@@ -32,11 +32,37 @@ import UniformTypeIdentifiers
 ///   surfaces the unedited master cleanly. Library + Loupe see display
 ///   files first via `thumbnailURL(for:)` / `previewURL(for:)`, which
 ///   transparently fall back to master.
+///
+/// ## Budget enforcement (issue #271)
+///
+/// When `budgetBytes > 0` the store caps the on-disk cache size: a
+/// `PreviewCacheIndex` (persisted as `index.json` at the cache root)
+/// tracks each written file's size and generation time, and after every
+/// `generate` / `regenerateWithEdit` an LRU pass evicts the
+/// least-recently-generated files until the total fits the budget. The
+/// just-written files are protected from that same pass so a fresh
+/// generate never deletes what it just produced. `budgetBytes == 0`
+/// (the default) disables enforcement entirely — the historical
+/// behaviour. `setBudget(_:)` retunes the cap live and re-evicts at once,
+/// mirroring `OriginalsCache`.
 public actor PreviewStore {
     private let cacheDirectory: URL
     private let context: CIContext
     private let fileManager: FileManager
     private let jpegQuality: CGFloat
+
+    /// On-disk cache size cap in bytes. `0` means unlimited (no eviction).
+    public private(set) var budgetBytes: Int64
+
+    /// Source of "now" for stamping `lastAccess`. Injectable so tests can
+    /// produce a deterministic LRU ordering without real-time sleeps.
+    private let clock: @Sendable () -> Date
+
+    /// Size + generation-time manifest for every cached file, persisted as
+    /// `index.json` at the cache root. Drives `currentSizeBytes()` and LRU
+    /// eviction; rebuilt from disk on first launch when absent.
+    private var index: PreviewCacheIndex
+    private let indexURL: URL
 
     /// Number of times a source file has been fully decoded. Used by
     /// tests to assert idempotent regeneration doesn't re-decode.
@@ -59,9 +85,14 @@ public actor PreviewStore {
         regeneratedSubject.eraseToAnyPublisher()
     }
 
-    public init(cacheDirectory: URL) {
+    /// - Parameter budgetBytes: on-disk size cap; `0` (default) disables
+    ///   eviction. The app seeds this from
+    ///   `SettingsStore.previewCacheBudgetBytes` and retunes it live via
+    ///   `setBudget(_:)`.
+    public init(cacheDirectory: URL, budgetBytes: Int64 = 0) {
         self.init(
             cacheDirectory: cacheDirectory,
+            budgetBytes: budgetBytes,
             context: CIContext(options: [.useSoftwareRenderer: false]),
             fileManager: .default,
             jpegQuality: 0.85
@@ -69,18 +100,87 @@ public actor PreviewStore {
     }
 
     /// Test-friendly initialiser. The `context` is injectable so unit
-    /// tests can use a software-backed context if they need one, and the
-    /// `fileManager` can be swapped for fakes if we ever need one.
+    /// tests can use a software-backed context if they need one, the
+    /// `fileManager` can be swapped for fakes if we ever need one, and
+    /// `clock` lets tests stamp deterministic `lastAccess` times so LRU
+    /// eviction order is reproducible.
     init(
         cacheDirectory: URL,
+        budgetBytes: Int64 = 0,
         context: CIContext,
         fileManager: FileManager,
-        jpegQuality: CGFloat
+        jpegQuality: CGFloat,
+        clock: @escaping @Sendable () -> Date = { Date() }
     ) {
         self.cacheDirectory = cacheDirectory
+        self.budgetBytes = budgetBytes
         self.context = context
         self.fileManager = fileManager
         self.jpegQuality = jpegQuality
+        self.clock = clock
+        let indexURL = cacheDirectory.appendingPathComponent("index.json")
+        self.indexURL = indexURL
+        // Ensure the cache root exists so `index.json` can be persisted
+        // before the first `generate` lays down a shard directory.
+        try? fileManager.createDirectory(at: cacheDirectory, withIntermediateDirectories: true)
+        // Load the persisted index, or rebuild it from any pre-existing
+        // cache files when this is the first launch with budget tracking.
+        if fileManager.fileExists(atPath: indexURL.path) {
+            self.index = PreviewCacheIndex.load(from: indexURL)
+        } else {
+            self.index = PreviewCacheIndex.rebuild(from: cacheDirectory, fileManager: fileManager)
+        }
+    }
+
+    // MARK: - Budget
+
+    /// Current cache size in bytes, computed from the index rather than an
+    /// O(n) filesystem walk, so it's cheap to call.
+    public func currentSizeBytes() -> Int64 {
+        index.totalBytes
+    }
+
+    /// Update the byte budget and immediately evict LRU entries to honour
+    /// it. A larger budget is a no-op (`evictIfNeeded` returns early when
+    /// total ≤ budget). `0` disables enforcement. Mirrors
+    /// `OriginalsCache.setBudget`; used by the Settings UI to retune the
+    /// cache without rebuilding it.
+    public func setBudget(_ newValue: Int64) {
+        budgetBytes = newValue
+        evictIfNeeded()
+        try? index.save(to: indexURL)
+    }
+
+    // MARK: - Index bookkeeping
+
+    /// Record (or update) the index entry for a freshly written cache file
+    /// and return its key, so the caller can protect it from the eviction
+    /// pass that immediately follows.
+    @discardableResult
+    private func register(_ url: URL, at now: Date) -> String {
+        let key = PreviewCacheIndex.key(for: url)
+        let attrs = (try? fileManager.attributesOfItem(atPath: url.path)) ?? [:]
+        let size = (attrs[.size] as? NSNumber)?.int64Value ?? 0
+        index.entries[key] = PreviewCacheIndex.Entry(bytes: size, lastAccess: now)
+        return key
+    }
+
+    /// Delete least-recently-generated files until the cache fits the
+    /// budget. No-op when unlimited (`budgetBytes == 0`) or already under
+    /// budget. `protecting` keys are never evicted — used to spare the
+    /// files a `generate`/`regenerate` just wrote.
+    private func evictIfNeeded(protecting protectedKeys: Set<String> = []) {
+        guard budgetBytes > 0, index.totalBytes > budgetBytes else { return }
+        let candidates = index.entries
+            .filter { !protectedKeys.contains($0.key) }
+            .sorted { $0.value.lastAccess < $1.value.lastAccess }
+
+        for (key, _) in candidates {
+            if index.totalBytes <= budgetBytes { break }
+            let fileURL = cacheDirectory.appendingPathComponent(key)
+            try? fileManager.removeItem(at: fileURL)
+            index.entries.removeValue(forKey: key)
+        }
     }
 
     // MARK: - Public API
@@ -121,16 +221,19 @@ public actor PreviewStore {
         return FileManager.default.fileExists(atPath: master.path) ? master : nil
     }
 
-    /// Remove every cached preview file under the cache directory.
-    /// Best-effort; missing files are ignored. The directory itself is
-    /// recreated so subsequent `generate` calls can write into it.
+    /// Remove every cached preview file under the cache directory,
+    /// including the persisted index, and reset the in-memory index so the
+    /// tracked size drops to zero. Best-effort; missing files are ignored.
+    /// The directory itself is preserved so subsequent `generate` calls can
+    /// write into it.
     public func removeAll() {
-        guard fileManager.fileExists(atPath: cacheDirectory.path) else { return }
-        if let contents = try? fileManager.contentsOfDirectory(at: cacheDirectory, includingPropertiesForKeys: nil) {
+        if fileManager.fileExists(atPath: cacheDirectory.path),
+           let contents = try? fileManager.contentsOfDirectory(at: cacheDirectory, includingPropertiesForKeys: nil) {
             for url in contents {
                 try? fileManager.removeItem(at: url)
             }
         }
+        index = PreviewCacheIndex()
     }
 
     /// Remove all cached thumbnail/preview JPEGs for `asset` across both
@@ -149,8 +252,10 @@ public actor PreviewStore {
                 if fileManager.fileExists(atPath: url.path) {
                     try? fileManager.removeItem(at: url)
                 }
+                index.entries.removeValue(forKey: PreviewCacheIndex.key(for: url))
             }
         }
+        try? index.save(to: indexURL)
     }
 
     /// Produce both master preview sizes for `asset` from its original at
@@ -158,6 +263,12 @@ public actor PreviewStore {
     /// disk the call returns immediately without decoding. Does not
     /// touch display-tier files — those are only written by
     /// `regenerateWithEdit`.
+    ///
+    /// After writing, the new files are registered in the index and an LRU
+    /// eviction pass runs to keep the cache within `budgetBytes` (a no-op
+    /// when the budget is unlimited). The two files just written are
+    /// protected from that pass so a tiny budget can't delete this asset's
+    /// fresh previews out from under the returned `PreviewSet`.
     @discardableResult
     public func generate(for asset: Asset, sourceURL: URL) async throws -> PreviewSet {
         let thumbURL = CachePaths.fileURL(for: asset, kind: .thumbnail, tier: .master, in: cacheDirectory)
@@ -175,11 +286,16 @@ public actor PreviewStore {
         decodeCount += 1
         let rotated = applyRotation(to: decoded, rotation: asset.rotation)
 
+        let now = clock()
+        var writtenKeys: Set<String> = []
         for kind in PreviewKind.allCases {
             let target = CachePaths.fileURL(for: asset, kind: kind, tier: .master, in: cacheDirectory)
             let scaled = scale(rotated, longEdge: kind.maxEdge)
             try writeJPEG(scaled, to: target)
+            writtenKeys.insert(register(target, at: now))
         }
+        evictIfNeeded(protecting: writtenKeys)
+        try? index.save(to: indexURL)
 
         return PreviewSet(thumbnail: thumbURL, preview: previewURL)
     }
@@ -217,7 +333,9 @@ public actor PreviewStore {
                 if fileManager.fileExists(atPath: displayURL.path) {
                     try? fileManager.removeItem(at: displayURL)
                 }
+                index.entries.removeValue(forKey: PreviewCacheIndex.key(for: displayURL))
             }
+            try? index.save(to: indexURL)
             regeneratedSubject.send(asset.id)
             return
         }
@@ -225,6 +343,8 @@ public actor PreviewStore {
         let lensProfile = LensProfileLibrary.lookup(for: asset.lensModel)
         let rendered = Renderer.render(source: source, editState: editState, lensProfile: lensProfile)
 
+        let now = clock()
+        var writtenKeys: Set<String> = []
         for kind in PreviewKind.allCases {
             let target = CachePaths.fileURL(
                 for: asset, kind: kind, tier: .display, in: cacheDirectory
@@ -238,7 +358,10 @@ public actor PreviewStore {
                 // prompt consumers to reload stale bytes.
                 return
             }
+            writtenKeys.insert(register(target, at: now))
         }
+        evictIfNeeded(protecting: writtenKeys)
+        try? index.save(to: indexURL)
 
         regeneratedSubject.send(asset.id)
     }

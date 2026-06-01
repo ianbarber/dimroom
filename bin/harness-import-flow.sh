@@ -52,17 +52,8 @@ swift build --package-path "$REPO_ROOT/App" 2>&1
 echo "=== Building CLI ==="
 swift build --package-path "$REPO_ROOT/Packages/Harness" --product dimroom-cli 2>&1
 
-APP_BIN="$REPO_ROOT/App/.build/debug/Dimroom"
-CLI_BIN="$REPO_ROOT/Packages/Harness/.build/debug/dimroom-cli"
-
-if [ ! -x "$APP_BIN" ]; then
-    echo "ERROR: App binary not found at $APP_BIN"
-    exit 1
-fi
-if [ ! -x "$CLI_BIN" ]; then
-    echo "ERROR: CLI binary not found at $CLI_BIN"
-    exit 1
-fi
+harness_locate_binaries
+harness_require_binaries "$APP_BIN" "$CLI_BIN" || exit 1
 
 echo "=== Preparing working catalog and originals dir ==="
 rm -rf "$ARTIFACT_DIR"

@@ -161,15 +161,8 @@ swift build --package-path "$REPO_ROOT/App" 2>&1
 echo "=== Building CLI ==="
 swift build --package-path "$REPO_ROOT/Packages/Harness" --product dimroom-cli 2>&1
 
-APP_BIN="$REPO_ROOT/App/.build/debug/Dimroom"
-CLI_BIN="$REPO_ROOT/Packages/Harness/.build/debug/dimroom-cli"
-
-for bin in "$APP_BIN" "$CLI_BIN"; do
-    if [ ! -x "$bin" ]; then
-        echo "ERROR: missing binary $bin"
-        exit 1
-    fi
-done
+harness_locate_binaries
+harness_require_binaries "$APP_BIN" "$CLI_BIN" || exit 1
 
 echo "=== Preparing working catalog and originals dir ==="
 rm -rf "$ARTIFACT_DIR"

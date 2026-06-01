@@ -34,16 +34,8 @@ LENS_MODEL="RF 50mm F1.2 L USM"
 
 trap harness_cleanup EXIT
 
-APP_BIN="$REPO_ROOT/App/.build/debug/Dimroom"
-CLI_BIN="$REPO_ROOT/Packages/Harness/.build/debug/dimroom-cli"
-FIXTURE_BIN="$REPO_ROOT/Packages/Harness/.build/debug/dimroom-fixture"
-
-for bin in "$APP_BIN" "$CLI_BIN" "$FIXTURE_BIN"; do
-    if [ ! -x "$bin" ]; then
-        echo "ERROR: missing binary $bin — capture-screenshots skill should have built it"
-        exit 1
-    fi
-done
+harness_locate_binaries
+harness_require_binaries "$APP_BIN" "$CLI_BIN" "$FIXTURE_BIN" || exit 1
 
 echo "=== Seeding catalog from $SEED_SRC with lens model '$LENS_MODEL' ==="
 rm -rf "$WORK_DIR"

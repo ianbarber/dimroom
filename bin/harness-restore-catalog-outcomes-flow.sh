@@ -62,16 +62,8 @@ cleanup() {
 }
 trap cleanup EXIT
 
-APP_BIN="$REPO_ROOT/App/.build/debug/Dimroom"
-CLI_BIN="$REPO_ROOT/Packages/Harness/.build/debug/dimroom-cli"
-FIXTURE_BIN="$REPO_ROOT/Packages/Harness/.build/debug/dimroom-fixture"
-
-for bin in "$APP_BIN" "$CLI_BIN" "$FIXTURE_BIN"; do
-    if [ ! -x "$bin" ]; then
-        echo "ERROR: missing binary $bin — capture-screenshots skill should have built it"
-        exit 1
-    fi
-done
+harness_locate_binaries
+harness_require_binaries "$APP_BIN" "$CLI_BIN" "$FIXTURE_BIN" || exit 1
 
 terminate_app() {
     "$CLI_BIN" quit --socket "$SOCKET" 2>&1 || true

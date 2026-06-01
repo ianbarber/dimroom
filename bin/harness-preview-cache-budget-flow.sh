@@ -20,6 +20,8 @@ set -euo pipefail
 REPO_ROOT="$(cd "$(dirname "$0")/.." && pwd)"
 # shellcheck source=lib/harness-launch.sh
 . "$REPO_ROOT/bin/lib/harness-launch.sh"
+# shellcheck source=lib/harness-flow.sh
+. "$REPO_ROOT/bin/lib/harness-flow.sh"
 
 WORK_DIR="$REPO_ROOT/.artifacts/harness-preview-cache-budget"
 CATALOG_PATH="$WORK_DIR/catalog.sqlite"
@@ -30,11 +32,7 @@ DEFAULTS_DOMAIN="com.dimroom.harness-preview-budget-$$"
 APP_PID=""
 
 cleanup() {
-    if [ -n "$APP_PID" ] && kill -0 "$APP_PID" 2>/dev/null; then
-        kill "$APP_PID" 2>/dev/null || true
-        wait "$APP_PID" 2>/dev/null || true
-    fi
-    rm -f "$SOCKET"
+    harness_cleanup
     defaults delete "$DEFAULTS_DOMAIN" 2>/dev/null || true
 }
 trap cleanup EXIT

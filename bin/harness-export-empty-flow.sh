@@ -14,6 +14,8 @@ set -euo pipefail
 REPO_ROOT="$(cd "$(dirname "$0")/.." && pwd)"
 # shellcheck source=lib/harness-launch.sh
 . "$REPO_ROOT/bin/lib/harness-launch.sh"
+# shellcheck source=lib/harness-flow.sh
+. "$REPO_ROOT/bin/lib/harness-flow.sh"
 ARTIFACT_DIR="$REPO_ROOT/.artifacts/harness-export-empty"
 CATALOG_COPY="$ARTIFACT_DIR/catalog.sqlite"
 ORIGINALS_DIR="$ARTIFACT_DIR/originals"
@@ -21,14 +23,7 @@ EXPORT_DIR="$ARTIFACT_DIR/exported"
 SOCKET="/tmp/dimroom-harness-export-empty-$$.sock"
 APP_PID=""
 
-cleanup() {
-    if [ -n "$APP_PID" ] && kill -0 "$APP_PID" 2>/dev/null; then
-        kill "$APP_PID" 2>/dev/null || true
-        wait "$APP_PID" 2>/dev/null || true
-    fi
-    rm -f "$SOCKET"
-}
-trap cleanup EXIT
+trap harness_cleanup EXIT
 
 assert_json_field() {
     local label="$1" json="$2" field="$3" expected="$4"

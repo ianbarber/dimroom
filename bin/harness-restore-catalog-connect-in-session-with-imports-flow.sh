@@ -46,6 +46,8 @@ set -euo pipefail
 REPO_ROOT="$(cd "$(dirname "$0")/.." && pwd)"
 # shellcheck source=lib/harness-launch.sh
 . "$REPO_ROOT/bin/lib/harness-launch.sh"
+# shellcheck source=lib/harness-flow.sh
+. "$REPO_ROOT/bin/lib/harness-flow.sh"
 SCREENSHOT_DIR="${SCREENSHOT_DIR:-$REPO_ROOT/.artifacts/restore-catalog-connect-in-session-with-imports}"
 WORK_DIR="$REPO_ROOT/.artifacts/harness-restore-catalog-connect-in-session-with-imports"
 REMOTE_CATALOG="$WORK_DIR/remote-catalog.sqlite"
@@ -66,14 +68,7 @@ APP_PID=""
 REMOTE_COUNT=3
 IMPORT_COUNT=1
 
-cleanup() {
-    if [ -n "$APP_PID" ] && kill -0 "$APP_PID" 2>/dev/null; then
-        kill "$APP_PID" 2>/dev/null || true
-        wait "$APP_PID" 2>/dev/null || true
-    fi
-    rm -f "$SOCKET"
-}
-trap cleanup EXIT
+trap harness_cleanup EXIT
 
 APP_BIN="$REPO_ROOT/App/.build/debug/Dimroom"
 CLI_BIN="$REPO_ROOT/Packages/Harness/.build/debug/dimroom-cli"

@@ -20,6 +20,8 @@ set -euo pipefail
 REPO_ROOT="$(cd "$(dirname "$0")/.." && pwd)"
 # shellcheck source=lib/harness-launch.sh
 . "$REPO_ROOT/bin/lib/harness-launch.sh"
+# shellcheck source=lib/harness-flow.sh
+. "$REPO_ROOT/bin/lib/harness-flow.sh"
 SCREENSHOT_DIR="${SCREENSHOT_DIR:-$REPO_ROOT/.artifacts/settings}"
 SEED_SRC="$REPO_ROOT/fixtures/library-seed"
 WORK_DIR="$REPO_ROOT/.artifacts/harness-settings"
@@ -38,11 +40,7 @@ DEFAULTS_DOMAIN="com.dimroom.harness-settings-$$"
 APP_PID=""
 
 cleanup() {
-    if [ -n "$APP_PID" ] && kill -0 "$APP_PID" 2>/dev/null; then
-        kill "$APP_PID" 2>/dev/null || true
-        wait "$APP_PID" 2>/dev/null || true
-    fi
-    rm -f "$SOCKET"
+    harness_cleanup
     defaults delete "$DEFAULTS_DOMAIN" 2>/dev/null || true
 }
 trap cleanup EXIT

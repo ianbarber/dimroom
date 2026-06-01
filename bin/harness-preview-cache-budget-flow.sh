@@ -20,6 +20,8 @@ set -euo pipefail
 REPO_ROOT="$(cd "$(dirname "$0")/.." && pwd)"
 # shellcheck source=lib/harness-launch.sh
 . "$REPO_ROOT/bin/lib/harness-launch.sh"
+# shellcheck source=lib/harness-flow.sh
+. "$REPO_ROOT/bin/lib/harness-flow.sh"
 
 WORK_DIR="$REPO_ROOT/.artifacts/harness-preview-cache-budget"
 CATALOG_PATH="$WORK_DIR/catalog.sqlite"
@@ -30,11 +32,7 @@ DEFAULTS_DOMAIN="com.dimroom.harness-preview-budget-$$"
 APP_PID=""
 
 cleanup() {
-    if [ -n "$APP_PID" ] && kill -0 "$APP_PID" 2>/dev/null; then
-        kill "$APP_PID" 2>/dev/null || true
-        wait "$APP_PID" 2>/dev/null || true
-    fi
-    rm -f "$SOCKET"
+    harness_cleanup
     defaults delete "$DEFAULTS_DOMAIN" 2>/dev/null || true
 }
 trap cleanup EXIT
@@ -44,32 +42,14 @@ cache_kb() {
     du -sk "$PREVIEW_CACHE" 2>/dev/null | awk '{print $1}'
 }
 
-assert_json_field() {
-    local label="$1" json="$2" field="$3" expected="$4"
-    local actual
-    actual=$(printf '%s' "$json" | "$REPO_ROOT/bin/harness-json-extract" "$field")
-    if [ "$actual" != "$expected" ]; then
-        echo "ERROR: $label — expected $field == $expected, got $actual"
-        echo "Response: $json"
-        exit 1
-    fi
-    echo "  OK: $label — $field == $expected"
-}
-
 echo "=== Building App ==="
 swift build --package-path "$REPO_ROOT/App" 2>&1
 
 echo "=== Building CLI ==="
 swift build --package-path "$REPO_ROOT/Packages/Harness" --product dimroom-cli 2>&1
 
-APP_BIN="$REPO_ROOT/App/.build/debug/Dimroom"
-CLI_BIN="$REPO_ROOT/Packages/Harness/.build/debug/dimroom-cli"
-for bin in "$APP_BIN" "$CLI_BIN"; do
-    if [ ! -x "$bin" ]; then
-        echo "ERROR: missing binary $bin"
-        exit 1
-    fi
-done
+harness_locate_binaries
+harness_require_binaries "$APP_BIN" "$CLI_BIN" || exit 1
 
 echo "=== Preparing fresh work dir ==="
 rm -rf "$WORK_DIR"

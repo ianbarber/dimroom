@@ -14,6 +14,8 @@ set -euo pipefail
 REPO_ROOT="$(cd "$(dirname "$0")/.." && pwd)"
 # shellcheck source=lib/harness-launch.sh
 . "$REPO_ROOT/bin/lib/harness-launch.sh"
+# shellcheck source=lib/harness-flow.sh
+. "$REPO_ROOT/bin/lib/harness-flow.sh"
 SCREENSHOT_DIR="${SCREENSHOT_DIR:-$REPO_ROOT/.artifacts/import-ui}"
 WORK_DIR="$REPO_ROOT/.artifacts/harness-import-ui"
 CATALOG_PATH="$WORK_DIR/catalog.sqlite"
@@ -23,26 +25,7 @@ IMPORT_SOURCE="$REPO_ROOT/fixtures/import"
 SOCKET="/tmp/dimroom-harness-import-ui-$$.sock"
 APP_PID=""
 
-cleanup() {
-    if [ -n "$APP_PID" ] && kill -0 "$APP_PID" 2>/dev/null; then
-        kill "$APP_PID" 2>/dev/null || true
-        wait "$APP_PID" 2>/dev/null || true
-    fi
-    rm -f "$SOCKET"
-}
-trap cleanup EXIT
-
-assert_json_field() {
-    local label="$1" json="$2" field="$3" expected="$4"
-    local actual
-    actual=$(printf '%s' "$json" | "$REPO_ROOT/bin/harness-json-extract" "$field")
-    if [ "$actual" != "$expected" ]; then
-        echo "ERROR: $label — expected $field == $expected, got $actual"
-        echo "Response: $json"
-        exit 1
-    fi
-    echo "  OK: $label — $field == $expected"
-}
+trap harness_cleanup EXIT
 
 assert_gt() {
     local label="$1" json="$2" field="$3" threshold="$4"
@@ -62,17 +45,8 @@ swift build --package-path "$REPO_ROOT/App" 2>&1
 echo "=== Building CLI ==="
 swift build --package-path "$REPO_ROOT/Packages/Harness" --product dimroom-cli 2>&1
 
-APP_BIN="$REPO_ROOT/App/.build/debug/Dimroom"
-CLI_BIN="$REPO_ROOT/Packages/Harness/.build/debug/dimroom-cli"
-
-if [ ! -x "$APP_BIN" ]; then
-    echo "ERROR: App binary not found at $APP_BIN"
-    exit 1
-fi
-if [ ! -x "$CLI_BIN" ]; then
-    echo "ERROR: CLI binary not found at $CLI_BIN"
-    exit 1
-fi
+harness_locate_binaries
+harness_require_binaries "$APP_BIN" "$CLI_BIN" || exit 1
 
 echo "=== Preparing working directories ==="
 rm -rf "$WORK_DIR"

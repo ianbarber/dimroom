@@ -17,6 +17,8 @@ set -euo pipefail
 REPO_ROOT="$(cd "$(dirname "$0")/.." && pwd)"
 # shellcheck source=lib/harness-launch.sh
 . "$REPO_ROOT/bin/lib/harness-launch.sh"
+# shellcheck source=lib/harness-flow.sh
+. "$REPO_ROOT/bin/lib/harness-flow.sh"
 SCREENSHOT_DIR="${SCREENSHOT_DIR:-$REPO_ROOT/.artifacts/lens-profile}"
 SEED_SRC="$REPO_ROOT/fixtures/library-seed"
 WORK_DIR="$REPO_ROOT/.artifacts/harness-lens-profile"
@@ -30,25 +32,10 @@ SOCKET="/tmp/dimroom-harness-lens-profile-$$.sock"
 APP_PID=""
 LENS_MODEL="RF 50mm F1.2 L USM"
 
-cleanup() {
-    if [ -n "$APP_PID" ] && kill -0 "$APP_PID" 2>/dev/null; then
-        kill "$APP_PID" 2>/dev/null || true
-        wait "$APP_PID" 2>/dev/null || true
-    fi
-    rm -f "$SOCKET"
-}
-trap cleanup EXIT
+trap harness_cleanup EXIT
 
-APP_BIN="$REPO_ROOT/App/.build/debug/Dimroom"
-CLI_BIN="$REPO_ROOT/Packages/Harness/.build/debug/dimroom-cli"
-FIXTURE_BIN="$REPO_ROOT/Packages/Harness/.build/debug/dimroom-fixture"
-
-for bin in "$APP_BIN" "$CLI_BIN" "$FIXTURE_BIN"; do
-    if [ ! -x "$bin" ]; then
-        echo "ERROR: missing binary $bin — capture-screenshots skill should have built it"
-        exit 1
-    fi
-done
+harness_locate_binaries
+harness_require_binaries "$APP_BIN" "$CLI_BIN" "$FIXTURE_BIN" || exit 1
 
 echo "=== Seeding catalog from $SEED_SRC with lens model '$LENS_MODEL' ==="
 rm -rf "$WORK_DIR"

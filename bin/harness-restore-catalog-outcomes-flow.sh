@@ -30,6 +30,8 @@ set -euo pipefail
 REPO_ROOT="$(cd "$(dirname "$0")/.." && pwd)"
 # shellcheck source=lib/harness-launch.sh
 . "$REPO_ROOT/bin/lib/harness-launch.sh"
+# shellcheck source=lib/harness-flow.sh
+. "$REPO_ROOT/bin/lib/harness-flow.sh"
 SCREENSHOT_DIR="${SCREENSHOT_DIR:-$REPO_ROOT/.artifacts/restore-catalog-outcomes}"
 WORK_DIR="$REPO_ROOT/.artifacts/harness-restore-catalog-outcomes"
 REMOTE_CATALOG="$WORK_DIR/remote-catalog.sqlite"
@@ -51,11 +53,7 @@ SOCKET="/tmp/dimroom-harness-restore-catalog-outcomes-$$.sock"
 APP_PID=""
 
 cleanup() {
-    if [ -n "$APP_PID" ] && kill -0 "$APP_PID" 2>/dev/null; then
-        kill "$APP_PID" 2>/dev/null || true
-        wait "$APP_PID" 2>/dev/null || true
-    fi
-    rm -f "$SOCKET"
+    harness_cleanup
     # Restore write permission so `rm -rf` can clean up between runs;
     # the failure-injection chmod 555 would otherwise stick.
     if [ -d "$LAUNCH_B_LOCAL_DIR" ]; then
@@ -64,16 +62,8 @@ cleanup() {
 }
 trap cleanup EXIT
 
-APP_BIN="$REPO_ROOT/App/.build/debug/Dimroom"
-CLI_BIN="$REPO_ROOT/Packages/Harness/.build/debug/dimroom-cli"
-FIXTURE_BIN="$REPO_ROOT/Packages/Harness/.build/debug/dimroom-fixture"
-
-for bin in "$APP_BIN" "$CLI_BIN" "$FIXTURE_BIN"; do
-    if [ ! -x "$bin" ]; then
-        echo "ERROR: missing binary $bin — capture-screenshots skill should have built it"
-        exit 1
-    fi
-done
+harness_locate_binaries
+harness_require_binaries "$APP_BIN" "$CLI_BIN" "$FIXTURE_BIN" || exit 1
 
 terminate_app() {
     "$CLI_BIN" quit --socket "$SOCKET" 2>&1 || true

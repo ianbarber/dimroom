@@ -45,6 +45,19 @@
 #     This exercises #367's app-level default, which the shared
 #     bin/lib/harness-launch.sh helper can't (it always scopes the knobs):
 #       bin/harness-originals-isolation-check.sh --default-launch
+#
+#     To stop assertion (b) being VACUOUS (#404), the launch drives a real
+#     on-demand originals write before re-snapshotting: the Library grid only
+#     renders previews, so a bare launch never writes to ANY originals dir and
+#     (b) would pass even if isolation were broken. So we seed a Drive-backed
+#     asset (--drive-backed: driveFileId set, localPath nil) and install the
+#     `slow-chunks` stub downloader, then open that asset in Develop. That runs
+#     fetchOriginalIfNeeded → OriginalsCache.fetch, which writes
+#     `<assetId>-drive-backed.jpg` + index.json into the resolved dir. `slow-chunks`
+#     (not `hold-until-released`) is required so the download *completes* and a
+#     file is actually persisted. A new assertion (c) then proves the resolved
+#     sandbox genuinely received that write — only then is (b) ("real dir
+#     untouched") a meaningful guarantee.
 set -euo pipefail
 
 REPO_ROOT="$(cd "$(dirname "$0")/.." && pwd)"
@@ -73,6 +86,9 @@ CREATED_REAL_DIR=0
 # --default-launch mode bookkeeping (stay empty in flow-sweep mode).
 DEFAULT_LAUNCH_APP_PID=""
 DEFAULT_LAUNCH_SOCKET=""
+# The per-run temp originals sandbox the app resolves + writes into (#404).
+# Captured from the launch log so cleanup() can remove it on exit.
+DEFAULT_LAUNCH_RESOLVED_DIR=""
 
 cleanup() {
     # --default-launch leftovers: stop the app and remove its socket.
@@ -81,6 +97,14 @@ cleanup() {
         wait "$DEFAULT_LAUNCH_APP_PID" 2>/dev/null || true
     fi
     [ -n "$DEFAULT_LAUNCH_SOCKET" ] && rm -f "$DEFAULT_LAUNCH_SOCKET" 2>/dev/null || true
+    # --default-launch now drives a real fetch into a fresh per-run temp
+    # sandbox (#404); remove it so it doesn't accumulate one dir per run. The
+    # rm -rf is GUARDED by the same isolation classifier the assertion uses, so
+    # a misread/garbage path can NEVER delete the real App Support originals dir.
+    if [ -n "$DEFAULT_LAUNCH_RESOLVED_DIR" ] \
+        && originals_path_is_isolated "$DEFAULT_LAUNCH_RESOLVED_DIR" "$REAL_ORIGINALS"; then
+        rm -rf "$DEFAULT_LAUNCH_RESOLVED_DIR" 2>/dev/null || true
+    fi
     rm -f "$SENTINEL" 2>/dev/null || true
     # If we created the real dir solely to host the sentinel and nothing else
     # landed in it, restore the prior state by removing the now-empty dir.
@@ -108,8 +132,11 @@ snapshot_manifest() {
 }
 
 # --default-launch: the CI-enrolled focused guard. Launch the app once with
-# the originals knobs omitted and prove #367's app-level isolation end to end:
-#   (a) the resolved `originals dir = …` line lands in the temp sandbox, and
+# the originals knobs omitted, drive a real on-demand originals fetch, and
+# prove #367's app-level isolation end to end:
+#   (a) the resolved `originals dir = …` line lands in the temp sandbox,
+#   (c) that resolved sandbox actually received the fetch's write (so (b) is
+#       non-vacuous — #404), and
 #   (b) the real App Support originals dir is byte-for-byte untouched.
 # Reuses the shared sentinel + snapshot_manifest machinery above and
 # harness_wait_for_socket from bin/lib/harness-launch.sh. Returns 0 on pass.
@@ -126,14 +153,18 @@ run_default_launch_check() {
 
     DEFAULT_LAUNCH_SOCKET="$socket"
 
-    # 1. Seed a throwaway fixture catalog (same seed the library flow uses).
-    echo "=== Seeding fixture catalog: $catalog ==="
+    # 1. Seed a throwaway fixture catalog with --drive-backed so it contains a
+    #    Drive-only asset (drive-backed.jpg: driveFileId set, localPath nil)
+    #    whose original is fetchable on demand. The bare library seed alone has
+    #    only local files, which never trigger an originals write (#404).
+    echo "=== Seeding fixture catalog (with --drive-backed): $catalog ==="
     rm -rf "$work_dir"
     mkdir -p "$work_dir" "$screenshot_dir"
     "$fixture_bin" seed \
         --catalog "$catalog" \
         --cache "$preview_cache" \
-        --seed-dir "$REPO_ROOT/fixtures/library-seed"
+        --seed-dir "$REPO_ROOT/fixtures/library-seed" \
+        --drive-backed
     if [ ! -f "$catalog" ]; then
         echo "FAIL: dimroom-fixture did not produce $catalog"
         return 1
@@ -157,11 +188,16 @@ run_default_launch_check() {
     #    is force-unset (env -u) so an inherited value can't mask the default,
     #    and --originals-cache is simply not passed — this is the un-scoped
     #    launch the shared harness-launch helper deliberately cannot do.
+    #    DIMROOM_HARNESS_STUB_DOWNLOADER=slow-chunks installs the stub fetcher
+    #    (it takes precedence over DriveClient in resolveHarnessDownloader, so
+    #    DISABLE_DRIVE=1 means no real network) and *completes* a small payload,
+    #    so step 4's Develop fetch actually writes a file into the resolved dir.
     echo "=== Launching app in --harness mode with originals knobs omitted ==="
     env -u DIMROOM_ORIGINALS_DIR \
         DIMROOM_HARNESS_SOCKET="$socket" \
         DIMROOM_HARNESS_DISABLE_DRIVE=1 \
         DIMROOM_HARNESS_AUTO_CONFIRM_RESTORE=0 \
+        DIMROOM_HARNESS_STUB_DOWNLOADER=slow-chunks \
         "$app_bin" --harness \
         --fixture-catalog "$catalog" \
         --preview-cache "$preview_cache" \
@@ -174,11 +210,56 @@ run_default_launch_check() {
         return 1
     fi
 
-    # 4. Screenshot for PR artifact parity (best-effort, never fatal).
+    # 4. Drive a real on-demand originals write so assertion (b) is non-vacuous
+    #    (#404). Open the Drive-backed asset in Develop — the same UI path the
+    #    develop flows exercise — which runs fetchOriginalIfNeeded →
+    #    OriginalsCache.fetch and persists a file into the resolved sandbox.
+    #    (Resolving the asset by filename mirrors
+    #    bin/harness-develop-asset-switch-mid-fetch.sh.)
+    echo "=== Opening drive-backed asset in Develop to drive an originals fetch ==="
+    "$cli_bin" navigate library --socket "$socket" >/dev/null 2>&1 || true
+    local list_out drive_asset
+    list_out="$("$cli_bin" list-assets --socket "$socket")"
+    drive_asset=$(paste \
+        <(printf '%s' "$list_out" | "$REPO_ROOT/bin/harness-json-extract" 'data[*].id') \
+        <(printf '%s' "$list_out" | "$REPO_ROOT/bin/harness-json-extract" 'data[*].originalFilename') \
+        | awk -F'\t' '$2 == "drive-backed.jpg" { print $1; exit }')
+    if [ -z "$drive_asset" ]; then
+        echo "FAIL: could not find drive-backed.jpg in list-assets — fetch can't be driven"
+        echo "  list-assets output: $list_out"
+        return 1
+    fi
+    echo "  drive-backed asset = $drive_asset"
+    "$cli_bin" select-asset "$drive_asset" --socket "$socket" >/dev/null
+    "$cli_bin" navigate develop --socket "$socket" >/dev/null
+
+    # Best-effort completion observation: watch developIsDownloadingOriginal go
+    # true then back to false. slow-chunks is ~1.5 s over 10 ticks, so an ~8 s
+    # budget at 100 ms intervals comfortably covers it. This is NOT the
+    # authoritative signal — a fast-completion race could miss the `true`
+    # window — so we NEVER hard-fail here; assertion (c)'s post-quit sandbox
+    # snapshot is what actually proves the write landed.
+    local saw_downloading="" dev_flag
+    for _ in $(seq 1 80); do
+        dev_flag=$(printf '%s' "$("$cli_bin" state --socket "$socket")" \
+            | "$REPO_ROOT/bin/harness-json-extract" 'data.developIsDownloadingOriginal' --default 'false')
+        if [ "$dev_flag" = "true" ]; then
+            saw_downloading="yes"
+        elif [ "$saw_downloading" = "yes" ]; then
+            echo "  observed developIsDownloadingOriginal go true → false (fetch completed)"
+            break
+        fi
+        sleep 0.1
+    done
+    if [ -z "$saw_downloading" ]; then
+        echo "  NOTE: never observed the downloading flag (fast-completion race) — relying on the post-quit sandbox snapshot"
+    fi
+
+    # 5. Screenshot for PR artifact parity (best-effort, never fatal).
     "$cli_bin" screenshot "$screenshot_dir/originals-isolation.png" \
         --socket "$socket" >/dev/null 2>&1 || true
 
-    # 5. Quit cleanly — this FLUSHES the buffered launch stdout so the
+    # 6. Quit cleanly — this FLUSHES the buffered launch stdout so the
     #    `originals dir = …` line is reliably present (known flush gotcha:
     #    a kill leaves the buffer unwritten).
     echo "=== Quitting app to flush the launch log ==="
@@ -190,10 +271,12 @@ run_default_launch_check() {
 
     local status=0
 
-    # 6. Assertion (a): the resolved originals dir landed in the temp sandbox.
+    # 7. Assertion (a): the resolved originals dir landed in the temp sandbox.
     #    Non-empty also proves the launch happened and logged (non-vacuous).
     local resolved
     resolved="$(grep -E 'originals dir = ' "$log" | sed -E 's/.*originals dir = //' | tail -n 1)"
+    # Record it for cleanup() before any assertion can early-return / fail.
+    DEFAULT_LAUNCH_RESOLVED_DIR="$resolved"
     if [ -z "$resolved" ]; then
         echo "FAIL: no 'originals dir = …' line in the launch log — check was vacuous"
         echo "----- launch log -----"; cat "$log" 2>/dev/null || true; echo "----------------------"
@@ -206,7 +289,25 @@ run_default_launch_check() {
         status=1
     fi
 
-    # 7. Assertion (b): the real App Support originals dir is untouched.
+    # 8. Assertion (c): the resolved sandbox actually received the fetch's
+    #    write. This is the POSITIVE CONTROL that makes assertion (b) below
+    #    meaningful (#404): if nothing ever writes an original, "real dir
+    #    untouched" passes even when isolation is broken. The post-quit
+    #    filesystem snapshot is authoritative — the state-poll in step 4 is
+    #    only best-effort against a fast-completion race.
+    if [ -n "$resolved" ]; then
+        if [ -d "$resolved" ] && [ -n "$(ls -A "$resolved" 2>/dev/null)" ]; then
+            echo "  OK: resolved sandbox received an originals write — assertion (b) is non-vacuous:"
+            ( cd "$resolved" && find . -type f -exec stat -f '        %z %N' {} \; ) 2>/dev/null | sort
+        else
+            echo "FAIL: positive control — the on-demand fetch wrote nothing to the resolved"
+            echo "      sandbox ($resolved); assertion (b) would be VACUOUS (#404). Did the"
+            echo "      Develop fetch run? Is the slow-chunks stub installed?"
+            status=1
+        fi
+    fi
+
+    # 9. Assertion (b): the real App Support originals dir is untouched.
     echo "=== Re-snapshotting real originals dir ==="
     snapshot_manifest "$AFTER_MANIFEST"
     if ! diff -u "$BEFORE_MANIFEST" "$AFTER_MANIFEST" > "/tmp/dimroom-originals-diff.$$" 2>&1; then

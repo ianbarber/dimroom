@@ -75,4 +75,12 @@ echo "=== bin/tests/test-originals-isolation.sh ==="
 originals_isolation_ok=0
 "$REPO_ROOT/bin/tests/test-originals-isolation.sh" || originals_isolation_ok=1
 
-[ "$agent_loop_ok" -eq 0 ] && [ "$harness_launch_ok" -eq 0 ] && [ "$originals_isolation_ok" -eq 0 ]
+# Dispatch the harness-flow helper suite (#402) — the shared cleanup / binary
+# locate+require / assert_json_field* helpers. Same shape: self-reports and
+# exits non-zero on any failure; its result folds into this entrypoint.
+echo
+echo "=== bin/tests/test-harness-flow.sh ==="
+harness_flow_ok=0
+"$REPO_ROOT/bin/tests/test-harness-flow.sh" || harness_flow_ok=1
+
+[ "$agent_loop_ok" -eq 0 ] && [ "$harness_launch_ok" -eq 0 ] && [ "$originals_isolation_ok" -eq 0 ] && [ "$harness_flow_ok" -eq 0 ]

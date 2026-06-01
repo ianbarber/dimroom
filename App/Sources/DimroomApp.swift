@@ -2568,6 +2568,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate, ObservableObject {
             return SlowChunkHarnessDownloader()
         case "hold-until-released":
             return HoldUntilReleasedHarnessDownloader()
+        case "quadrant-original":
+            return QuadrantImageHarnessDownloader()
         default:
             return nil
         }

@@ -2483,9 +2483,23 @@ final class AppDelegate: NSObject, NSApplicationDelegate, ObservableObject {
     func clearPreviewCacheFromSettings() {
         guard let previewStore else { return }
         Task {
-            await previewStore.removeAll()
-            await MainActor.run { self.libraryViewModel.reload() }
+            await Self.clearPreviewCache(previewStore) { self.libraryViewModel.reload() }
         }
+    }
+
+    /// Clears the on-disk preview cache and then refreshes the library grid.
+    /// Shared by the Settings button (`clearPreviewCacheFromSettings`) and the
+    /// harness command (`HarnessController.handleClearPreviewCache`) so both
+    /// produce the same observable effect — clearing previews leaves no grid
+    /// rows pointing at deleted thumbnail files (CLAUDE.md hard rule 4, #268).
+    /// The reload is fire-and-forget: `LibraryViewModel.reload()` kicks its
+    /// task and returns immediately, matching the prior Settings behaviour.
+    static func clearPreviewCache(
+        _ store: PreviewStore,
+        thenReloadOn reload: @escaping @MainActor () -> Void
+    ) async {
+        await store.removeAll()
+        await MainActor.run { reload() }
     }
 
     /// Pure helper that picks the token store backing `DriveClient`

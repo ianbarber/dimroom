@@ -546,7 +546,7 @@ final class CommandCodingTests: XCTestCase {
         let json = String(data: data, encoding: .utf8)!
         XCTAssertEqual(
             json,
-            #"{"assetCount":3,"developIsDownloadingOriginal":false,"downloadProgressByAssetId":{},"downloadingAssetIds":[],"hasUndoToast":false,"isZoomed":false,"magnifier":{"samplePointX":0.5,"samplePointY":0.5,"usingPreviewFallback":false,"visible":false,"windowOffsetX":0,"windowOffsetY":0,"zoom":2},"minRating":3,"route":"library","scopeKind":"all","selectedAssetId":"12345678-1234-1234-1234-123456789012","selectedAssetIds":[],"showHistogram":true}"#
+            #"{"assetCount":3,"developIsDownloadingOriginal":false,"downloadProgressByAssetId":{},"downloadingAssetIds":[],"hasUndoToast":false,"isZoomed":false,"magnifier":{"samplePointX":0.5,"samplePointY":0.5,"usingPreviewFallback":false,"visible":false,"windowOffsetX":0,"windowOffsetY":0,"zoom":2},"minRating":3,"route":"library","scopeKind":"all","selectedAssetId":"12345678-1234-1234-1234-123456789012","selectedAssetIds":[],"showHistogram":true,"uploadCoordinatorPhase":"idle"}"#
         )
     }
 
@@ -564,7 +564,7 @@ final class CommandCodingTests: XCTestCase {
         let json = String(data: data, encoding: .utf8)!
         XCTAssertEqual(
             json,
-            #"{"assetCount":0,"developIsDownloadingOriginal":false,"downloadProgressByAssetId":{},"downloadingAssetIds":[],"hasUndoToast":false,"isZoomed":false,"magnifier":{"samplePointX":0.5,"samplePointY":0.5,"usingPreviewFallback":false,"visible":false,"windowOffsetX":0,"windowOffsetY":0,"zoom":2},"minRating":0,"route":"library","scopeKind":"all","selectedAssetIds":[],"showHistogram":true}"#
+            #"{"assetCount":0,"developIsDownloadingOriginal":false,"downloadProgressByAssetId":{},"downloadingAssetIds":[],"hasUndoToast":false,"isZoomed":false,"magnifier":{"samplePointX":0.5,"samplePointY":0.5,"usingPreviewFallback":false,"visible":false,"windowOffsetX":0,"windowOffsetY":0,"zoom":2},"minRating":0,"route":"library","scopeKind":"all","selectedAssetIds":[],"showHistogram":true,"uploadCoordinatorPhase":"idle"}"#
         )
     }
 
@@ -582,7 +582,7 @@ final class CommandCodingTests: XCTestCase {
         let json = String(data: data, encoding: .utf8)!
         XCTAssertEqual(
             json,
-            #"{"assetCount":0,"developIsDownloadingOriginal":false,"downloadProgressByAssetId":{},"downloadingAssetIds":[],"hasUndoToast":false,"isZoomed":true,"magnifier":{"samplePointX":0.5,"samplePointY":0.5,"usingPreviewFallback":false,"visible":false,"windowOffsetX":0,"windowOffsetY":0,"zoom":2},"minRating":0,"route":"loupe","scopeKind":"all","selectedAssetIds":[],"showHistogram":true}"#
+            #"{"assetCount":0,"developIsDownloadingOriginal":false,"downloadProgressByAssetId":{},"downloadingAssetIds":[],"hasUndoToast":false,"isZoomed":true,"magnifier":{"samplePointX":0.5,"samplePointY":0.5,"usingPreviewFallback":false,"visible":false,"windowOffsetX":0,"windowOffsetY":0,"zoom":2},"minRating":0,"route":"loupe","scopeKind":"all","selectedAssetIds":[],"showHistogram":true,"uploadCoordinatorPhase":"idle"}"#
         )
     }
 
@@ -613,7 +613,7 @@ final class CommandCodingTests: XCTestCase {
         let json = String(data: data, encoding: .utf8)!
         XCTAssertEqual(
             json,
-            #"{"assetCount":0,"developIsDownloadingOriginal":false,"downloadProgressByAssetId":{"12345678-1234-1234-1234-123456789012":0.5},"downloadingAssetIds":["12345678-1234-1234-1234-123456789012"],"hasUndoToast":false,"isZoomed":false,"magnifier":{"samplePointX":0.5,"samplePointY":0.5,"usingPreviewFallback":false,"visible":false,"windowOffsetX":0,"windowOffsetY":0,"zoom":2},"minRating":0,"route":"loupe","scopeKind":"all","selectedAssetId":"12345678-1234-1234-1234-123456789012","selectedAssetIds":[],"showHistogram":true}"#
+            #"{"assetCount":0,"developIsDownloadingOriginal":false,"downloadProgressByAssetId":{"12345678-1234-1234-1234-123456789012":0.5},"downloadingAssetIds":["12345678-1234-1234-1234-123456789012"],"hasUndoToast":false,"isZoomed":false,"magnifier":{"samplePointX":0.5,"samplePointY":0.5,"usingPreviewFallback":false,"visible":false,"windowOffsetX":0,"windowOffsetY":0,"zoom":2},"minRating":0,"route":"loupe","scopeKind":"all","selectedAssetId":"12345678-1234-1234-1234-123456789012","selectedAssetIds":[],"showHistogram":true,"uploadCoordinatorPhase":"idle"}"#
         )
     }
 
@@ -640,7 +640,7 @@ final class CommandCodingTests: XCTestCase {
         let json = String(data: data, encoding: .utf8)!
         XCTAssertEqual(
             json,
-            #"{"assetCount":0,"developDownloadProgress":0.25,"developIsDownloadingOriginal":true,"downloadProgressByAssetId":{},"downloadingAssetIds":[],"hasUndoToast":false,"isZoomed":false,"magnifier":{"samplePointX":0.5,"samplePointY":0.5,"usingPreviewFallback":false,"visible":false,"windowOffsetX":0,"windowOffsetY":0,"zoom":2},"minRating":0,"route":"develop","scopeKind":"all","selectedAssetIds":[],"showHistogram":true}"#
+            #"{"assetCount":0,"developDownloadProgress":0.25,"developIsDownloadingOriginal":true,"downloadProgressByAssetId":{},"downloadingAssetIds":[],"hasUndoToast":false,"isZoomed":false,"magnifier":{"samplePointX":0.5,"samplePointY":0.5,"usingPreviewFallback":false,"visible":false,"windowOffsetX":0,"windowOffsetY":0,"zoom":2},"minRating":0,"route":"develop","scopeKind":"all","selectedAssetIds":[],"showHistogram":true,"uploadCoordinatorPhase":"idle"}"#
         )
     }
 

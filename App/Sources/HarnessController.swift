@@ -168,7 +168,8 @@ final class HarnessController: @unchecked Sendable {
                         usingPreviewFallback: developViewModel.magnifierUsingPreviewFallback,
                         windowOffsetX: developViewModel.magnifierWindowOffset.width,
                         windowOffsetY: developViewModel.magnifierWindowOffset.height
-                    )
+                    ),
+                    uploadCoordinatorPhase: Self.phaseString(uploadCoordinator.phase)
                 )
             }
             let encoder = JSONEncoder()
@@ -974,6 +975,17 @@ final class HarnessController: @unchecked Sendable {
         ]))
     }
 
+    /// Maps `UploadCoordinator.Phase` to the stable string surfaced in
+    /// `AppState.uploadCoordinatorPhase` for Layer C assertions.
+    private static func phaseString(_ phase: UploadCoordinator.Phase) -> String {
+        switch phase {
+        case .idle: return "idle"
+        case .uploading: return "uploading"
+        case .done: return "done"
+        case .failed: return "failed"
+        }
+    }
+
     // MARK: - Import
 
     private func handleImportFolder(path: String) async throws -> Response {
@@ -998,6 +1010,24 @@ final class HarnessController: @unchecked Sendable {
         // Auto-scope the library to the newly imported session and
         // reload so `state` reflects the new rows.
         await libraryViewModel.setScope(result.sessionId)
+
+        // Mirror the GUI import path: auto-upload the new session's
+        // originals when the user has opted in. Harness mode wires no real
+        // `driveUploader` and `driveAuthState` starts disconnected, so this
+        // deterministically no-ops — it proves the decision path is reached
+        // without crashing or alerting. The full upload is covered by the
+        // Layer A `AutoUploadAfterImportTests`.
+        if let settingsStore, let driveAuthState {
+            await AutoUploadAfterImport.runIfEnabled(
+                sessionId: result.sessionId,
+                settingsStore: settingsStore,
+                driveAuthState: driveAuthState,
+                driveUploader: driveUploader,
+                uploadCoordinator: uploadCoordinator,
+                catalog: catalog
+            )
+        }
+
         return .ok(data: .dictionary([
             "importedCount": .int(result.importedCount),
             "skippedCount": .int(result.skippedCount),

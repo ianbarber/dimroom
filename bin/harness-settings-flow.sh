@@ -333,6 +333,72 @@ if [ "$VALUE" != "6" ]; then
 fi
 echo "  OK: persisted libraryGridColumns == 6 across relaunch"
 
+# --- Auto-upload-after-import toggle (#270) --------------------------------
+# Proves the post-import auto-upload decision path (AutoUploadAfterImport) is
+# reached from the harness import path for BOTH toggle states without crashing
+# or alerting. Harness mode wires no real driveUploader and driveAuthState
+# starts disconnected, so the toggle-on branch deterministically short-circuits
+# — uploadCoordinatorPhase stays "idle". This does NOT prove the upload runs
+# (that is the Layer A test AutoUploadAfterImportTests
+# .testToggleOn_connectedWithUploader_runsUpload); it proves the wiring is
+# exercised end-to-end through the harness.
+#
+# Stage two single-image folders whose contents hash differently from the seed
+# (fixtures/import images differ from fixtures/library-seed), so each import
+# adds exactly one new asset rather than dedup-skipping. assetCount can't be
+# compared across the import because handleImportFolder scopes the library to
+# the new session; the import response's importedCount is the scope-independent
+# signal.
+AUTO_UPLOAD_A="$WORK_DIR/auto-upload-a"
+AUTO_UPLOAD_B="$WORK_DIR/auto-upload-b"
+mkdir -p "$AUTO_UPLOAD_A" "$AUTO_UPLOAD_B"
+cp "$REPO_ROOT/fixtures/import/IMG_0001.jpg" "$AUTO_UPLOAD_A/"
+cp "$REPO_ROOT/fixtures/import/IMG_0002.jpg" "$AUTO_UPLOAD_B/"
+
+echo "=== auto-upload Step A: toggle OFF, import (expect 1 imported, phase idle) ==="
+SET_OUT=$("$CLI_BIN" set-setting driveAutoUploadOriginals false --socket "$SOCKET")
+if ! echo "$SET_OUT" | grep -q '"ok"'; then
+    echo "ERROR: set-setting driveAutoUploadOriginals false did not return ok"
+    exit 1
+fi
+IMPORT_OUT=$("$CLI_BIN" import-folder "$AUTO_UPLOAD_A" --socket "$SOCKET")
+echo "$IMPORT_OUT"
+IMPORTED=$(printf '%s' "$IMPORT_OUT" | "$REPO_ROOT/bin/harness-json-extract" 'data.importedCount')
+if [ "$IMPORTED" != "1" ]; then
+    echo "ERROR: toggle-off import expected importedCount 1, got '$IMPORTED'"
+    exit 1
+fi
+STATE_OUT=$("$CLI_BIN" state --socket "$SOCKET")
+PHASE=$(printf '%s' "$STATE_OUT" | "$REPO_ROOT/bin/harness-json-extract" 'data.uploadCoordinatorPhase')
+if [ "$PHASE" != "idle" ]; then
+    echo "ERROR: toggle-off import should leave uploadCoordinatorPhase idle, got '$PHASE'"
+    exit 1
+fi
+echo "  OK: toggle-off import added 1 asset, phase idle (no auto-upload)"
+
+echo "=== auto-upload Step B: toggle ON, import (expect 1 imported, phase idle — no real uploader) ==="
+SET_OUT=$("$CLI_BIN" set-setting driveAutoUploadOriginals true --socket "$SOCKET")
+if ! echo "$SET_OUT" | grep -q '"ok"'; then
+    echo "ERROR: set-setting driveAutoUploadOriginals true did not return ok"
+    exit 1
+fi
+IMPORT_OUT=$("$CLI_BIN" import-folder "$AUTO_UPLOAD_B" --socket "$SOCKET")
+echo "$IMPORT_OUT"
+IMPORTED=$(printf '%s' "$IMPORT_OUT" | "$REPO_ROOT/bin/harness-json-extract" 'data.importedCount')
+if [ "$IMPORTED" != "1" ]; then
+    echo "ERROR: toggle-on import expected importedCount 1, got '$IMPORTED'"
+    exit 1
+fi
+STATE_OUT=$("$CLI_BIN" state --socket "$SOCKET")
+PHASE=$(printf '%s' "$STATE_OUT" | "$REPO_ROOT/bin/harness-json-extract" 'data.uploadCoordinatorPhase')
+# With the toggle on but no real driveUploader (and auth disconnected), the
+# decision helper runs and returns silently — the coordinator never starts.
+if [ "$PHASE" != "idle" ]; then
+    echo "ERROR: toggle-on import (no Drive uploader) should leave phase idle, got '$PHASE'"
+    exit 1
+fi
+echo "  OK: toggle-on import added 1 asset, phase idle (decision path reached, no uploader)"
+
 echo "=== quit ==="
 quit_app
 

@@ -1220,8 +1220,23 @@ final class AppDelegate: NSObject, NSApplicationDelegate, ObservableObject {
                 alert.alertStyle = .critical
                 alert.runModal()
             case .done:
+                let sessionId = importCoordinator.lastImportSessionId
                 Task {
-                    await libraryViewModel.setScope(importCoordinator.lastImportSessionId)
+                    await libraryViewModel.setScope(sessionId)
+                    // If the user opted into auto-upload, kick off the
+                    // upload for just this session's assets. Silent on
+                    // every guard (toggle off, Drive disconnected, no
+                    // uploader) — see AutoUploadAfterImport.
+                    if let sessionId {
+                        await AutoUploadAfterImport.runIfEnabled(
+                            sessionId: sessionId,
+                            settingsStore: settingsStore,
+                            driveAuthState: driveAuthState,
+                            driveUploader: driveUploader,
+                            uploadCoordinator: uploadCoordinator,
+                            catalog: catalog
+                        )
+                    }
                 }
             default:
                 break

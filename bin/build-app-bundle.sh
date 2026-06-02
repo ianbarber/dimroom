@@ -52,6 +52,15 @@ cat > "$CONTENTS/Info.plist" << 'PLIST'
 </plist>
 PLIST
 
+# Re-sign with an explicit, stable identifier. Without this the Swift toolchain's
+# inherited ad-hoc signature uses a content-hash-derived identifier that changes on
+# every rebuild, so macOS treats each build as a different app and the Keychain's
+# "Always Allow Dimroom" ACL never matches across builds. An explicit ad-hoc
+# identifier keeps the designated requirement stable so the ACL keeps matching.
+echo "Signing app bundle..."
+codesign --force --sign - --identifier com.ianbarber.dimroom "$BUNDLE_DIR"
+codesign -dvv "$BUNDLE_DIR" 2>&1 | grep -E '^(Identifier|Signature)=' || true
+
 echo "Done. App bundle at:"
 echo "  $BUNDLE_DIR"
 echo ""

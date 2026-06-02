@@ -72,6 +72,54 @@ final class DevelopViewModelCropResetTests: XCTestCase {
         XCTAssertFalse(vm.cropViewModel.isActive)
     }
 
+    /// Regression: `enterCropMode` must inverse-convert the stored
+    /// `cropRect` against the **saved** `cropReferenceSize`, not the
+    /// currently-displayed `sourceImageSize`. When the preview has
+    /// been regenerated at different dimensions between save and load
+    /// (rotation, edit chain, cache invalidation), the two diverge,
+    /// and using `sourceImageSize` mis-applies the Y flip — the overlay
+    /// ends up anchored to the bottom-left of the frame instead of
+    /// where the user actually cropped.
+    @MainActor
+    func testEnterCropModeUsesCropReferenceSizeNotSourceImageSize() async throws {
+        let catalog = try CatalogDatabase.inMemory()
+        let asset = TestFixtures.makeAsset(hash: "crop-ref-size")
+        try catalog.insertAsset(asset)
+        // Preview at one resolution; saved crop at a different one.
+        // 800×600 preview vs 2048×1365 reference is the realistic
+        // "edited preview is smaller than the master that owned the
+        // crop rect" case.
+        try TestFixtures.placePreview(
+            for: asset,
+            cacheDirectory: tempCacheDir,
+            color: (r: 100, g: 100, b: 100)
+        )
+        let referenceSize = CGSize(width: 2048, height: 1365)
+        // Crop the top-left quadrant at the reference resolution. In
+        // CI bottom-left pixel coords that's (0, 682.5, 1024, 682.5).
+        let savedCIPixelRect = CGRect(x: 0, y: 682.5, width: 1024, height: 682.5)
+        var editState = EditState()
+        editState.cropRect = savedCIPixelRect
+        editState.cropReferenceSize = referenceSize
+        try catalog.saveEditState(editState, for: asset.id)
+
+        let store = PreviewStore(cacheDirectory: tempCacheDir)
+        let vm = DevelopViewModel(catalog: catalog, previewStore: store)
+        await vm.activate(assetId: asset.id)
+        vm.enterCropMode()
+
+        // The saved CI-pixel rect (0, 682.5, 1024, 682.5) against the
+        // 2048×1365 reference is the top-left quadrant: normalised
+        // top-left (0, 0, 0.5, 0.5). Using `sourceImageSize` (the
+        // smaller preview) instead would mangle the Y flip and land
+        // somewhere else entirely — typically (0, ~0.16, 0.5, 0.5),
+        // which visually reads as bottom-left anchoring.
+        XCTAssertEqual(vm.cropViewModel.cropRect.minX, 0, accuracy: 1e-9)
+        XCTAssertEqual(vm.cropViewModel.cropRect.minY, 0, accuracy: 1e-9)
+        XCTAssertEqual(vm.cropViewModel.cropRect.width, 0.5, accuracy: 1e-9)
+        XCTAssertEqual(vm.cropViewModel.cropRect.height, 0.5, accuracy: 1e-9)
+    }
+
     /// Deactivating Develop (e.g. switching to Library) must also clear
     /// the overlay state so re-entering Develop on the same asset starts
     /// from a clean slate rather than the rect carried over from the

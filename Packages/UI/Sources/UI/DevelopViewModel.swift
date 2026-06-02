@@ -412,7 +412,17 @@ public final class DevelopViewModel: ObservableObject {
     /// must be able to see the full frame to adjust or undo the crop.
     public func enterCropMode() {
         let normalised: CGRect
-        if let existing = editState.cropRect, let size = sourceImageSize,
+        // The stored `cropRect` is in pixel coords against
+        // `cropReferenceSize` (the dimensions at save time, ~2048px
+        // master preview). Inverse-convert against the SAME reference,
+        // not the currently-displayed `sourceImageSize` — if the preview
+        // has been regenerated at different dimensions (rotation, edit
+        // chain) between save and load, using sourceImageSize anchors
+        // the overlay to the wrong reference and the rect lands in
+        // the wrong place (typically the bottom-left, because the Y
+        // flip miscalculates against the mismatched height).
+        let referenceSize = editState.cropReferenceSize ?? sourceImageSize
+        if let existing = editState.cropRect, let size = referenceSize,
            size.width > 0, size.height > 0 {
             normalised = CropGeometry.ciPixelToNormalizedTopLeft(
                 rect: existing,

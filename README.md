@@ -6,14 +6,19 @@ A native macOS photo editing and management app for digital captures and film sc
 
 ## What it does
 
+![Library grid](docs/screenshots/01-library.png)
+
+![Develop view](docs/screenshots/02-develop.png)
+
 - Imports from cameras and folders, organises by date, groups by import session
 - Browses a Drive-resident library without keeping a full local mirror (originals fetched on demand, LRU-cached)
 - Fast keyboard-driven culling: 1–5 star ratings, filters, rotation, multi-select + delete
-- Non-destructive develop view: crop, white balance, exposure, contrast, highlights, shadows, clarity, vibrance, saturation
+- Non-destructive develop view: crop, white balance, exposure, contrast, highlights, shadows, clarity, vibrance, saturation, curves, HSL, split toning, sharpening, noise reduction, perspective + lens corrections, vignette
+- Live histogram and pixel-level magnifier overlay
 - Copy-paste edit settings across selections
 - Pinch-to-zoom in Loupe with pan + zoom indicator
 - Export to local folder (original or with edits baked in)
-- Google Drive integration: OAuth PKCE, upload originals, fetch on demand
+- Google Drive integration: OAuth PKCE, upload originals, fetch on demand, auto-publish catalog, delta sync
 
 ## How it was built
 

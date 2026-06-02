@@ -43,7 +43,8 @@ final class CropRotationHitZoneTests: XCTestCase {
                     in: sampleRect,
                     offset: overlay.rotationHandleOffset,
                     bounds: CGSize(width: 640, height: 480),
-                    hitSize: overlay.rotationHitSize
+                    hitSize: overlay.rotationHitSize,
+                    handleSize: overlay.handleSize
                 ),
                 size: overlay.rotationHitSize
             )
@@ -76,7 +77,8 @@ final class CropRotationHitZoneTests: XCTestCase {
                     in: sampleRect,
                     offset: overlay.rotationHandleOffset,
                     bounds: CGSize(width: 640, height: 480),
-                    hitSize: overlay.rotationHitSize
+                    hitSize: overlay.rotationHitSize,
+                    handleSize: overlay.handleSize
                 ),
                 size: overlay.rotationHitSize
             )

@@ -75,8 +75,11 @@ public struct CropOverlayView: View {
     /// Euclidean distance from a crop corner to the centre of its rotation
     /// hit-zone, along the 45° diagonal pointing away from the crop. At 34pt
     /// the zone's inner edge clears the `corner ± 6pt` resize handle by ~3pt
-    /// (`34/√2 − 30/2 = 9.04pt` vs the handle's 6pt half-width), so the two
-    /// hit-zones never compete for the same pixels (#356).
+    /// (`34/√2 − 30/2 = 9.04pt` vs the handle's 6pt half-width), so for an
+    /// inset crop the two hit-zones never compete for the same pixels (#356).
+    /// For an edge-touching corner the bounds clamp in `handleCentre` would
+    /// otherwise re-seat the zone over the resize handle; it nudges the zone
+    /// clear by `handleSize/2` to preserve that separation (#406).
     let rotationHandleOffset: CGFloat = 34
     /// Edge length of a rotation hit-zone (and its icon container).
     let rotationHitSize: CGFloat = 30
@@ -225,7 +228,9 @@ public struct CropOverlayView: View {
     /// `bounds` is the overlay's pixel size; `handleCentre` clamps each
     /// zone inside it so a corner sitting on the image edge (full-frame
     /// crop, fit-rotated-bounds) keeps a reachable rotate target instead
-    /// of pushing the affordance off-frame where it can't be grabbed (#389).
+    /// of pushing the affordance off-frame where it can't be grabbed (#389),
+    /// and nudges that clamped zone clear of the corner's resize handle so
+    /// the resize affordance stays grabbable too (#406).
     private func rotationHandles(cropPixels: CGRect, centre: CGPoint, bounds: CGSize) -> some View {
         ZStack(alignment: .topLeading) {
             ForEach(RotationCorner.allCases, id: \.self) { corner in
@@ -233,7 +238,8 @@ public struct CropOverlayView: View {
                     in: cropPixels,
                     offset: rotationHandleOffset,
                     bounds: bounds,
-                    hitSize: rotationHitSize
+                    hitSize: rotationHitSize,
+                    handleSize: handleSize
                 )
                 rotationHandle(for: corner)
                     .frame(width: rotationHitSize, height: rotationHitSize)
@@ -441,8 +447,12 @@ enum RotationCorner: String, CaseIterable {
     /// inset crop (the outward centre is already in bounds) and only bites
     /// for a corner on the image edge, where it pulls the affordance just
     /// inside the boundary on that corner's interior side so it stays
-    /// reachable (#389).
-    func handleCentre(in rect: CGRect, offset: CGFloat, bounds: CGSize, hitSize: CGFloat) -> CGPoint {
+    /// reachable (#389). Where that clamp engages it would seat the zone
+    /// directly over the corner's `handleSize` resize handle, so the same
+    /// axis is then nudged a further `handleSize/2` toward the interior to
+    /// clear the handle's footprint and keep the resize affordance grabbable
+    /// (#406).
+    func handleCentre(in rect: CGRect, offset: CGFloat, bounds: CGSize, hitSize: CGFloat, handleSize: CGFloat) -> CGPoint {
         let c = corner(in: rect)
         let component = offset / 2.0.squareRoot()
         let outwardCentre = CGPoint(
@@ -450,8 +460,8 @@ enum RotationCorner: String, CaseIterable {
             y: c.y + outward.height * component
         )
         return CGPoint(
-            x: Self.clampAxis(outwardCentre.x, axisLength: bounds.width, hitSize: hitSize),
-            y: Self.clampAxis(outwardCentre.y, axisLength: bounds.height, hitSize: hitSize)
+            x: Self.clampAxis(outwardCentre.x, axisLength: bounds.width, hitSize: hitSize, handleSize: handleSize),
+            y: Self.clampAxis(outwardCentre.y, axisLength: bounds.height, hitSize: hitSize, handleSize: handleSize)
         )
     }
 
@@ -459,10 +469,34 @@ enum RotationCorner: String, CaseIterable {
     /// within `[0, axisLength]`. If the axis is narrower than the zone
     /// (degenerate: can't fit at all) centre on the axis midpoint, the
     /// best available position, rather than producing an inverted range.
-    private static func clampAxis(_ value: CGFloat, axisLength: CGFloat, hitSize: CGFloat) -> CGFloat {
+    ///
+    /// When the bounds-clamp actually engages — i.e. `value` lies outside
+    /// `[half, axisLength − half]`, meaning the corner sits on the image
+    /// edge — the clamped zone would cover that corner's resize handle. To
+    /// keep both affordances reachable (#406) the centre is pushed a further
+    /// `handleSize/2` toward the interior so the zone's inner edge meets the
+    /// resize handle's outer edge instead of swallowing it, then re-clamped
+    /// so the zone never leaves the overlay even on a small one (#389). An
+    /// un-clamped axis (the common inset crop) is returned untouched, so its
+    /// goldens and the inset tests don't move.
+    private static func clampAxis(
+        _ value: CGFloat,
+        axisLength: CGFloat,
+        hitSize: CGFloat,
+        handleSize: CGFloat
+    ) -> CGFloat {
         let half = hitSize / 2
         guard axisLength >= hitSize else { return axisLength / 2 }
-        return min(max(value, half), axisLength - half)
+        let clearance = handleSize / 2
+        if value < half {
+            // Corner on the low edge: the clamp pulled the zone up to `half`,
+            // over the resize handle. Push toward the interior to clear it.
+            return min(half + clearance, axisLength - half)
+        } else if value > axisLength - half {
+            // Corner on the high edge: mirror on the far side.
+            return max(axisLength - half - clearance, half)
+        }
+        return value
     }
 
     /// Spin the curved-arrow glyph so each corner's icon reads as facing

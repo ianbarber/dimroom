@@ -496,7 +496,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, ObservableObject {
     private var harnessWindow: NSWindow?
     private var originalsCoordinator: OriginalsCoordinator?
     private var driveClient: DriveClient?
-    private var driveUploader: DriveUploader?
+    private var driveUploader: (any DriveUploading)?
     private var driveMarkerBackfill: DriveMarkerBackfill?
     private var catalogPublisher: CatalogPublisher?
     private var catalogUploader: DriveCatalogUploader?
@@ -639,7 +639,11 @@ final class AppDelegate: NSObject, NSApplicationDelegate, ObservableObject {
                 driveClient: resolvedDriveClient,
                 fileIdStore: fileIdStore
             )
-            resolvedCatalog = openCatalog(at: catalogPath)
+            resolvedCatalog = openCatalogWithRecovery(
+                catalogPath: catalogPath,
+                driveClient: resolvedDriveClient,
+                fileIdStore: fileIdStore
+            )
         }
         self.catalog = resolvedCatalog
         self.previewStore = resolvedPreviewStore
@@ -648,7 +652,21 @@ final class AppDelegate: NSObject, NSApplicationDelegate, ObservableObject {
         // with the same args the initial launch used (#283).
         self.resolvedArgs = args
 
-        if let resolvedDriveClient {
+        // `--stub-drive-uploader` is a harness-only flag (#414) that
+        // installs a recording no-network `DriveUploading` plus a fake
+        // "always authenticated" auth state. Lets the auto-upload Layer C
+        // flow drive the *full* AutoUploadAfterImport path — toggle on,
+        // import, assert uploadCoordinator hits `.done` — without real
+        // Drive credentials. Takes precedence over any resolved
+        // DriveClient so harness flows are deterministic. Default
+        // (flag absent) preserves the existing real-Drive path.
+        if args.contains("--stub-drive-uploader") {
+            let stubAuth = HarnessStubDriveAuth()
+            driveAuthState.configure(client: stubAuth)
+            Task { @MainActor in
+                await driveAuthState.hydrate()
+            }
+        } else if let resolvedDriveClient {
             driveAuthState.configure(client: resolvedDriveClient)
             // Hydrate from the stored refresh token so the menu reflects
             // the connected state on launch without a re-auth round-trip.
@@ -869,7 +887,12 @@ final class AppDelegate: NSObject, NSApplicationDelegate, ObservableObject {
             originalsCoordinator = coordinator
         }
 
-        if let resolvedDriveClient = driveClient {
+        if args.contains("--stub-drive-uploader") {
+            // Harness-only path: a recording stub that returns a fake
+            // Drive file ID so AutoUploadAfterImport completes end-to-end
+            // without hitting Google. See #414.
+            self.driveUploader = HarnessStubDriveUploader()
+        } else if let resolvedDriveClient = driveClient {
             let httpClient = URLSessionHTTPClient()
             let session = AuthorizedSession(client: httpClient, provider: resolvedDriveClient)
             let resolver = DriveFolderResolver(session: session)
@@ -1197,7 +1220,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, ObservableObject {
         guard let catalog, let previewStore, let originalsDirectory else {
             let alert = NSAlert()
             alert.messageText = "Import Failed"
-            alert.informativeText = "No catalog is loaded. Launch with --fixture-catalog to enable import."
+            alert.informativeText = "The photo library couldn't be opened. Try restarting the app, or restore from Google Drive."
             alert.alertStyle = .warning
             alert.runModal()
             return
@@ -1250,7 +1273,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, ObservableObject {
         guard driveClient != nil else {
             let alert = NSAlert()
             alert.messageText = "Drive Not Configured"
-            alert.informativeText = "Set DIMROOM_GOOGLE_CLIENT_ID or create ~/Library/Application Support/dimroom/oauth.json."
+            alert.informativeText = "Set DIMROOM_GOOGLE_CLIENT_ID or create ~/Library/Application Support/Dimroom/oauth.json."
             alert.alertStyle = .warning
             alert.runModal()
             return
@@ -1679,7 +1702,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, ObservableObject {
         guard let driveUploader else {
             let alert = NSAlert()
             alert.messageText = "Drive Not Configured"
-            alert.informativeText = "Set DIMROOM_GOOGLE_CLIENT_ID or create ~/Library/Application Support/dimroom/oauth.json, then Connect Google Drive…"
+            alert.informativeText = "Set DIMROOM_GOOGLE_CLIENT_ID or create ~/Library/Application Support/Dimroom/oauth.json, then Connect Google Drive…"
             alert.alertStyle = .warning
             alert.runModal()
             return
@@ -1783,6 +1806,65 @@ final class AppDelegate: NSObject, NSApplicationDelegate, ObservableObject {
             return try CatalogDatabase(path: path)
         } catch {
             print("[Dimroom] Failed to open catalog at \(path): \(error)")
+            return nil
+        }
+    }
+
+    /// Wraps `openCatalog` with a user-facing recovery prompt when the
+    /// catalog file exists but can't be opened (corrupt / partially-
+    /// written DB, schema mismatch, permission error). Three branches:
+    ///
+    ///   - **Try Drive Restore**: delete the broken file, retry the
+    ///     same `attemptCatalogRestore` flow that runs on a fresh
+    ///     install, then re-open.
+    ///   - **Start Fresh**: delete the broken file and create an
+    ///     empty catalog (the bad data is gone, the user keeps using
+    ///     the app).
+    ///   - **Quit**: `NSApp.terminate(nil)` and let the user move the
+    ///     file aside or get help.
+    ///
+    /// Skipped silently when the file doesn't exist (that path is
+    /// covered by `attemptCatalogRestore`).
+    private func openCatalogWithRecovery(
+        catalogPath: String,
+        driveClient: DriveClient?,
+        fileIdStore: DriveFileIdStore
+    ) -> CatalogDatabase? {
+        if let catalog = openCatalog(at: catalogPath) {
+            return catalog
+        }
+        guard FileManager.default.fileExists(atPath: catalogPath) else {
+            // No file, no recovery needed — open() will create one
+            // when something tries to write.
+            return openCatalog(at: catalogPath)
+        }
+
+        let alert = NSAlert()
+        alert.messageText = "Couldn't Open Photo Library"
+        alert.informativeText = "Dimroom couldn't open the catalog at \(catalogPath). The file may be corrupt or from an incompatible version."
+        alert.alertStyle = .critical
+        alert.addButton(withTitle: "Try Drive Restore")
+        alert.addButton(withTitle: "Start Fresh")
+        alert.addButton(withTitle: "Quit")
+        let response = alert.runModal()
+
+        switch response {
+        case .alertFirstButtonReturn:
+            // Try Drive Restore
+            try? FileManager.default.removeItem(atPath: catalogPath)
+            attemptCatalogRestore(
+                catalogPath: catalogPath,
+                driveClient: driveClient,
+                fileIdStore: fileIdStore
+            )
+            return openCatalog(at: catalogPath)
+        case .alertSecondButtonReturn:
+            // Start Fresh
+            try? FileManager.default.removeItem(atPath: catalogPath)
+            return openCatalog(at: catalogPath)
+        default:
+            // Quit
+            NSApp.terminate(nil)
             return nil
         }
     }

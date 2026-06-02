@@ -1,6 +1,6 @@
 import Foundation
 
-public struct OAuthConfig: Equatable {
+public struct OAuthConfig: Equatable, Sendable {
     public var clientID: String
     public var clientSecret: String?
     public var scope: String
@@ -27,7 +27,7 @@ public struct OAuthConfig: Equatable {
     public static func defaultConfigFileURL() -> URL {
         let appSupport = FileManager.default.urls(for: .applicationSupportDirectory, in: .userDomainMask).first
             ?? URL(fileURLWithPath: NSHomeDirectory()).appendingPathComponent("Library/Application Support")
-        return appSupport.appendingPathComponent("dimroom/oauth.json")
+        return appSupport.appendingPathComponent("Dimroom/oauth.json")
     }
 
     public static func load(

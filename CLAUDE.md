@@ -67,7 +67,9 @@ The app target is thin. Almost everything lives in packages so it can be tested 
 │   ├── SyncEngine/
 │   └── Harness/
 ├── App/
-│   └── Dimroom.xcodeproj      # macOS app target (Stage 0.3)
+│   ├── Package.swift          # macOS app target — SwiftPM executable
+│   ├── Sources/               # DimroomApp, AppDelegate, ContentView, HarnessController, settings tabs
+│   └── Tests/                 # App-target tests for non-package coordinator types
 ├── labels.json                # GitHub label definitions
 └── .artifacts/                # gitignored, branch-scoped screenshot output
 ```
@@ -123,11 +125,28 @@ A single `state:*` label tracks where an issue is in the loop. Exactly one state
 
 Topic labels: `area:catalog`, `area:import`, `area:editor`, `area:drive`, `area:sync`, `area:ui`, `area:harness`, `area:infra`. One or more per issue.
 
-Stage labels: `stage:0` through `stage:8`. Exactly one per issue, matching the delivery plan in README.
+Stage labels: `stage:0` through `stage:8`. Exactly one per issue. Roughly: 0 = skeleton/infra, 1 = catalog + import, 2 = gallery + loupe + culling, 3 = develop view + edit engine, 4 = export, 5 = Drive, 6 = sync, 7 = advanced edit tools, 8 = NAS archive (post-1.0).
 
 ## How the agent loop runs
 
 `bin/agent-loop.sh` picks the next issue based on label state precedence (changes-requested > in-review > in-progress > planned > needs-plan) and invokes Claude Code in headless mode with the matching prompt from `.claude/prompts/`. Each invocation is a clean session — no memory of prior runs except what's in the repo, the issue, and the PR.
+
+### Modes (parallelism)
+
+The loop has four invocation modes — running them in separate terminals lets plan/implement/review proceed concurrently without racing on the same issue:
+
+- default (no flag) — handles every state label, single-threaded
+- `--planner-only` — only `state:needs-plan`
+- `--implementer-only` — only `state:changes-requested` / `in-progress` / `planned`
+- `--reviewer-only` — only `state:in-review`
+
+Worktrees keep parallel work isolated: implementer at `.worktrees/issue-N/`, reviewer at `.review-worktrees/pr-M/`. The `sync_main` step is mkdir-locked so concurrent `git pull` calls don't fail.
+
+### Per-session timeout + progress checkpoints
+
+`claude --print` calls are wrapped in a hard 30-minute timeout (`CLAUDE_TIMEOUT_SECONDS`, override with `--claude-timeout`). On timeout the process group is SIGKILLed and the loop continues to the next pass.
+
+Each stage prompt that produces durable artifacts writes a `.agent-state.json` checkpoint in its worktree via `bin/agent-checkpoint.sh write <dir> <phase> "<notes>" [sha]`. Milestones: `branch-created → code-written → tests-passing → pr-opened`. On a resume (next loop pass after a timeout or crash), the prompt reads the checkpoint and skips past completed phases instead of starting from scratch. The file is gitignored.
 
 If you are running inside the loop, your prompt tells you what stage you are in. Stick to that stage. Do not plan and implement in the same run.
 

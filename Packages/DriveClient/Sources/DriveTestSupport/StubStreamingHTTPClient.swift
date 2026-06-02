@@ -54,25 +54,12 @@ public final class StubStreamingHTTPClient: StreamingHTTPClient, @unchecked Send
         to destinationURL: URL,
         progress: (@Sendable (Double) -> Void)?
     ) async throws -> HTTPURLResponse {
-        lock.lock()
-        _captured.append(
-            CapturedRequest(
-                url: request.url,
-                method: request.httpMethod ?? "GET",
-                headers: request.allHTTPHeaderFields ?? [:],
-                destination: destinationURL
-            )
-        )
-        guard !responses.isEmpty else {
-            lock.unlock()
-            throw NSError(
-                domain: "StubStreamingHTTPClient",
-                code: 0,
-                userInfo: [NSLocalizedDescriptionKey: "no canned response"]
-            )
-        }
-        let response = responses.removeFirst()
-        lock.unlock()
+        // Strict-concurrency mode refuses NSLock from async contexts even
+        // when the lock is held only across synchronous statements
+        // (#415). Pull the lock-protected critical section into a
+        // synchronous helper so the compiler can verify the lock isn't
+        // held across any await.
+        let response = try popNextResponse(request: request, destinationURL: destinationURL)
 
         let total = response.chunks.reduce(0) { $0 + $1.count }
         if (200..<300).contains(response.status) {
@@ -107,5 +94,30 @@ public final class StubStreamingHTTPClient: StreamingHTTPClient, @unchecked Send
             headerFields: nil
         )!
         return http
+    }
+
+    /// Synchronous helper that owns the lock-protected mutation —
+    /// capture the request, pop the next canned response. Called from
+    /// the async `download` so the lock is provably not held across
+    /// any await (strict-concurrency compatible).
+    private func popNextResponse(request: URLRequest, destinationURL: URL) throws -> Response {
+        lock.lock()
+        defer { lock.unlock() }
+        _captured.append(
+            CapturedRequest(
+                url: request.url,
+                method: request.httpMethod ?? "GET",
+                headers: request.allHTTPHeaderFields ?? [:],
+                destination: destinationURL
+            )
+        )
+        guard !responses.isEmpty else {
+            throw NSError(
+                domain: "StubStreamingHTTPClient",
+                code: 0,
+                userInfo: [NSLocalizedDescriptionKey: "no canned response"]
+            )
+        }
+        return responses.removeFirst()
     }
 }

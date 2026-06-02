@@ -6,6 +6,12 @@ struct ParameterSlider: View {
     let step: Double
     let identity: Double
     var trackTint: Color? = nil
+    /// Optional `String(format:)` spec for the value readout. When `nil`
+    /// the default `%.0f` / `%.2f` (chosen by `step`) is used. The crop
+    /// Straighten control passes `"%+.1f°"` so it keeps its signed-degree
+    /// readout after being unified into `ParameterSlider` for the
+    /// double-click reset (#426).
+    var valueFormat: String? = nil
     @Binding var value: Double
     var onReset: () -> Void
 
@@ -51,6 +57,9 @@ struct ParameterSlider: View {
     }
 
     private var formattedValue: String {
+        if let valueFormat {
+            return String(format: valueFormat, value)
+        }
         if step >= 1 {
             return String(format: "%.0f", value)
         }

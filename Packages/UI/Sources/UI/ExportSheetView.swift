@@ -10,9 +10,13 @@ import SwiftUI
 /// (ContentView / HarnessController) is responsible for driving the
 /// `ExportCoordinator`.
 public struct ExportSheetView: View {
+    /// Default JPEG quality — the initial slider value and the value a
+    /// double-click on the quality slider resets to (#426).
+    static let defaultJPEGQuality: Double = 85
+
     @State private var destinationURL: URL?
     @State private var format: ExportFormat
-    @State private var jpegQuality: Double = 85
+    @State private var jpegQuality: Double = ExportSheetView.defaultJPEGQuality
     @State private var applyEdits: Bool = true
 
     let assetCount: Int
@@ -63,16 +67,28 @@ public struct ExportSheetView: View {
                 .labelsHidden()
             }
 
-            // JPEG quality slider (only visible when JPEG is selected)
+            // JPEG quality slider (only visible when JPEG is selected).
+            // Double-click resets to the default quality, matching the
+            // double-click-to-reset convention every Develop slider uses
+            // (#426). The reset must be a `highPriorityGesture` on the
+            // `Slider` itself — `Slider` consumes the double-click before it
+            // reaches the row `onTapGesture` otherwise, and a
+            // `simultaneousGesture` would let the slider also jump its value
+            // to the click location (the #265 failure mode).
             if format == .jpeg {
                 HStack {
                     Text("Quality:")
                         .frame(width: 90, alignment: .trailing)
                     Slider(value: $jpegQuality, in: 0...100, step: 1)
+                        .highPriorityGesture(
+                            TapGesture(count: 2).onEnded { jpegQuality = Self.defaultJPEGQuality }
+                        )
                     Text("\(Int(jpegQuality))")
                         .monospacedDigit()
                         .frame(width: 30, alignment: .trailing)
                 }
+                .contentShape(Rectangle())
+                .onTapGesture(count: 2) { jpegQuality = Self.defaultJPEGQuality }
             }
 
             // Apply edits toggle

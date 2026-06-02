@@ -390,3 +390,17 @@ jobs:
             exit 0
           fi
           bin/harness-magnifier-flow.sh
+      - name: Run harness magnifier offset flow
+        run: |
+          if [ ! -x bin/harness-magnifier-offset-flow.sh ]; then
+            echo "No harness magnifier-offset flow script yet — skipping."
+            exit 0
+          fi
+          bin/harness-magnifier-offset-flow.sh
+      - name: Run harness preview cache budget flow
+        run: |
+          if [ ! -x bin/harness-preview-cache-budget-flow.sh ]; then
+            echo "No harness preview-cache-budget flow script yet — skipping."
+            exit 0
+          fi
+          bin/harness-preview-cache-budget-flow.sh

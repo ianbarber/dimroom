@@ -1841,7 +1841,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, ObservableObject {
 
         let alert = NSAlert()
         alert.messageText = "Couldn't Open Photo Library"
-        alert.informativeText = "Dimroom couldn't open the catalog at \(catalogPath). The file may be corrupt or from an incompatible version."
+        alert.informativeText = "The photo library couldn't be opened. The file may be corrupt or from an incompatible version. You can try restoring from Google Drive, start fresh with an empty library, or quit."
         alert.alertStyle = .critical
         alert.addButton(withTitle: "Try Drive Restore")
         alert.addButton(withTitle: "Start Fresh")
@@ -1850,18 +1850,34 @@ final class AppDelegate: NSObject, NSApplicationDelegate, ObservableObject {
 
         switch response {
         case .alertFirstButtonReturn:
-            // Try Drive Restore
+            // Try Drive Restore. If the restore lands a *second* broken
+            // catalog (truncated download, bad Drive snapshot), recurse
+            // back through the alert so the user has another choice
+            // (Start Fresh / Quit) instead of being silently stranded.
             try? FileManager.default.removeItem(atPath: catalogPath)
             attemptCatalogRestore(
                 catalogPath: catalogPath,
                 driveClient: driveClient,
                 fileIdStore: fileIdStore
             )
-            return openCatalog(at: catalogPath)
+            return openCatalogWithRecovery(
+                catalogPath: catalogPath,
+                driveClient: driveClient,
+                fileIdStore: fileIdStore
+            )
         case .alertSecondButtonReturn:
-            // Start Fresh
+            // Start Fresh. If even creating a fresh empty catalog
+            // fails (disk full / permission denied), re-present the
+            // alert so the user can pick Quit deliberately.
             try? FileManager.default.removeItem(atPath: catalogPath)
-            return openCatalog(at: catalogPath)
+            if let fresh = openCatalog(at: catalogPath) {
+                return fresh
+            }
+            return openCatalogWithRecovery(
+                catalogPath: catalogPath,
+                driveClient: driveClient,
+                fileIdStore: fileIdStore
+            )
         default:
             // Quit
             NSApp.terminate(nil)

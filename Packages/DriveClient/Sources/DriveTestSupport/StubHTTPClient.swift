@@ -37,7 +37,22 @@ public final class StubHTTPClient: HTTPClient, @unchecked Sendable {
     }
 
     public func data(for request: URLRequest) async throws -> (Data, HTTPURLResponse) {
+        // Lock-protected mutation extracted to a sync helper so strict-
+        // concurrency mode (#415) can prove the lock isn't held across
+        // an await.
+        let response = try popNextResponse(request: request)
+        switch response {
+        case .success(let status, let data):
+            let http = HTTPURLResponse(url: request.url!, statusCode: status, httpVersion: "HTTP/1.1", headerFields: nil)!
+            return (data, http)
+        case .error(let error):
+            throw error
+        }
+    }
+
+    private func popNextResponse(request: URLRequest) throws -> Response {
         lock.lock()
+        defer { lock.unlock() }
         let captured = CapturedRequest(
             url: request.url,
             method: request.httpMethod,
@@ -46,21 +61,12 @@ public final class StubHTTPClient: HTTPClient, @unchecked Sendable {
         )
         _captured.append(captured)
         guard !responses.isEmpty else {
-            lock.unlock()
             throw NSError(
                 domain: "StubHTTPClient",
                 code: 0,
                 userInfo: [NSLocalizedDescriptionKey: "no canned response for \(request.url?.absoluteString ?? "?")"]
             )
         }
-        let response = responses.removeFirst()
-        lock.unlock()
-        switch response {
-        case .success(let status, let data):
-            let http = HTTPURLResponse(url: request.url!, statusCode: status, httpVersion: "HTTP/1.1", headerFields: nil)!
-            return (data, http)
-        case .error(let error):
-            throw error
-        }
+        return responses.removeFirst()
     }
 }

@@ -404,3 +404,17 @@ jobs:
             exit 0
           fi
           bin/harness-preview-cache-budget-flow.sh
+      - name: Run harness magnifier original flow
+        run: |
+          if [ ! -x bin/harness-magnifier-original-flow.sh ]; then
+            echo "No harness magnifier original flow script yet — skipping."
+            exit 0
+          fi
+          bin/harness-magnifier-original-flow.sh
+      - name: Run harness auto-upload stub flow
+        run: |
+          if [ ! -x bin/harness-auto-upload-stub-flow.sh ]; then
+            echo "No harness auto-upload stub flow script yet — skipping."
+            exit 0
+          fi
+          bin/harness-auto-upload-stub-flow.sh

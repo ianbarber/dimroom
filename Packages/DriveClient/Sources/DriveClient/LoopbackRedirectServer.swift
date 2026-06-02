@@ -1,7 +1,7 @@
 import Foundation
 import Network
 
-public struct LoopbackRedirect: Equatable {
+public struct LoopbackRedirect: Equatable, Sendable {
     public let code: String
     public let state: String?
 }
@@ -166,7 +166,18 @@ public actor LoopbackRedirectServer {
         finished = true
         if let cont = continuation {
             continuation = nil
-            cont.resume(with: result)
+            // Splitting the Result branches sidesteps the strict-
+            // concurrency warning about `sending` a Result whose
+            // success payload (`LoopbackRedirect`) is value-type
+            // Sendable but the Result wrapper isn't tagged as such
+            // across the actor boundary. Each branch resumes with
+            // a directly-Sendable payload.
+            switch result {
+            case .success(let value):
+                cont.resume(returning: value)
+            case .failure(let error):
+                cont.resume(throwing: error)
+            }
         }
     }
 

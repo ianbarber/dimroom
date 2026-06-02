@@ -68,7 +68,22 @@ public final class RoutingStubHTTPClient: HTTPClient, @unchecked Sendable {
     }
 
     public func data(for request: URLRequest) async throws -> (Data, HTTPURLResponse) {
+        // Lock-protected mutation extracted to a sync helper so strict-
+        // concurrency mode (#415) can prove the lock isn't held across
+        // an await.
+        let response = try popNextResponse(request: request)
+        let http = HTTPURLResponse(
+            url: request.url!,
+            statusCode: response.status,
+            httpVersion: "HTTP/1.1",
+            headerFields: response.headers
+        )!
+        return (response.body, http)
+    }
+
+    private func popNextResponse(request: URLRequest) throws -> CannedResponse {
         lock.lock()
+        defer { lock.unlock() }
         let captured = CapturedRequest(
             url: request.url,
             method: request.httpMethod,
@@ -88,7 +103,6 @@ public final class RoutingStubHTTPClient: HTTPClient, @unchecked Sendable {
             }
         }
         guard let i = matchedIndex else {
-            lock.unlock()
             throw NSError(
                 domain: "RoutingStubHTTPClient",
                 code: 0,
@@ -98,13 +112,6 @@ public final class RoutingStubHTTPClient: HTTPClient, @unchecked Sendable {
         var responses = routes[i].1
         let response = responses.removeFirst()
         routes[i] = (routes[i].0, responses)
-        lock.unlock()
-        let http = HTTPURLResponse(
-            url: request.url!,
-            statusCode: response.status,
-            httpVersion: "HTTP/1.1",
-            headerFields: response.headers
-        )!
-        return (response.body, http)
+        return response
     }
 }

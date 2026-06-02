@@ -59,13 +59,17 @@ You are reviewing a PR for **dimroom**. You will read the diff adversarially, ru
    - Set issue label to `state:changes-requested` (remove `state:in-review`).
    - Stop.
 
+   **If you found small in-scope gaps the PR should address before merge** (a missing one-line test, a leftover TODO, a missed branch in error handling, a misnamed variable, a stale comment, a missing Layer C flow the plan promised, a small test-strengthening that would fit in the same diff):
+   - Prefer **`--request-changes`** with a punch list of specific in-PR fixes. The responder picks the PR up next, adds the fixes in additional commits on the same branch, and it comes back through review. This keeps small follow-ups in the originating PR rather than fragmenting them into new tracked issues.
+   - Do NOT file a new issue for any of these. They belong in this PR.
+
    **If everything looks good:**
-   - **File follow-up issues** for any non-blocking gaps, missing tests, or deferred work you noticed. Use `gh issue create` with `state:needs-plan` and appropriate area/stage labels. Common examples: a Layer C harness flow the plan promised but the PR omitted, a TODO without an issue link, a non-blocking code suggestion that would be a separate PR. Don't just mention them in a comment — actually create the issue so the work is tracked and the loop picks it up.
+   - Use `gh pr review --comment -F <path>` (NOT `--approve` — only the human approves).
    - Post a top-level approval comment summarising:
      - What the PR does
      - What you verified (CI green, tests run locally, harness flow X passed, screenshots checked)
-     - Follow-up issues filed (link them)
-   - Use `gh pr review --comment -F <path>` (NOT `--approve` — only the human approves).
+     - Linked follow-up issues (if any — see next bullet)
+   - **Only file a follow-up issue when the work is genuinely out of scope** for this PR — i.e. it would require its own plan, has architectural scope distinct from this PR's goal, or is a new feature surfaced by the implementation. Examples that DO warrant a follow-up issue: "this implementation reveals a need for a shared helper across packages", "the auto-upload toggle works but exposes a latent bug in `OriginalsCache` cleanup that needs its own design", "the new view would benefit from a settings panel we don't have yet". Examples that do NOT warrant a follow-up issue (these go in `--request-changes` instead): "missing a test for the edge case", "the helper name is misleading", "this comment is stale", "the Layer C flow promised in the plan isn't here". When in doubt: if the fix is a few commits on this PR's branch, it's in-PR feedback, not a new issue.
    - Set issue label to `state:ready-to-merge` (remove `state:in-review`).
    - Mention `@ianbarber` in a comment so the human gets notified.
    - Stop.

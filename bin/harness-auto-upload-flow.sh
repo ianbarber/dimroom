@@ -57,6 +57,14 @@ launch_app() {
     FIXTURE_CATALOG="$CATALOG_PATH"
     HARNESS_WORK_DIR="$WORK_DIR"
     SETTINGS_SUITE="$DEFAULTS_DOMAIN"
+    # Hermetic Drive: DISABLE_DRIVE forces resolveDriveClient -> nil so no real
+    # client resolves on dev machines. That matters because a resolved client
+    # spawns an async driveAuthState.hydrate() that would otherwise race the
+    # flag's synchronous markConnectedForTesting() flip and reset auth to
+    # disconnected (no stored token), short-circuiting the upload. With no real
+    # client, the synthetic connected state and the injected stub uploader are
+    # the only Drive surface — fully deterministic on CI and locally.
+    HARNESS_ENV=(DIMROOM_HARNESS_DISABLE_DRIVE=1)
     # The headline flag: inject the no-network stub uploader + connected auth.
     HARNESS_FLAGS=(--stub-drive-uploader)
     harness_launch_app

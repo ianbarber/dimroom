@@ -757,7 +757,10 @@ final class AppDelegate: NSObject, NSApplicationDelegate, ObservableObject {
         // auto-upload branch (#270 AC1). Absent the flag this stays the
         // (nil-in-harness) `driveUploader` property and auth stays
         // disconnected — the default no-uploader behaviour other flows rely
-        // on (AC3).
+        // on (AC3). Intended for hermetic flows that also disable the real
+        // Drive client (DIMROOM_HARNESS_DISABLE_DRIVE): otherwise a resolved
+        // client's async `hydrate()` (above) would race this synchronous flip
+        // and reset auth to disconnected.
         let harnessDriveUploader: (any DriveUploading)?
         if Self.shouldStubDriveUploader(args: args) {
             harnessDriveUploader = HarnessStubDriveUploader()

@@ -90,8 +90,29 @@ public struct DevelopView: View {
     private var sliderColumn: some View {
         VStack(alignment: .leading, spacing: 12) {
             sliderSection("Tone") {
-                slider("Exposure", keyPath: \.exposure, range: -5.0...5.0, step: 0.01, identity: 0)
-                slider("Contrast", keyPath: \.contrast, range: -100...100, step: 1, identity: 0)
+                // Calibration (#426): exposure and contrast pass through to
+                // their Core Image filters near the *theoretical* maximum, so
+                // most of the slider travel landed in the "destructive" zone.
+                // Narrow only the slider's binding range (view-side) — the
+                // EditState model range and `Renderer` math are unchanged, so
+                // saved edits load/render identically and the Layer A
+                // `RendererTests` stay green.
+                //   • Exposure: ±2.5 EV (was ±5). ±2 EV is the practical edit
+                //     ceiling; the saved field is still clamped only by the
+                //     model's ±5, so older edits past the new endpoint pin to
+                //     the slider edge rather than being lost.
+                //   • Contrast: ±60 (was ±100). Through the unchanged
+                //     `1.0 + contrast/200` map that yields 0.7× at −60 and
+                //     1.3× at +60 — exactly the issue's usable-range targets.
+                // The remaining tone/presence sliders were each calibrated at
+                // the *renderer* level in their own issues so ±100 already
+                // lands on a usable (not theoretical) endpoint — highlights/
+                // shadows halved to 1.0±0.5 / ±0.5 and whites/blacks held
+                // monotonic (#155), clarity capped at 0.5 intensity, saturation
+                // asymmetric to 0…1.5×. Audited against the develop-ranges
+                // fixture: none needs a second, slider-side narrowing.
+                slider("Exposure", keyPath: \.exposure, range: -2.5...2.5, step: 0.01, identity: 0)
+                slider("Contrast", keyPath: \.contrast, range: -60...60, step: 1, identity: 0)
                 slider("Highlights", keyPath: \.highlights, range: -100...100, step: 1, identity: 0)
                 slider("Shadows", keyPath: \.shadows, range: -100...100, step: 1, identity: 0)
                 slider("Whites", keyPath: \.whites, range: -100...100, step: 1, identity: 0)
@@ -219,25 +240,25 @@ public struct DevelopView: View {
             .foregroundStyle(.white)
             .accessibilityIdentifier("crop-aspect-picker")
 
-            VStack(alignment: .leading, spacing: 4) {
-                HStack {
-                    Text("Straighten")
-                        .font(.system(size: 11))
-                        .foregroundStyle(Color(white: 0.7))
-                    Spacer()
-                    Text(String(format: "%+.1f°", cropViewModel.cropAngle))
-                        .font(.system(size: 11, design: .monospaced))
-                        .foregroundStyle(Color(white: 0.5))
-                }
-                Slider(
-                    value: Binding(
-                        get: { cropViewModel.cropAngle },
-                        set: { viewModel.setCropAngleLive($0) }
-                    ),
-                    in: -45...45,
-                    step: 0.1
-                )
-            }
+            // Straighten routes through `ParameterSlider` (rather than a bare
+            // `Slider`) so it inherits the double-click-to-reset gesture along
+            // with every other Develop slider — the "new slider control didn't
+            // get the reset" regression that bit vignette (#265) and HSL (#318)
+            // separately. `SliderResetStructureTests` guards the invariant that
+            // no bare `Slider` survives in the sidebar. `valueFormat` keeps the
+            // signed-degree readout the custom row used to show.
+            ParameterSlider(
+                label: "Straighten",
+                range: -45...45,
+                step: 0.1,
+                identity: 0,
+                valueFormat: "%+.1f°",
+                value: Binding(
+                    get: { cropViewModel.cropAngle },
+                    set: { viewModel.setCropAngleLive($0) }
+                ),
+                onReset: { viewModel.setCropAngleLive(0) }
+            )
         }
     }
 

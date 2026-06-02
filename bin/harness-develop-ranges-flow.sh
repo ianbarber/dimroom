@@ -106,12 +106,19 @@ drive() {
 # Each slider: drive to max, screenshot, back to 0, drive to min, screenshot.
 # Temperature and tint live at neutral 6500/0 and use different extremes.
 for param in exposure contrast highlights shadows whites blacks clarity vibrance saturation luminanceNoiseReduction chrominanceNoiseReduction; do
-    echo "=== $param: +100 ==="
-    # Exposure is in EV stops — ±5, not ±100. Noise-reduction sliders are
-    # one-sided 0…100 so the "min" leg degenerates to identity.
+    echo "=== $param: max ==="
+    # Drive each parameter to its *slider* endpoint so the screenshots show
+    # the thumb at the edge of its travel rather than pinned past it.
+    # Exposure and contrast were narrowed view-side in #426 (±2.5 EV, ±60)
+    # while the EditState model range is unchanged. Exposure is in EV stops.
+    # Noise-reduction sliders are one-sided 0…100 so the "min" leg
+    # degenerates to identity.
     if [ "$param" = "exposure" ]; then
-        MAX=5
-        MIN=-5
+        MAX=2.5
+        MIN=-2.5
+    elif [ "$param" = "contrast" ]; then
+        MAX=60
+        MIN=-60
     elif [ "$param" = "luminanceNoiseReduction" ] || [ "$param" = "chrominanceNoiseReduction" ]; then
         MAX=100
         MIN=0

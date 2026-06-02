@@ -120,6 +120,40 @@ final class DevelopViewModelCropResetTests: XCTestCase {
         XCTAssertEqual(vm.cropViewModel.cropRect.height, 0.5, accuracy: 1e-9)
     }
 
+    /// The crop **Straighten** slider's double-click reset routes through
+    /// `setCropAngleLive(0)` — the `onReset` closure the unified
+    /// `ParameterSlider` calls (#426). Setting a live angle then resetting
+    /// must return `cropAngle` to 0. This is the model side of the reset the
+    /// structural test guards at the view layer.
+    @MainActor
+    func testStraightenLiveResetReturnsAngleToZero() async throws {
+        let catalog = try CatalogDatabase.inMemory()
+        let asset = TestFixtures.makeAsset(hash: "straighten-reset")
+        try catalog.insertAsset(asset)
+        try TestFixtures.placePreview(
+            for: asset,
+            cacheDirectory: tempCacheDir,
+            color: (r: 100, g: 100, b: 100)
+        )
+        let store = PreviewStore(cacheDirectory: tempCacheDir)
+        let vm = DevelopViewModel(catalog: catalog, previewStore: store)
+
+        await vm.activate(assetId: asset.id)
+        vm.enterCropMode()
+
+        vm.setCropAngleLive(12.5)
+        XCTAssertEqual(vm.cropViewModel.cropAngle, 12.5, accuracy: 1e-9)
+
+        // Double-click on the Straighten slider → onReset → setCropAngleLive(0).
+        vm.setCropAngleLive(0)
+        XCTAssertEqual(
+            vm.cropViewModel.cropAngle,
+            0,
+            accuracy: 1e-9,
+            "double-clicking the Straighten slider must reset the crop angle to 0 (#426)"
+        )
+    }
+
     /// Deactivating Develop (e.g. switching to Library) must also clear
     /// the overlay state so re-entering Develop on the same asset starts
     /// from a clean slate rather than the rect carried over from the

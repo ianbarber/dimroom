@@ -752,6 +752,19 @@ final class AppDelegate: NSObject, NSApplicationDelegate, ObservableObject {
             args: args,
             env: ProcessInfo.processInfo.environment
         ).rawValue
+        // `--stub-drive-uploader` (#414): inject a no-network uploader and
+        // flip auth to connected so the harness import path drives the full
+        // auto-upload branch (#270 AC1). Absent the flag this stays the
+        // (nil-in-harness) `driveUploader` property and auth stays
+        // disconnected — the default no-uploader behaviour other flows rely
+        // on (AC3).
+        let harnessDriveUploader: (any DriveUploading)?
+        if Self.shouldStubDriveUploader(args: args) {
+            harnessDriveUploader = HarnessStubDriveUploader()
+            driveAuthState.markConnectedForTesting()
+        } else {
+            harnessDriveUploader = driveUploader
+        }
         // Catalog-derived dependencies (catalog, publisher, poller,
         // originals coordinator, undo stack) are passed as closure-getters
         // so the harness keeps reading the live values after a
@@ -769,7 +782,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, ObservableObject {
             exportCoordinator: exportCoordinator,
             uploadCoordinator: uploadCoordinator,
             appDelegate: self,
-            driveUploader: driveUploader,
+            driveUploader: harnessDriveUploader,
             driveMarkerBackfill: driveMarkerBackfill,
             originalsCoordinator: { [weak self] in self?.originalsCoordinator },
             undoStack: { [weak self] in self?.undoStack },
@@ -2345,6 +2358,17 @@ final class AppDelegate: NSObject, NSApplicationDelegate, ObservableObject {
         env: [String: String]
     ) -> Bool {
         env["DIMROOM_HARNESS_DISABLE_DRIVE"] != nil
+    }
+
+    /// True when the `--stub-drive-uploader` launch flag is present (#414).
+    /// In `--harness` mode that flag injects a no-network
+    /// `HarnessStubDriveUploader` and flips `driveAuthState` to connected so
+    /// the post-import auto-upload branch (#270 AC1) runs end-to-end under
+    /// Layer C. An argv flag (not an env var) so it rides the same
+    /// `HARNESS_FLAGS` channel the flow scripts already use. Pinned by
+    /// `HarnessStubDriveUploaderTests`.
+    nonisolated static func shouldStubDriveUploader(args: [String]) -> Bool {
+        args.contains("--stub-drive-uploader")
     }
 
     /// Number of OAuth authorize attempts the harness stub client should

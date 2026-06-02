@@ -190,6 +190,30 @@ final class DriveAuthStateTests: XCTestCase {
         XCTAssertNotNil(state.needsReauthMessage)
     }
 
+    // MARK: - markConnectedForTesting (#414)
+
+    func testMarkConnectedForTestingFlipsStatusToConnected() {
+        let stub = StubDriveAuth(initialAuthenticated: false, email: nil)
+        let state = DriveAuthState(client: stub)
+        XCTAssertEqual(state.status, .disconnected)
+
+        state.markConnectedForTesting()
+
+        XCTAssertEqual(state.status, .connected(email: nil))
+        XCTAssertTrue(state.status.isConnected,
+                      "the auto-upload helper gates on status.isConnected")
+    }
+
+    func testMarkConnectedForTestingSurfacesEmail() {
+        let stub = StubDriveAuth(initialAuthenticated: false, email: nil)
+        let state = DriveAuthState(client: stub)
+
+        state.markConnectedForTesting(email: "harness@example.com")
+
+        XCTAssertEqual(state.status, .connected(email: "harness@example.com"))
+        XCTAssertEqual(state.status.email, "harness@example.com")
+    }
+
     private func waitForDisconnect(_ state: DriveAuthState, timeoutMs: Int = 500) async {
         let deadline = Date().addingTimeInterval(Double(timeoutMs) / 1000.0)
         while state.status != .disconnected, Date() < deadline {

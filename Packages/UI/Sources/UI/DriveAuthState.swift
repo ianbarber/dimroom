@@ -98,6 +98,16 @@ public final class DriveAuthState: ObservableObject {
         handleAuthFailure()
     }
 
+    /// Test/harness hook: synchronously flips the published status to
+    /// `.connected` without a real OAuth round-trip, mirroring
+    /// `simulateAuthFailureForTesting()`. The `--stub-drive-uploader`
+    /// harness flag (#414) uses this so the auto-upload decision helper's
+    /// `driveAuthState.status.isConnected` guard passes and the full
+    /// post-import upload branch runs under Layer C.
+    public func markConnectedForTesting(email: String? = nil) {
+        status = .connected(email: email)
+    }
+
     /// Acknowledges a re-auth message after the AppDelegate has shown it,
     /// so a subsequent failure can re-trigger.
     public func clearNeedsReauthMessage() {

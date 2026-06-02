@@ -369,6 +369,13 @@ jobs:
             exit 0
           fi
           bin/harness-settings-flow.sh
+      - name: Run harness auto-upload flow
+        run: |
+          if [ ! -x bin/harness-auto-upload-flow.sh ]; then
+            echo "No harness auto-upload flow script yet — skipping."
+            exit 0
+          fi
+          bin/harness-auto-upload-flow.sh
       - name: Run harness backfill markers flow
         run: |
           if [ ! -x bin/harness-backfill-markers-flow.sh ]; then

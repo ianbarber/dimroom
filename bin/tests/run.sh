@@ -83,4 +83,14 @@ echo "=== bin/tests/test-harness-flow.sh ==="
 harness_flow_ok=0
 "$REPO_ROOT/bin/tests/test-harness-flow.sh" || harness_flow_ok=1
 
-[ "$agent_loop_ok" -eq 0 ] && [ "$harness_launch_ok" -eq 0 ] && [ "$originals_isolation_ok" -eq 0 ] && [ "$harness_flow_ok" -eq 0 ]
+# Dispatch the app-bundle signing guard (#425) — asserts build-app-bundle.sh
+# re-signs with the stable explicit identifier the Keychain ACL keys off. Same
+# shape: self-reports and exits non-zero on any failure; its result folds into
+# this entrypoint. The behavioural codesign check skips on Linux (no codesign);
+# the static assertion still runs in the Ubuntu bash-tests job.
+echo
+echo "=== bin/tests/test-build-app-bundle-signing.sh ==="
+bundle_signing_ok=0
+"$REPO_ROOT/bin/tests/test-build-app-bundle-signing.sh" || bundle_signing_ok=1
+
+[ "$agent_loop_ok" -eq 0 ] && [ "$harness_launch_ok" -eq 0 ] && [ "$originals_isolation_ok" -eq 0 ] && [ "$harness_flow_ok" -eq 0 ] && [ "$bundle_signing_ok" -eq 0 ]
